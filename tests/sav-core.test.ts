@@ -365,10 +365,10 @@ function testStorageKeysUseNewPrefixOnly() {
 
 function testApplicationIdentityVersion() {
   assert.equal(APP_NAME, "NIMR SAV PRO");
-  assert.equal(APP_VERSION, "1.0.1");
+  assert.equal(APP_VERSION, "1.0.2");
   assert.equal(APP_BASE_URL, "/NIMR-SAV-PRO/");
   assert.equal(LOCAL_STORAGE_PREFIX, "nimr-sav-pro");
-  assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.0.1");
+  assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.0.2");
 }
 
 testReceptionCreation();

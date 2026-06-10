@@ -32,6 +32,7 @@ interface GuidedReceptionProps {
 
 export default function GuidedReception({ existingDossierIds, onAddDossier, onNavigateToTab }: GuidedReceptionProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const [receptionError, setReceptionError] = useState<string | null>(null);
   
   // Local Form state
   const [clientNom, setClientNom] = useState("");
@@ -138,12 +139,12 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
   ];
 
   return (
-    <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg shadow-sm overflow-hidden max-w-4xl mx-auto">
+    <div data-testid="reception-start" className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg shadow-sm overflow-hidden max-w-4xl mx-auto">
       {/* Title block */}
       <div className="p-6 bg-slate-900 text-white flex justify-between items-center border-b border-slate-800">
         <div>
           <h2 className="text-base font-extrabold tracking-tight flex items-center gap-2 font-display uppercase">
-            <Sparkles className="w-5 h-5 text-blue-400" />
+            <Sparkles className="w-4.5 h-4.5 text-blue-400" />
             RÉCEPTION AUTOMOBILE DIGITALE SUR TABLETTE
           </h2>
           <p className="text-slate-400 text-xs font-medium">Parcours guidé et rapide pour l'accueil client NIMR</p>
@@ -152,6 +153,12 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
           Étape {currentStep < 5 ? `${currentStep} / 4` : "Terminé"}
         </span>
       </div>
+
+      {receptionError && (
+        <div data-testid="reception-error-message" className="mx-6 mt-4 p-3 bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400 border border-red-200 rounded-lg text-xs font-bold">
+          {receptionError}
+        </div>
+      )}
 
       {/* Steps progress indicator */}
       <div className="bg-slate-50 dark:bg-neutral-950 border-b border-slate-200 dark:border-neutral-800 px-6 py-4 flex justify-between items-center overflow-x-auto gap-4">
@@ -191,6 +198,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Nom du Client / Société *</label>
                 <input 
                   type="text" 
+                  data-testid="reception-client-name"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:text-neutral-100" 
                   placeholder="EX: Client Démo 001 ou Société Démo"
                   value={clientNom}
@@ -202,6 +210,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Téléphone Client *</label>
                 <input 
                   type="text" 
+                  data-testid="reception-client-phone"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:text-neutral-100" 
                   placeholder="+216 -- --- ---"
                   value={clientTelephone}
@@ -276,6 +285,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Modèle du Véhicule *</label>
                 <input 
                   type="text" 
+                  data-testid="reception-vehicle-model"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-semibold focus:outline-none dark:text-neutral-100" 
                   placeholder="EX: T5 EVO, Glory 580, S50EV"
                   value={vehiculeModele}
@@ -287,6 +297,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Immatriculation Tunisienne *</label>
                 <input 
                   type="text" 
+                  data-testid="reception-plate"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-mono font-bold placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:text-neutral-100" 
                   placeholder="Ex: 000 TU 0001"
                   value={vehiculeImmatriculation}
@@ -300,6 +311,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Code VIN (Châssis) *</label>
                 <input 
                   type="text" 
+                  data-testid="reception-vin"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-mono focus:outline-none dark:text-neutral-100" 
                   placeholder="DEMOVIN000000001"
                   value={vehiculeVIN}
@@ -311,6 +323,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Kilométrage Actuel *</label>
                 <input 
                   type="number" 
+                  data-testid="reception-mileage"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-bold focus:outline-none dark:text-neutral-100" 
                   value={vehiculeKilometrage}
                   onChange={(e) => setVehiculeKilometrage(Number(e.target.value))}
@@ -367,6 +380,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Plainte Principale du client (Symptômes ou travaux demandés) *</label>
                 <textarea 
+                  data-testid="reception-reason"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 h-16 dark:text-neutral-100" 
                   placeholder="EX: Révision des 10000 km + bruit de sifflement d'embrayage lors des démarrages en côte..."
                   value={plainteClient}
@@ -387,7 +401,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
             </div>
 
             {/* Objets check list */}
-            <div className="p-4 bg-zinc-50 dark:bg-neutral-950 rounded-xl border border-zinc-200 dark:border-neutral-800">
+            <div data-testid="reception-objects-left" className="p-4 bg-zinc-50 dark:bg-neutral-950 rounded-xl border border-zinc-200 dark:border-neutral-800">
               <span className="text-xs font-bold text-zinc-600 dark:text-neutral-300 uppercase block mb-2">Objets de valeur laissés dans le véhicule :</span>
               
               <div className="flex gap-2 mb-3">
@@ -431,7 +445,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               
               {/* Left Column - Damage switches */}
-              <div className="space-y-3 p-4 bg-zinc-50 dark:bg-neutral-950 rounded-xl border border-zinc-200 dark:border-neutral-800">
+              <div data-testid="reception-body-condition" className="space-y-3 p-4 bg-zinc-50 dark:bg-neutral-950 rounded-xl border border-zinc-200 dark:border-neutral-800">
                 <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 uppercase block mb-1">État Carrosserie Rapide :</span>
                 
                 <div className="grid grid-cols-2 gap-3">
@@ -498,6 +512,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                     min="0" 
                     max="100" 
                     step="5"
+                    data-testid="reception-fuel-level"
                     className="w-full accent-blue-600"
                     value={niveauCarburant} 
                     onChange={(e) => setNiveauCarburant(Number(e.target.value))} 
@@ -526,6 +541,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                   <select
                     className="bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-neutral-800 rounded px-2.5 py-1 text-xs font-bold dark:text-neutral-100 focus:outline-none"
                     value={photoCategory}
+                    data-testid="reception-photo-category"
                     onChange={(e) => setPhotoCategory(e.target.value as PhotoCategory)}
                   >
                     {PHOTO_CATEGORIES.map(category => (
@@ -541,6 +557,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                         type="file"
                         accept="image/*"
                         capture="environment"
+                        data-testid="reception-photo-input"
                         className="hidden"
                         onChange={(e) => {
                           void handlePhotoFiles(e.target.files);
@@ -556,6 +573,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                         type="file"
                         accept="image/*"
                         multiple
+                        data-testid="reception-photo-input-import"
                         className="hidden"
                         onChange={(e) => {
                           void handlePhotoFiles(e.target.files);
@@ -569,7 +587,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 {/* Photo list rendering */}
                 <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto">
                   {photosPre.map((p) => (
-                    <div key={p.id} className="relative rounded bg-white dark:bg-neutral-900 border-2 border-slate-100 overflow-hidden shadow-sm">
+                    <div key={p.id} data-testid="reception-photo-preview" className="relative rounded bg-white dark:bg-neutral-900 border-2 border-slate-100 overflow-hidden shadow-sm">
                       <img src={p.url} alt={p.title} className="w-full h-16 object-cover" referrerPolicy="no-referrer" />
                       <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[9px] p-1 font-bold truncate">
                         {p.title}
@@ -579,6 +597,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                       </div>
                       <button 
                         onClick={() => setPhotosPre(photosPre.filter(ph => ph.id !== p.id))}
+                        data-testid="reception-photo-delete"
                         className="absolute right-1 top-1 bg-red-600/80 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center hover:bg-red-700"
                         title="Supprimer la photo"
                       >
@@ -662,8 +681,12 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
       {currentStep < 5 && (
         <div className="p-4 bg-slate-50 dark:bg-neutral-950 border-t border-slate-200 dark:border-neutral-800 flex justify-between">
           <button
-            onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
+            onClick={() => {
+              setReceptionError(null);
+              setCurrentStep(prev => Math.max(1, prev - 1));
+            }}
             disabled={currentStep === 1}
+            data-testid="reception-previous"
             className={`px-4 py-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-bold hover:bg-slate-100 dark:hover:bg-neutral-800 text-slate-700 dark:text-neutral-300 flex items-center gap-1.5 transition ${
               currentStep === 1 ? "opacity-40 cursor-not-allowed" : ""
             }`}
@@ -677,15 +700,19 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                onClick={() => {
                 // If required fields are omitted with placeholder checks
                 if (currentStep === 1 && !clientNom) {
+                  setReceptionError("Veuillez saisir le nom du client.");
                   alert("Veuillez saisir le nom du client.");
                   return;
                 }
                 if (currentStep === 2 && (!vehiculeModele || !vehiculeImmatriculation)) {
+                  setReceptionError("Veuillez remplir le modèle et l'immatriculation.");
                   alert("Veuillez remplir le modèle et l'immatriculation.");
                   return;
                 }
+                setReceptionError(null);
                 setCurrentStep(prev => prev + 1);
               }}
+              data-testid="reception-next"
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition hover:scale-105 cursor-pointer"
             >
               Suivant
@@ -693,7 +720,11 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
             </button>
           ) : (
             <button
-              onClick={handleFormSubmit}
+              onClick={() => {
+                setReceptionError(null);
+                handleFormSubmit();
+              }}
+              data-testid="reception-submit"
               className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer hover:scale-105"
             >
               Créer & Finaliser le dossier

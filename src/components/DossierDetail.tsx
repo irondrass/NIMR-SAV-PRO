@@ -86,6 +86,11 @@ export default function DossierDetail({
   const [dossierPhotoTitle, setDossierPhotoTitle] = useState("");
   const [dossierPhotoCategory, setDossierPhotoCategory] = useState<PhotoCategory>("autre");
 
+  // QA/E2E error states for strict validation
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const [qcError, setQcError] = useState<string | null>(null);
+  const [deliveryError, setDeliveryError] = useState<string | null>(null);
+
   const updateDossierState = (changes: Partial<DossierSAV>) => {
     const updated = {
       ...dossier,
@@ -121,9 +126,11 @@ export default function DossierDetail({
 
   const applyTaskMutation = (result: ReturnType<typeof startRepairOrder>) => {
     if (result.ok === false) {
+      setTaskError(result.error);
       alert(result.error);
       return;
     }
+    setTaskError(null);
     onUpdateDossier(result.dossier);
   };
 
@@ -205,16 +212,41 @@ export default function DossierDetail({
     updateDossierState({ checklistQC: updatedQC });
   };
 
+  const isChecklistComplete = 
+    !!dossier.checklistQC.essaiEffectue &&
+    !!dossier.checklistQC.defautRepare &&
+    !!dossier.checklistQC.aucunVoyantAllume &&
+    !!dossier.checklistQC.niveauxVerifies &&
+    !!dossier.checklistQC.serrageSecurite &&
+    !!dossier.checklistQC.propreteVehicule &&
+    !!dossier.checklistQC.documentsPrets &&
+    !!dossier.checklistQC.photosApresOk;
+
   const handleQCSubmit = (globVal: "valide" | "refuse", comment?: string) => {
+    if (globVal === "valide" && !isChecklistComplete) {
+      setQcError("Impossible de valider le QC sans checklist complète.");
+      return;
+    }
+    if (globVal === "refuse" && !comment?.trim()) {
+      setQcError("Un motif est obligatoire pour refuser le QC.");
+      return;
+    }
+    setQcError(null);
     onUpdateDossier(submitQualityControl(dossier, userRole, globVal, comment));
   };
 
   // 5. Handover / Delivery functions
   const handleDeliveryConfirm = () => {
+    if (dossier.checklistQC.validationGlobale !== "valide") {
+      setDeliveryError("Le contrôle qualité doit être validé avant la livraison.");
+      return;
+    }
+    setDeliveryError(null);
     onUpdateDossier(confirmDelivery(dossier));
   };
 
   const handleFinalOperationalClose = () => {
+    setDeliveryError(null);
     onUpdateDossier(markReadyForBilling(dossier));
   };
 
@@ -241,6 +273,7 @@ export default function DossierDetail({
             {/* Quick manual status trigger for demonstration */}
             <span className="text-xs font-bold text-neutral-400 self-center">Forcer le statut (Démo) :</span>
             <select
+              data-testid="force-status-select"
               className="p-1 px-2.5 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold text-xs text-slate-800 dark:text-neutral-300"
               value={dossier.statut}
               onChange={(e) => updateDossierState({ statut: e.target.value as DossierStatus })}
@@ -251,6 +284,7 @@ export default function DossierDetail({
             </select>
 
             <select
+              data-testid="force-priority-select"
               className="p-1 px-2.5 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold text-xs text-slate-800 dark:text-neutral-300"
               value={dossier.priorite}
               onChange={(e) => updateDossierState({ priorite: e.target.value as DossierPriority })}
@@ -321,6 +355,7 @@ export default function DossierDetail({
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
+              data-testid={`tab-${tab.key}`}
               className={`p-2.5 px-4 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition duration-150 ${
                 isSel 
                   ? "bg-slate-900 text-white dark:bg-neutral-800" 
@@ -407,6 +442,7 @@ export default function DossierDetail({
                     <div>
                       <label className="block text-xs font-bold text-slate-600 dark:text-neutral-400 mb-1">Attribuer à un technicien :</label>
                       <select
+                        data-testid="assign-technicien-select"
                         className="w-full p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold text-xs dark:text-neutral-100"
                         value={dossier.technicienId || ""}
                         onChange={(e) => {
@@ -563,6 +599,12 @@ export default function DossierDetail({
               </span>
             </div>
 
+            {taskError && (
+              <div data-testid="task-error-message" className="p-3.5 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 text-red-700 dark:text-red-400 rounded-lg text-xs font-bold">
+                {taskError}
+              </div>
+            )}
+
             {/* List RO line items */}
             <div className="space-y-2.5">
               {dossier.ordresReparation.map((line) => {
@@ -595,6 +637,7 @@ export default function DossierDetail({
                 return (
                   <div 
                     key={line.id}
+                    data-testid={`task-card-${line.id}`}
                     className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs gap-4"
                   >
                     <div className="space-y-1">
@@ -611,7 +654,10 @@ export default function DossierDetail({
                     </div>
 
                     <div className="flex flex-col items-start sm:items-end gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeStyle}`}>
+                      <span 
+                        data-testid={`task-status-${line.id}`}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeStyle}`}
+                      >
                         {getRepairOrderStatusLabel(status)}
                       </span>
                       {startBlockedMessage && status !== "in_progress" && status !== "done" && (
@@ -630,6 +676,7 @@ export default function DossierDetail({
                             {canManageDossier && (
                               <button
                                 onClick={() => handleReopenROLine(line.id)}
+                                data-testid={`task-reopen-${line.id}`}
                                 className="p-1 px-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
                                 title="Réouvrir avec motif obligatoire"
                               >
@@ -644,6 +691,7 @@ export default function DossierDetail({
                               <button
                                 disabled={!canStartLine}
                                 onClick={() => handleStartROLine(line.id)}
+                                data-testid={`task-start-${line.id}`}
                                 className="p-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold text-[10px] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                                 title={startBlockedMessage || "Lancer la tâche"}
                               >
@@ -654,6 +702,7 @@ export default function DossierDetail({
                               <>
                                 <button
                                   onClick={() => handlePauseROLine(line.id)}
+                                  data-testid={`task-pause-${line.id}`}
                                   className="p-1 px-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded font-bold text-[10px] cursor-pointer"
                                   title="Suspendre cette tâche"
                                 >
@@ -661,6 +710,7 @@ export default function DossierDetail({
                                 </button>
                                 <button
                                   onClick={() => handleBlockROLine(line.id)}
+                                  data-testid={`task-block-${line.id}`}
                                   className="p-1 px-2.5 bg-rose-600 text-white rounded font-bold text-[10px] hover:bg-rose-700 cursor-pointer"
                                   title="Bloquer cette tâche"
                                 >
@@ -668,6 +718,7 @@ export default function DossierDetail({
                                 </button>
                                 <button
                                   onClick={() => handleFinishROLine(line.id)}
+                                  data-testid={`task-finish-${line.id}`}
                                   className="p-1 px-2.5 bg-emerald-600 text-white rounded font-bold text-[10px] hover:bg-emerald-700 cursor-pointer"
                                   title="Valider la fin de tâche"
                                 >
@@ -692,6 +743,7 @@ export default function DossierDetail({
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                   <input 
                     type="text" 
+                    data-testid="new-task-desc"
                     className="md:col-span-2 p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold dark:text-neutral-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
                     placeholder="EX: Remplacement plaquettes de frein avant NIMR"
                     value={newROLineText}
@@ -700,6 +752,7 @@ export default function DossierDetail({
                   <input 
                     type="number" 
                     step="0.1"
+                    data-testid="new-task-time"
                     className="p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold dark:text-neutral-100 focus:outline-none" 
                     placeholder="Temps estimé (H)"
                     value={newROLineTime}
@@ -707,6 +760,7 @@ export default function DossierDetail({
                   />
                   <button 
                     onClick={handleAddROLine}
+                    data-testid="new-task-submit"
                     className="py-2 bg-slate-900 hover:bg-slate-950 text-white dark:bg-neutral-800 dark:hover:bg-neutral-800 font-bold rounded cursor-pointer transition flex items-center justify-center gap-1"
                   >
                     <Plus className="w-4 h-4" />
@@ -731,12 +785,14 @@ export default function DossierDetail({
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                 <input
                   type="text"
+                  data-testid="photo-title-input"
                   className="md:col-span-2 p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold dark:text-neutral-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   placeholder="Titre photo (ex: défaut aile droite)"
                   value={dossierPhotoTitle}
                   onChange={(e) => setDossierPhotoTitle(e.target.value)}
                 />
                 <select
+                  data-testid="photo-category-select"
                   className="p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold dark:text-neutral-100 focus:outline-none"
                   value={dossierPhotoCategory}
                   onChange={(e) => setDossierPhotoCategory(e.target.value as PhotoCategory)}
@@ -751,6 +807,7 @@ export default function DossierDetail({
                     Prendre
                     <input
                       type="file"
+                      data-testid="photo-file-input-capture"
                       accept="image/*"
                       capture="environment"
                       className="hidden"
@@ -765,6 +822,7 @@ export default function DossierDetail({
                     Importer
                     <input
                       type="file"
+                      data-testid="photo-file-input-import"
                       accept="image/*"
                       multiple
                       className="hidden"
@@ -783,7 +841,7 @@ export default function DossierDetail({
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {dossier.photosAvant.map((ph) => (
-                  <div key={ph.id} className="border border-slate-200 dark:border-neutral-800 rounded-lg overflow-hidden bg-white dark:bg-neutral-950 shadow-sm relative group">
+                  <div key={ph.id} data-testid={`photo-card-${ph.id}`} className="border border-slate-200 dark:border-neutral-800 rounded-lg overflow-hidden bg-white dark:bg-neutral-950 shadow-sm relative group">
                     <img src={ph.url} alt={ph.title} className="w-full h-32 object-cover" referrerPolicy="no-referrer" />
                     <span className="absolute left-2 top-2 bg-white/90 text-zinc-700 text-[9px] px-1.5 py-0.5 rounded font-bold">
                       {ph.category}
@@ -791,6 +849,7 @@ export default function DossierDetail({
                     {canUpdateWorkOrders && (
                       <button
                         onClick={() => onUpdateDossier(removePhotoFromDossier(dossier, ph.id))}
+                        data-testid={`photo-delete-${ph.id}`}
                         className="absolute right-2 top-2 bg-red-600/90 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center hover:bg-red-700"
                         title="Supprimer la photo"
                       >
@@ -951,9 +1010,15 @@ export default function DossierDetail({
               <p className="text-slate-400 text-xs">Checklist de sécurité opérationnelle à valider obligatoirement par l'essayeur contrôleur technique</p>
             </div>
 
+            {qcError && (
+              <div data-testid="qc-error-message" className="p-3.5 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 text-red-700 dark:text-red-400 rounded-lg text-xs font-bold">
+                {qcError}
+              </div>
+            )}
+
             {/* If QC is already validated display details */}
             {dossier.checklistQC.validationGlobale === "valide" ? (
-              <div className="p-5 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-950 rounded-xl text-xs space-y-3">
+              <div data-testid="qc-status-message" className="p-5 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-950 rounded-xl text-xs space-y-3">
                 <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-bold">
                   <CheckCircle className="w-5 h-5" />
                   CONTRÔLE QUALITÉ VALIDÉ - BON POUR LIVRAISON VÉHICULE
@@ -971,7 +1036,7 @@ export default function DossierDetail({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
                   {[
                     { key: "essaiEffectue", label: "Essai routier / essai de conduite réalisé à bord" },
-                    { key: "defautRepare", label: "Défaut d'origine du client confirmé comme résolu" },
+                    { key: "defautRepare", label: "Défaut d'origine du client confirmed comme résolu" },
                     { key: "aucunVoyantAllume", label: "Aucun voyant de panne ou anomalie orange/rouge allumé" },
                     { key: "niveauxVerifies", label: "Niveaux de fluides et batteries contrôlés et ajustés" },
                     { key: "serrageSecurite", label: "Serrages dynamométriques et organes de sécurité vérifiés" },
@@ -990,6 +1055,7 @@ export default function DossierDetail({
                         onChange={(e) => handleQCFieldChange(item.key as any, e.target.checked)}
                         className="rounded text-blue-600 focus:ring-blue-500"
                         disabled={!canValidateQuality}
+                        data-testid={`qc-check-${item.key}`}
                       />
                     </label>
                   ))}
@@ -1003,6 +1069,7 @@ export default function DossierDetail({
                     <div className="flex gap-2">
                       <button 
                         onClick={() => handleQCSubmit("valide")}
+                        data-testid="qc-accept"
                         className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
                       >
                         <CheckCircle className="w-4 h-4" />
@@ -1014,8 +1081,12 @@ export default function DossierDetail({
                           const cause = prompt("Veuillez saisir la cause ou le motif de refus qualité :");
                           if (cause) {
                             handleQCSubmit("refuse", cause);
+                          } else {
+                            // Enforce refusing QC without prompt by showing error!
+                            handleQCSubmit("refuse", "");
                           }
                         }}
+                        data-testid="qc-refuse"
                         className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
                       >
                         <XCircle className="w-4 h-4" />
@@ -1037,6 +1108,12 @@ export default function DossierDetail({
               <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">Protocole de Clôture et Restitution d'Véhicules</h3>
               <p className="text-slate-400 text-xs">Validation de conformité d'exploitation avec signature manuelle du client final</p>
             </div>
+
+            {deliveryError && (
+              <div data-testid="delivery-error-message" className="p-3.5 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 text-red-700 dark:text-red-400 rounded-lg text-xs font-bold">
+                {deliveryError}
+              </div>
+            )}
 
             {/* Check requirements */}
             <div className="p-4 bg-slate-50 dark:bg-neutral-950 rounded-xl border border-slate-200 dark:border-neutral-800 text-xs space-y-3.5">
@@ -1080,7 +1157,11 @@ export default function DossierDetail({
                   <span className="font-bold text-blue-800 dark:text-blue-400 block uppercase font-display">Signature client lors de la remise des clés :</span>
                   
                   {/* Visual Signature Mock */}
-                  <div className="bg-white dark:bg-neutral-900 border border-dashed border-zinc-300 dark:border-neutral-800 h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" onClick={() => alert("Signature sécurisée capturée sur tablette NIMR.")}>
+                  <div 
+                    data-testid="delivery-signature"
+                    className="bg-white dark:bg-neutral-900 border border-dashed border-zinc-300 dark:border-neutral-800 h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
+                    onClick={() => alert("Signature sécurisée capturée sur tablette NIMR.")}
+                  >
                     [ Cliquer ici pour simuler la signature tactile du client ]
                   </div>
 
@@ -1090,6 +1171,7 @@ export default function DossierDetail({
                 <div className="flex gap-2">
                   <button 
                     onClick={handleDeliveryConfirm}
+                    data-testid="delivery-submit"
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
                   >
                     Restituer le Véhicule au client
@@ -1106,6 +1188,7 @@ export default function DossierDetail({
                 {canDeliverVehicle && (
                   <button 
                     onClick={handleFinalOperationalClose}
+                    data-testid="delivery-billing"
                     className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition cursor-pointer"
                   >
                     Marquer "Prêt pour facturation ERP" (Clôture Opérationnelle)

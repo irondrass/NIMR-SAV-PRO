@@ -109,6 +109,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
           <div className="flex-1 space-y-1">
             <span className="text-[10px] uppercase tracking-widest font-black text-slate-400">Suggestion automatique atelier</span>
             <select
+              data-testid="planning-suggest-dossier"
               className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded text-xs font-bold text-slate-800 dark:text-neutral-300"
               value={selectedTargetId}
               onChange={(e) => {
@@ -126,6 +127,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
           </div>
           <button
             onClick={handleSuggestSlot}
+            data-testid="planning-suggest-submit"
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
@@ -134,18 +136,18 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         </div>
 
         {suggestionError && (
-          <p className="text-xs font-bold text-rose-600">{suggestionError}</p>
+          <p data-testid="planning-suggest-error" className="text-xs font-bold text-rose-600">{suggestionError}</p>
         )}
 
         {suggestion && (
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 bg-blue-50/40 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900 rounded-lg text-xs">
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Technicien proposé</span>
-              <strong className="text-slate-800 dark:text-neutral-100">{suggestion.technicianName}</strong>
+              <strong data-testid="planning-suggest-tech" className="text-slate-800 dark:text-neutral-100">{suggestion.technicianName}</strong>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Pont proposé</span>
-              <strong className="text-slate-800 dark:text-neutral-100">{suggestion.bayName}</strong>
+              <strong data-testid="planning-suggest-bay" className="text-slate-800 dark:text-neutral-100">{suggestion.bayName}</strong>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Heure début</span>
@@ -160,6 +162,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
               <p className="text-slate-600 dark:text-neutral-300 font-semibold">{suggestion.reason}</p>
               <button
                 onClick={handleApplySuggestion}
+                data-testid="planning-suggest-apply"
                 className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
@@ -199,13 +202,13 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
             const isOverloaded = totalHoursEst > 8;
 
             return (
-              <div key={tech.id} className="flex flex-col md:flex-row p-4 items-stretch gap-4 hover:bg-slate-50/50 dark:hover:bg-neutral-950/40 transition">
+              <div key={tech.id} data-testid={`tech-row-${tech.id}`} className="flex flex-col md:flex-row p-4 items-stretch gap-4 hover:bg-slate-50/50 dark:hover:bg-neutral-950/40 transition">
                 
                 {/* Tech Profile Panel */}
                 <div className="md:w-2/5 space-y-1.5 flex flex-col justify-center">
                   <div className="flex items-center gap-2">
                     <span className={`w-2.5 h-2.5 rounded-full ${statusColor}`} title={tech.disponibilite}></span>
-                    <span className="font-bold text-slate-800 dark:text-neutral-100 text-xs">{tech.nom}</span>
+                    <span data-testid={`tech-name-${tech.id}`} className="font-bold text-slate-800 dark:text-neutral-100 text-xs">{tech.nom}</span>
                     <span className="bg-zinc-100 dark:bg-neutral-800 text-zinc-500 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
                       {tech.zoneAffectee}
                     </span>
@@ -234,7 +237,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                 <div className="md:w-3/5 flex flex-col justify-center space-y-2 pt-2 md:pt-0">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400">Total charge planifiée: <strong className="text-zinc-700 dark:text-zinc-300 font-bold">{totalHoursEst}H</strong></span>
-                    <span className={`font-mono font-bold ${isOverloaded ? "text-rose-500" : "text-neutral-500"}`}>
+                    <span data-testid={`tech-charge-${tech.id}`} className={`font-mono font-bold ${isOverloaded ? "text-rose-500" : "text-neutral-500"}`}>
                       {chargePercent}% {isOverloaded && "(Surcharge)"}
                     </span>
                   </div>

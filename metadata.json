@@ -1,10 +1,10 @@
 {
   "name": "NIMR SAV PRO",
-  "version": "1.0.1",
-  "versionLabel": "NIMR SAV PRO v1.0.1",
+  "version": "1.0.2",
+  "versionLabel": "NIMR SAV PRO v1.0.2",
   "baseUrl": "/NIMR-SAV-PRO/",
   "storagePrefix": "nimr-sav-pro",
-  "cacheName": "nimr-sav-pro-v1.0.1",
+  "cacheName": "nimr-sav-pro-v1.0.2",
   "description": "Nouvelle application interne indépendante pour le suivi opérationnel, la réception digitale, le planning atelier et la gestion de la relation client SAV NIMR.",
   "requestFramePermissions": [],
   "majorCapabilities": []

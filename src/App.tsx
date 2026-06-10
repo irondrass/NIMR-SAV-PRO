@@ -137,6 +137,10 @@ export default function App() {
   // Detailed selected folder id
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
 
+  // Import feedback states
+  const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
+  const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
+
   // Search and Filter states
   const [globalSearchTerm, setGlobalSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("Tous");
@@ -244,6 +248,8 @@ export default function App() {
   };
 
   const handleImportDataJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImportSuccessMessage(null);
+    setImportErrorMessage(null);
     const reader = new FileReader();
     const files = e.target.files;
     if (files && files[0]) {
@@ -252,6 +258,7 @@ export default function App() {
           const parsed = JSON.parse(event.target?.result as string);
           const validation = validateBackupPayload(parsed);
           if (validation.ok === false) {
+            setImportErrorMessage(validation.error);
             alert(validation.error);
             return;
           }
@@ -273,13 +280,16 @@ export default function App() {
             setActivityLogs(validation.data.activityLogs);
             writeLocalStorageJSON(STORAGE_KEYS.logs, validation.data.activityLogs);
           }
+          setImportSuccessMessage("Base restaurée avec succès !");
           alert("Base restaurée avec succès !");
         } catch (err) {
+          setImportErrorMessage("Erreur de format de fichier de sauvegarde.");
           alert("Erreur de format de fichier de sauvegarde.");
         }
         e.target.value = "";
       };
       reader.onerror = () => {
+        setImportErrorMessage("Impossible de lire le fichier de sauvegarde.");
         alert("Impossible de lire le fichier de sauvegarde.");
       };
       reader.readAsText(files[0]);
@@ -324,10 +334,11 @@ export default function App() {
           <div className="bg-white/5 rounded-lg p-3 border border-white/10 text-xs">
             <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Rôle Connecté (Démo)</span>
             <div className="flex items-center justify-between">
-              <span className="font-extrabold text-blue-400 font-display">{activeRole}</span>
+              <span data-testid="current-role" className="font-extrabold text-blue-400 font-display">{activeRole}</span>
               {allowRoleChange && (
                 <button 
                   onClick={() => goToTab("parametres")}
+                  data-testid="role-switch-button"
                   className="text-[10px] text-zinc-400 underline hover:text-white"
                 >
                   Changer
@@ -356,9 +367,23 @@ export default function App() {
               const LinkIcon = item.icon;
               const isSel = activeTab === item.id;
               
+              const navTestIds: Record<string, string> = {
+                "dashboard": "nav-dashboard",
+                "reception-rapide": "nav-reception",
+                "dossiers-liste": "nav-dossiers",
+                "atelier-planning": "nav-planning",
+                "chef-atelier": "nav-chef-atelier",
+                "tech-view": "nav-technician",
+                "parametres": "nav-settings",
+                "atelier-kanban": "nav-kanban",
+                "reclamations": "nav-reclamations",
+                "rendements-sav": "nav-performance"
+              };
+
               return (
                 <button
                   key={item.id}
+                  data-testid={navTestIds[item.id] || `nav-${item.id}`}
                   onClick={() => {
                     goToTab(item.id);
                   }}
@@ -645,6 +670,8 @@ export default function App() {
                     setSelectedDossierId(null);
                     setActiveTab(getDefaultTabForRole(role));
                   }}
+                  importSuccessMessage={importSuccessMessage}
+                  importErrorMessage={importErrorMessage}
                 />
               )}
 

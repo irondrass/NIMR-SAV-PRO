@@ -72,7 +72,10 @@ export function StatusBadge({ status }: { status: DossierStatus }) {
   }
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${style}`}> 
+    <span 
+      data-testid="status-badge"
+      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${style}`}
+    > 
       {status}
     </span>
   );

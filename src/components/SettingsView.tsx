@@ -14,9 +14,19 @@ interface SettingsViewProps {
   activeRole: UserRole;
   canChangeRole: boolean;
   onChangeRole: (role: UserRole) => void;
+  importSuccessMessage?: string | null;
+  importErrorMessage?: string | null;
 }
 
-export default function SettingsView({ onExportData, onImportData, activeRole, canChangeRole, onChangeRole }: SettingsViewProps) {
+export default function SettingsView({ 
+  onExportData, 
+  onImportData, 
+  activeRole, 
+  canChangeRole, 
+  onChangeRole,
+  importSuccessMessage,
+  importErrorMessage
+}: SettingsViewProps) {
   
   // High quality configuration tables
   const userRolesPermissions = [
@@ -27,6 +37,15 @@ export default function SettingsView({ onExportData, onImportData, activeRole, c
     { role: UserRole.CONTROLE_QUALITE, desc: "Checklist d'essais routiers et statiques globales, refus ou acceptation qualité", canModify: "OUI (Qualité)" },
     { role: UserRole.LECTURE_SEULE, desc: "Portails d'affichage TV atelier et consultation générale d'avancement ERP", canModify: "NON (Consulte)" }
   ];
+
+  const roleTestIds: Record<UserRole, string> = {
+    [UserRole.DIRECTEUR_SAV]: "role-option-directeur",
+    [UserRole.RECEPTIONNAIRE]: "role-option-receptionnaire",
+    [UserRole.CHEF_ATELIER]: "role-option-chef-atelier",
+    [UserRole.TECHNICIEN]: "role-option-technicien",
+    [UserRole.CONTROLE_QUALITE]: "role-option-controle-qualite",
+    [UserRole.LECTURE_SEULE]: "role-option-lecture-seule"
+  };
 
   const openingHours = [
     { day: "Lundi - Vendredi", hm: "08:00 - 12:00, 14:00 - 18:00", active: true },
@@ -59,23 +78,40 @@ export default function SettingsView({ onExportData, onImportData, activeRole, c
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button 
               onClick={onExportData}
+              data-testid="export-json"
               className="p-3 bg-zinc-900 hover:bg-zinc-950 text-white font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer"
             >
               <Download className="w-4 h-4" />
               Exporter Base de données (JSON / CSV)
             </button>
 
-            <label className="p-3 bg-blue-50/70 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-900 dark:hover:bg-blue-950 hover:bg-blue-100 text-blue-800 dark:text-blue-400 font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer text-center">
+            <label 
+              data-testid="import-json"
+              className="p-3 bg-blue-50/70 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-900 dark:hover:bg-blue-950 hover:bg-blue-100 text-blue-800 dark:text-blue-400 font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer text-center"
+            >
               <Upload className="w-4 h-4" />
               Restaurer Base / Importer
               <input 
                 type="file" 
                 accept=".json" 
+                data-testid="import-json-input"
                 onChange={onImportData} 
                 className="hidden" 
               />
             </label>
           </div>
+
+          {importSuccessMessage && (
+            <div data-testid="import-success-message" className="p-3 bg-green-50 text-green-700 dark:bg-green-950/20 dark:text-green-400 border border-green-200 rounded-lg">
+              {importSuccessMessage}
+            </div>
+          )}
+
+          {importErrorMessage && (
+            <div data-testid="import-error-message" className="p-3 bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400 border border-red-200 rounded-lg">
+              {importErrorMessage}
+            </div>
+          )}
 
           <div className="p-3.5 bg-neutral-50 dark:bg-neutral-950 rounded-xl border flex items-center gap-3">
             <Clock className="w-5 h-5 text-zinc-400" />
@@ -108,9 +144,11 @@ export default function SettingsView({ onExportData, onImportData, activeRole, c
         <div>
           <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">PORTAIL D'HABILITATION DE RÔLE (DÉMO INTERNE)</h3>
           <p className="text-slate-400 text-xs">
-            {canChangeRole
-              ? "Ajuster instantanément votre profil utilisateur connecté pour examiner l'ensemble des limites d'accès"
-              : "Votre rôle connecté ne permet pas de modifier les habilitations."}
+            {canChangeRole ? (
+              "Ajuster instantanément votre profil utilisateur connecté pour examiner l'ensemble des limites d'accès"
+            ) : (
+              <span data-testid="role-change-blocked-message">Votre rôle connecté ne permet pas de modifier les habilitations.</span>
+            )}
           </p>
         </div>
 
@@ -122,6 +160,7 @@ export default function SettingsView({ onExportData, onImportData, activeRole, c
               <button
                 key={role}
                 disabled={!canChangeRole}
+                data-testid={roleTestIds[role]}
                 onClick={() => onChangeRole(role)}
                 className={`p-2.5 px-4 rounded-xl text-xs font-bold transition duration-150 border cursor-pointer hover:scale-105 ${
                   isSel 

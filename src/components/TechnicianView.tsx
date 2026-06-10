@@ -222,7 +222,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                   <span className="font-extrabold text-slate-800 dark:text-neutral-200 block">{line.designation}</span>
                                   <span className="text-[10px] text-zinc-400 font-mono">{line.tempsPasse}H / {line.tempsEstime}H</span>
                                 </div>
-                                <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300">
+                                <span 
+                                  data-testid={`task-status-${line.id}`}
+                                  className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300">
                                   {getRepairOrderStatusLabel(status)}
                                 </span>
                               </div>
@@ -239,6 +241,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                   {status !== "in_progress" && (
                                     <button
                                       disabled={!canStartLine}
+                                      data-testid={`task-start-${line.id}`}
                                       onClick={() => handleRepairOrderAction(task.id, line.id, "start")}
                                       className="flex-1 min-w-24 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded flex items-center justify-center gap-1 text-[10px] transition cursor-pointer"
                                     >
@@ -249,6 +252,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                   {status === "in_progress" && (
                                     <>
                                       <button
+                                        data-testid={`task-pause-${line.id}`}
                                         onClick={() => handleRepairOrderAction(task.id, line.id, "pause")}
                                         className="flex-1 min-w-20 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded flex items-center justify-center gap-1 text-[10px] transition cursor-pointer"
                                       >
@@ -262,6 +266,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                         Bloquer
                                       </button>
                                       <button
+                                        data-testid={`task-finish-${line.id}`}
                                         onClick={() => handleRepairOrderAction(task.id, line.id, "finish")}
                                         className="py-1.5 px-2.5 bg-green-600 text-white rounded font-bold hover:bg-green-700 text-[10px] transition"
                                       >
