@@ -335,7 +335,7 @@ export default function App() {
             <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Rôle Connecté (Démo)</span>
             <div className="flex items-center justify-between">
               <span data-testid="current-role" className="font-extrabold text-blue-400 font-display">{activeRole}</span>
-              {allowRoleChange && (
+              {allowRoleChange ? (
                 <button 
                   onClick={() => goToTab("parametres")}
                   data-testid="role-switch-button"
@@ -343,6 +343,14 @@ export default function App() {
                 >
                   Changer
                 </button>
+              ) : (
+                <span 
+                  data-testid="role-change-blocked-message" 
+                  className="text-[10px] text-rose-400 font-semibold italic"
+                  title="Votre rôle connecté ne permet pas de modifier les habilitations."
+                >
+                  Modification bloquée
+                </span>
               )}
             </div>
           </div>

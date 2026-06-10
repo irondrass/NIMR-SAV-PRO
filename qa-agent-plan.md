@@ -34,6 +34,7 @@ La suite E2E est structurée dans le répertoire [e2e/](file:///c:/Users/mhadh/a
   - `09-photos.spec.ts` : Persistance d'images encodées en base64 dans le flux de preuves photos.
   - `10-planning-strict.spec.ts` : Charge de travail Gantt calculée à la volée.
   - `11-persistence.spec.ts` : Préservation de l'état applicatif après refresh navigateur.
+  - `12-role-and-controls-security.spec.ts` : Validation de la sécurité d'accès aux contrôles de forçage et habilitations.
 
 ---
 
