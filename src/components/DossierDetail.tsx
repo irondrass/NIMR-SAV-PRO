@@ -13,14 +13,27 @@ import {
   RepairOrderLine,
   ComplementTravail,
   AccordSuivi,
-  UserRole
+  UserRole,
+  PHOTO_CATEGORIES,
+  PhotoCategory
 } from "../types";
 import {
+  addPhotoToDossier,
+  blockRepairOrder,
   confirmDelivery,
   createRuntimeId,
+  finishRepairOrder,
+  getRepairOrderStatusLabel,
+  isRepairOrderDone,
   markReadyForBilling,
+  normalizeRepairOrderStatus,
+  pauseRepairOrder,
+  removePhotoFromDossier,
+  reopenRepairOrder,
+  startRepairOrder,
   submitQualityControl
 } from "../sav-core";
+import { fileToCameraPhoto } from "../photo-utils";
 import { 
   ArrowLeft, 
   FileText, 
@@ -47,6 +60,7 @@ import { StatusBadge, PriorityBadge, LicencePlate, FuelIndicator, MiniProgress, 
 
 interface DossierDetailProps {
   dossier: DossierSAV;
+  dossiers: DossierSAV[];
   userRole: UserRole;
   onBack: () => void;
   onUpdateDossier: (updated: DossierSAV) => void;
@@ -55,6 +69,7 @@ interface DossierDetailProps {
 
 export default function DossierDetail({ 
   dossier, 
+  dossiers,
   userRole, 
   onBack, 
   onUpdateDossier,
@@ -68,6 +83,8 @@ export default function DossierDetail({
 
   // For adding custom logs
   const [newLogText, setNewLogText] = useState("");
+  const [dossierPhotoTitle, setDossierPhotoTitle] = useState("");
+  const [dossierPhotoCategory, setDossierPhotoCategory] = useState<PhotoCategory>("autre");
 
   const updateDossierState = (changes: Partial<DossierSAV>) => {
     const updated = {
@@ -86,12 +103,12 @@ export default function DossierDetail({
       designation: newROLineText.trim(),
       tempsEstime: Number(newROLineTime),
       tempsPasse: 0,
-      status: "non_commence"
+      status: "pending"
     };
     const updatedRO = [...dossier.ordresReparation, newLine];
     
     // Auto recalculate progress percentage based on task counts
-    const completedCount = updatedRO.filter(r => r.status === "termine").length;
+    const completedCount = updatedRO.filter(isRepairOrderDone).length;
     const progress = Math.round((completedCount / updatedRO.length) * 100);
 
     updateDossierState({
@@ -102,32 +119,59 @@ export default function DossierDetail({
     setNewROLineTime(1.0);
   };
 
-  const handleToggleROStatus = (lineId: string, nextStatus: "non_commence" | "en_cours" | "suspendu" | "termine") => {
-    const updatedRO = dossier.ordresReparation.map(line => {
-      if (line.id === lineId) {
-        return { 
-          ...line, 
-          status: nextStatus,
-          tempsPasse: nextStatus === "termine" ? line.tempsEstime : line.tempsPasse
-        };
-      }
-      return line;
-    });
-
-    const completedCount = updatedRO.filter(r => r.status === "termine").length;
-    const progress = Math.round((completedCount / updatedRO.length) * 100);
-
-    // Auto-recommmended action update
-    let nextRec = dossier.prochaineActionRecommended;
-    if (progress === 100 && dossier.statut === DossierStatus.EN_TRAVAUX) {
-      nextRec = "Lancer le contrôle qualité d'essai routier";
+  const applyTaskMutation = (result: ReturnType<typeof startRepairOrder>) => {
+    if (result.ok === false) {
+      alert(result.error);
+      return;
     }
+    onUpdateDossier(result.dossier);
+  };
 
-    updateDossierState({
-      ordresReparation: updatedRO,
-      avancementGlobal: progress,
-      prochaineActionRecommended: nextRec
-    });
+  const handleStartROLine = (lineId: string) => {
+    applyTaskMutation(startRepairOrder(dossiers, dossier.id, lineId));
+  };
+
+  const handlePauseROLine = (lineId: string) => {
+    applyTaskMutation(pauseRepairOrder(dossiers, dossier.id, lineId));
+  };
+
+  const handleBlockROLine = (lineId: string) => {
+    const reason = prompt("Raison du blocage atelier :")?.trim();
+    if (!reason) return;
+    applyTaskMutation(blockRepairOrder(dossiers, dossier.id, lineId, reason));
+  };
+
+  const handleFinishROLine = (lineId: string) => {
+    applyTaskMutation(finishRepairOrder(dossiers, dossier.id, lineId));
+  };
+
+  const handleReopenROLine = (lineId: string) => {
+    const reason = prompt("Motif obligatoire de réouverture :")?.trim();
+    if (!reason) {
+      alert("Le motif de réouverture est obligatoire.");
+      return;
+    }
+    applyTaskMutation(reopenRepairOrder(dossiers, dossier.id, lineId, userRole, reason));
+  };
+
+  const handleDossierPhotoFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    try {
+      const currentCount = dossier.photosAvant.length;
+      const photos = await Promise.all(Array.from(files).map((file, index) => (
+        fileToCameraPhoto(file, {
+          title: dossierPhotoTitle.trim() || `${dossierPhotoCategory} ${currentCount + index + 1}`,
+          category: dossierPhotoCategory,
+          takenBy: userRole,
+        })
+      )));
+      const nextDossier = photos.reduce((current, photo) => addPhotoToDossier(current, photo), dossier);
+      onUpdateDossier(nextDossier);
+      setDossierPhotoTitle("");
+    } catch {
+      alert("Impossible d'ajouter cette photo au dossier.");
+    }
   };
 
   // 2. Complements Actions
@@ -522,10 +566,31 @@ export default function DossierDetail({
             {/* List RO line items */}
             <div className="space-y-2.5">
               {dossier.ordresReparation.map((line) => {
-                let badgeStyle = "bg-stone-100 text-stone-600";
-                if (line.status === "en_cours") badgeStyle = "bg-amber-50 text-amber-700 animate-pulse border border-amber-200";
-                if (line.status === "termine") badgeStyle = "bg-green-50 text-green-700 border border-green-200";
-                if (line.status === "suspendu") badgeStyle = "bg-rose-50 text-rose-700 border border-rose-200";
+                const status = normalizeRepairOrderStatus(line.status);
+                const activeLineInSameDossier = dossier.ordresReparation.find(current =>
+                  current.id !== line.id && normalizeRepairOrderStatus(current.status) === "in_progress"
+                );
+                const activeDossierForTechnician = dossier.technicienId
+                  ? dossiers.find(current =>
+                    current.id !== dossier.id &&
+                    current.technicienId === dossier.technicienId &&
+                    current.ordresReparation.some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
+                  )
+                  : undefined;
+                const startBlockedMessage = activeLineInSameDossier
+                  ? "Une tâche est déjà en cours pour ce dossier."
+                  : activeDossierForTechnician
+                    ? "Ce technicien a déjà une tâche en cours."
+                    : "";
+                const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
+                const badgeStyle = {
+                  pending: "bg-stone-100 text-stone-600",
+                  in_progress: "bg-amber-50 text-amber-700 animate-pulse border border-amber-200",
+                  paused: "bg-sky-50 text-sky-700 border border-sky-200",
+                  blocked: "bg-rose-50 text-rose-700 border border-rose-200",
+                  done: "bg-green-50 text-green-700 border border-green-200",
+                  reopened: "bg-violet-50 text-violet-700 border border-violet-200",
+                }[status];
 
                 return (
                   <div 
@@ -538,41 +603,80 @@ export default function DossierDetail({
                         <span>Estimation: <span className="text-stone-700 dark:text-stone-300 font-bold font-mono">{line.tempsEstime}H</span></span>
                         <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
                       </div>
+                      {line.reopenedReason && (
+                        <p className="text-[10px] text-violet-600 dark:text-violet-400 font-bold">
+                          Motif réouverture : {line.reopenedReason}
+                        </p>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col items-start sm:items-end gap-2">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeStyle}`}>
-                        {line.status.replace("_", " ")}
+                        {getRepairOrderStatusLabel(status)}
                       </span>
+                      {startBlockedMessage && status !== "in_progress" && status !== "done" && (
+                        <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold text-right">
+                          {startBlockedMessage}
+                        </span>
+                      )}
 
                       {/* Technical staff control buttons */}
                       {canUpdateWorkOrders && (
-                        <div className="flex gap-1">
-                          <button 
-                            disabled={line.status === "en_cours"}
-                            onClick={() => handleToggleROStatus(line.id, "en_cours")}
-                            className="p-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold text-[10px] disabled:opacity-30 cursor-pointer"
-                            title="Lancer la tâche"
-                          >
-                            Démarrer
-                          </button>
-                          <button 
-                            disabled={line.status === "termine"}
-                            onClick={() => handleToggleROStatus(line.id, "termine")}
-                            className="p-1 px-2.5 bg-emerald-600 text-white rounded font-bold text-[10px] hover:bg-emerald-700 disabled:opacity-30 cursor-pointer"
-                            title="Valider la fin de tâche"
-                          >
-                            Terminer
-                          </button>
-                          <button 
-                            disabled={line.status === "suspendu"}
-                            onClick={() => handleToggleROStatus(line.id, "suspendu")}
-                            className="p-1 px-2.5 bg-rose-600 text-white rounded font-bold text-[10px] hover:bg-rose-700 disabled:opacity-30 cursor-pointer"
-                            title="Suspendre cette tâche"
-                          >
-                            Bloquer
-                          </button>
-                        </div>
+                        status === "done" ? (
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <span className="p-1 px-2.5 bg-green-50 text-green-700 border border-green-200 rounded font-bold text-[10px] uppercase">
+                              Terminé
+                            </span>
+                            {canManageDossier && (
+                              <button
+                                onClick={() => handleReopenROLine(line.id)}
+                                className="p-1 px-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
+                                title="Réouvrir avec motif obligatoire"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                Réouvrir
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap justify-end gap-1">
+                            {status !== "in_progress" && (
+                              <button
+                                disabled={!canStartLine}
+                                onClick={() => handleStartROLine(line.id)}
+                                className="p-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold text-[10px] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                                title={startBlockedMessage || "Lancer la tâche"}
+                              >
+                                {status === "pending" ? "Démarrer" : "Reprendre"}
+                              </button>
+                            )}
+                            {status === "in_progress" && (
+                              <>
+                                <button
+                                  onClick={() => handlePauseROLine(line.id)}
+                                  className="p-1 px-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded font-bold text-[10px] cursor-pointer"
+                                  title="Suspendre cette tâche"
+                                >
+                                  Suspendre
+                                </button>
+                                <button
+                                  onClick={() => handleBlockROLine(line.id)}
+                                  className="p-1 px-2.5 bg-rose-600 text-white rounded font-bold text-[10px] hover:bg-rose-700 cursor-pointer"
+                                  title="Bloquer cette tâche"
+                                >
+                                  Bloquer
+                                </button>
+                                <button
+                                  onClick={() => handleFinishROLine(line.id)}
+                                  className="p-1 px-2.5 bg-emerald-600 text-white rounded font-bold text-[10px] hover:bg-emerald-700 cursor-pointer"
+                                  title="Valider la fin de tâche"
+                                >
+                                  Terminer
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )
                       )}
                     </div>
                   </div>
@@ -622,6 +726,58 @@ export default function DossierDetail({
               <p className="text-slate-400 text-xs">Historique visuel permettant de sécuriser le client et la concession</p>
             </div>
 
+            <div className="p-4 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg space-y-3">
+              <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 uppercase block">Ajouter une photo au dossier</span>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                <input
+                  type="text"
+                  className="md:col-span-2 p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold dark:text-neutral-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  placeholder="Titre photo (ex: défaut aile droite)"
+                  value={dossierPhotoTitle}
+                  onChange={(e) => setDossierPhotoTitle(e.target.value)}
+                />
+                <select
+                  className="p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold dark:text-neutral-100 focus:outline-none"
+                  value={dossierPhotoCategory}
+                  onChange={(e) => setDossierPhotoCategory(e.target.value as PhotoCategory)}
+                >
+                  {PHOTO_CATEGORIES.map(category => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="py-2 bg-slate-900 hover:bg-slate-950 text-white dark:bg-neutral-800 dark:hover:bg-neutral-700 font-bold rounded cursor-pointer transition flex items-center justify-center gap-1">
+                    <Camera className="w-4 h-4" />
+                    Prendre
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        void handleDossierPhotoFiles(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <label className="py-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 text-slate-700 dark:text-neutral-200 font-bold rounded cursor-pointer transition flex items-center justify-center gap-1">
+                    <Plus className="w-4 h-4" />
+                    Importer
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        void handleDossierPhotoFiles(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
             {dossier.photosAvant.length === 0 ? (
               <p className="text-xs text-zinc-400 italic">Aucune photo enregistrée pour ce dossier.</p>
             ) : (
@@ -629,10 +785,22 @@ export default function DossierDetail({
                 {dossier.photosAvant.map((ph) => (
                   <div key={ph.id} className="border border-slate-200 dark:border-neutral-800 rounded-lg overflow-hidden bg-white dark:bg-neutral-950 shadow-sm relative group">
                     <img src={ph.url} alt={ph.title} className="w-full h-32 object-cover" referrerPolicy="no-referrer" />
+                    <span className="absolute left-2 top-2 bg-white/90 text-zinc-700 text-[9px] px-1.5 py-0.5 rounded font-bold">
+                      {ph.category}
+                    </span>
+                    {canUpdateWorkOrders && (
+                      <button
+                        onClick={() => onUpdateDossier(removePhotoFromDossier(dossier, ph.id))}
+                        className="absolute right-2 top-2 bg-red-600/90 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center hover:bg-red-700"
+                        title="Supprimer la photo"
+                      >
+                        ×
+                      </button>
+                    )}
                     <div className="p-2.5 space-y-1 text-[10px]">
                       <span className="font-bold text-slate-800 dark:text-neutral-300 block truncate">{ph.title}</span>
                       <div className="flex justify-between text-zinc-400 font-semibold">
-                        <span>{ph.date}</span>
+                        <span>{new Date(ph.date).toLocaleDateString("fr-FR")}</span>
                         <span>{ph.takenBy}</span>
                       </div>
                     </div>
@@ -891,14 +1059,14 @@ export default function DossierDetail({
 
                 <div className="flex items-center gap-2">
                   <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white font-bold ${
-                    dossier.ordresReparation.every(r=>r.status==="termine") ? "bg-green-500" : "bg-blue-500"
+                    dossier.ordresReparation.every(isRepairOrderDone) ? "bg-green-500" : "bg-blue-500"
                   }`}>
                     ✓
                   </span>
                   <span className="font-semibold text-slate-700 dark:text-neutral-400">
                     Tous les ordres de réparation d'origine validés : 
                     <strong className="text-slate-900 dark:text-white ml-1">
-                      {dossier.ordresReparation.every(r=>r.status==="termine") ? "OUI (100% terminés)" : "NON (Certaines tâches suspendues ou en cours)"}
+                      {dossier.ordresReparation.every(isRepairOrderDone) ? "OUI (100% terminés)" : "NON (Certaines tâches suspendues ou en cours)"}
                     </strong>
                   </span>
                 </div>

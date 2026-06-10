@@ -4,8 +4,9 @@
  */
 
 import React, { useState } from "react";
-import { DossierSAV, DossierPriority, InterventionType } from "../types";
-import { createReceptionDossier, createRuntimeId } from "../sav-core";
+import { CameraPhoto, DossierSAV, DossierPriority, InterventionType, PHOTO_CATEGORIES, PhotoCategory } from "../types";
+import { createReceptionDossier } from "../sav-core";
+import { fileToCameraPhoto } from "../photo-utils";
 import { 
   Users, 
   Car, 
@@ -62,11 +63,9 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
   const [objets, setObjets] = useState<string[]>(["Gilet jaune & triangle"]);
   const [tempObjet, setTempObjet] = useState("");
 
-  // Simulated photo list
-  const [photosPre, setPhotosPre] = useState<{ id: string; url: string; title: string; date: string }[]>([
-    { id: "p1", url: "https://images.unsplash.com/photo-1617788138017-80ad40651399?w=400&auto=format&fit=crop&q=60", title: "Vue Avant Gauche", date: "2026-06-09" }
-  ]);
+  const [photosPre, setPhotosPre] = useState<CameraPhoto[]>([]);
   const [photoTitle, setPhotoTitle] = useState("");
+  const [photoCategory, setPhotoCategory] = useState<PhotoCategory>("réception avant");
 
   const handleAddObject = () => {
     if (tempObjet.trim()) {
@@ -79,20 +78,23 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
     setObjets(objets.filter((_, i) => i !== index));
   };
 
-  const handleSimulatePhoto = () => {
-    const defaultUrls = [
-      "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60",
-      "https://images.unsplash.com/photo-1617788138017-80ad40651399?w=400&auto=format&fit=crop&q=60"
-    ];
-    const pickedUrl = defaultUrls[photosPre.length % defaultUrls.length];
-    const newPhoto = {
-      id: createRuntimeId("photo_reception"),
-      url: pickedUrl,
-      title: photoTitle.trim() || `Photo État ${photosPre.length + 1}`,
-      date: new Date().toISOString().split("T")[0]
-    };
-    setPhotosPre([...photosPre, newPhoto]);
-    setPhotoTitle("");
+  const handlePhotoFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    try {
+      const currentCount = photosPre.length;
+      const nextPhotos = await Promise.all(Array.from(files).map((file, index) => (
+        fileToCameraPhoto(file, {
+          title: photoTitle.trim() || `${photoCategory} ${currentCount + index + 1}`,
+          category: photoCategory,
+          takenBy: "Conseiller Client NIMR",
+        })
+      )));
+      setPhotosPre(prev => [...prev, ...nextPhotos]);
+      setPhotoTitle("");
+    } catch {
+      alert("Impossible d'ajouter cette photo. Veuillez réessayer avec une image valide.");
+    }
   };
 
   const handleFormSubmit = () => {
@@ -508,11 +510,11 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 </div>
               </div>
 
-              {/* Right Column - Tablet camera Simulation */}
+              {/* Right Column - Tablet camera */}
               <div className="p-4 bg-zinc-50 dark:bg-neutral-950 rounded-xl border border-zinc-200 dark:border-neutral-800 space-y-3">
                 <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 uppercase block mb-1">Appareil Photo Tablette :</span>
                 
-                <div className="flex gap-2">
+                <div className="grid grid-cols-1 gap-2">
                   <input 
                     type="text" 
                     className="bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-neutral-800 rounded px-2.5 py-1 text-xs flex-1 dark:text-neutral-100 focus:outline-none" 
@@ -520,14 +522,48 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                     value={photoTitle}
                     onChange={(e) => setPhotoTitle(e.target.value)}
                   />
-                  
-                  <button 
-                    onClick={handleSimulatePhoto}
-                    className="px-3 py-1.5 bg-zinc-800 text-white rounded text-xs font-bold hover:bg-zinc-950 flex items-center gap-1.5 transition"
+
+                  <select
+                    className="bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-neutral-800 rounded px-2.5 py-1 text-xs font-bold dark:text-neutral-100 focus:outline-none"
+                    value={photoCategory}
+                    onChange={(e) => setPhotoCategory(e.target.value as PhotoCategory)}
                   >
-                    <Upload className="w-3.5 h-3.5" />
-                    Prendre
-                  </button>
+                    {PHOTO_CATEGORIES.map(category => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="px-3 py-1.5 bg-zinc-800 text-white rounded text-xs font-bold hover:bg-zinc-950 flex items-center justify-center gap-1.5 transition cursor-pointer">
+                      <Camera className="w-3.5 h-3.5" />
+                      Prendre
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          void handlePhotoFiles(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+
+                    <label className="px-3 py-1.5 bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-neutral-800 text-slate-700 dark:text-neutral-200 rounded text-xs font-bold hover:bg-zinc-50 dark:hover:bg-neutral-800 flex items-center justify-center gap-1.5 transition cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      Importer
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          void handlePhotoFiles(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 {/* Photo list rendering */}
@@ -537,6 +573,9 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                       <img src={p.url} alt={p.title} className="w-full h-16 object-cover" referrerPolicy="no-referrer" />
                       <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[9px] p-1 font-bold truncate">
                         {p.title}
+                      </div>
+                      <div className="absolute left-1 top-1 bg-white/90 text-zinc-700 text-[8px] px-1.5 py-0.5 rounded font-bold">
+                        {p.category}
                       </div>
                       <button 
                         onClick={() => setPhotosPre(photosPre.filter(ph => ph.id !== p.id))}
@@ -600,6 +639,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                   setPlainteClient("");
                   setObservationsReception("");
                   setPhotosPre([]);
+                  setPhotoCategory("réception avant");
                   setCurrentStep(1);
                 }}
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700 rounded-lg text-xs font-bold transition cursor-pointer"

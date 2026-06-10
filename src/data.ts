@@ -91,8 +91,8 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     plainteClient: "Voyant moteur allumé sur le tableau de bord + perte intermittente de puissance lors des phases d'accélération en mode électrique.",
     observationsReception: "Véhicule propre globalement, micro-rayures sur l'aile arrière gauche.",
     photosAvant: [
-      { id: "ph_1_a", url: "https://images.unsplash.com/photo-1617788138017-80ad40651399?w=400&auto=format&fit=crop&q=60", title: "Face Avant", date: "2026-06-09", takenBy: "Réceptionnaire Démo" },
-      { id: "ph_1_b", url: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60", title: "Aile AR Gauche Rayure", date: "2026-06-09", takenBy: "Réceptionnaire Démo" }
+      { id: "ph_1_a", url: "https://images.unsplash.com/photo-1617788138017-80ad40651399?w=400&auto=format&fit=crop&q=60", title: "Face Avant", date: "2026-06-09", takenBy: "Réceptionnaire Démo", category: "réception avant" },
+      { id: "ph_1_b", url: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60", title: "Aile AR Gauche Rayure", date: "2026-06-09", takenBy: "Réceptionnaire Démo", category: "défaut carrosserie" }
     ],
     niveauCarburant: 65,
     etatCarrosserie: {
@@ -109,9 +109,9 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     technicienId: "tech_01",
     zoneAtelier: AtelierZone.ELECTRICITE_DIAG,
     ordresReparation: [
-      { id: "ro_1", designation: "Diagnostic système de gestion batterie hybride (BMS)", tempsEstime: 1.5, tempsPasse: 1.5, status: "termine" },
-      { id: "ro_2", designation: "Mise à jour du logiciel calculateur de puissance", tempsEstime: 1.0, tempsPasse: 0.5, status: "en_cours" },
-      { id: "ro_3", designation: "Remplacement connecteur haute tension faisceaux secondaires", tempsEstime: 2.0, tempsPasse: 0, status: "non_commence" }
+      { id: "ro_1", designation: "Diagnostic système de gestion batterie hybride (BMS)", tempsEstime: 1.5, tempsPasse: 1.5, status: "done" },
+      { id: "ro_2", designation: "Mise à jour du logiciel calculateur de puissance", tempsEstime: 1.0, tempsPasse: 0.5, status: "in_progress" },
+      { id: "ro_3", designation: "Remplacement connecteur haute tension faisceaux secondaires", tempsEstime: 2.0, tempsPasse: 0, status: "pending" }
     ],
     complements: [
       {
@@ -175,7 +175,7 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     plainteClient: "Premier entretien systématique des 10 000 km + bruit de sifflement d'air aérodynamique léger côté conducteur au-dessus de 90 km/h.",
     observationsReception: "Parfait état. Pas d'anomalie carrosserie.",
     photosAvant: [
-      { id: "ph_2_a", url: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60", title: "Profil Droit", date: "2026-06-09", takenBy: "Réceptionnaire Démo" }
+      { id: "ph_2_a", url: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60", title: "Profil Droit", date: "2026-06-09", takenBy: "Réceptionnaire Démo", category: "côté droit" }
     ],
     niveauCarburant: 85,
     etatCarrosserie: {
@@ -192,9 +192,9 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     technicienId: "tech_03",
     zoneAtelier: AtelierZone.LAVAGE_FINITION,
     ordresReparation: [
-      { id: "ro_4", designation: "Vidange d'huile moteur + filtre à huile + filtre habitacle", tempsEstime: 0.8, tempsPasse: 0.8, status: "termine" },
-      { id: "ro_5", designation: "Contrôle des 30 points critiques & mise à niveau liquides", tempsEstime: 0.5, tempsPasse: 0.6, status: "termine" },
-      { id: "ro_6", designation: "Vérification des joints de portières (problème bruit aérodynamique)", tempsEstime: 0.5, tempsPasse: 0.5, status: "termine" }
+      { id: "ro_4", designation: "Vidange d'huile moteur + filtre à huile + filtre habitacle", tempsEstime: 0.8, tempsPasse: 0.8, status: "done" },
+      { id: "ro_5", designation: "Contrôle des 30 points critiques & mise à niveau liquides", tempsEstime: 0.5, tempsPasse: 0.6, status: "done" },
+      { id: "ro_6", designation: "Vérification des joints de portières (problème bruit aérodynamique)", tempsEstime: 0.5, tempsPasse: 0.5, status: "done" }
     ],
     complements: [],
     accords: [],
@@ -240,7 +240,7 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     plainteClient: "Choc arrière droit suite à collision sur rond-point. Bouclier cassé, capteurs d'aide au stationnement désactivés, aile enfoncée, coffre difficile à fermer.",
     observationsReception: "Bouclier AR détruit en partie gauche, tôle de passage de roue enfoncée.",
     photosAvant: [
-      { id: "ph_3_a", url: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60", title: "Choc Arrière Droit", date: "2026-06-08", takenBy: "Réceptionnaire Démo" }
+      { id: "ph_3_a", url: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60", title: "Choc Arrière Droit", date: "2026-06-08", takenBy: "Réceptionnaire Démo", category: "défaut carrosserie" }
     ],
     niveauCarburant: 40,
     etatCarrosserie: {
@@ -255,9 +255,9 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     dateSouhaiteeLivraison: "2026-06-18T12:00:00Z",
     statut: DossierStatus.EN_ATTENTE_ACCORD,
     ordresReparation: [
-      { id: "ro_7", designation: "Démontage pare-choc AR et pare-boue pour chiffrage expert", tempsEstime: 1.5, tempsPasse: 1.5, status: "termine" },
-      { id: "ro_8", designation: "Mise sur marbre pour redressage de traverse arrière", tempsEstime: 4.0, tempsPasse: 0, status: "non_commence" },
-      { id: "ro_9", designation: "Peinture complète bouclier AR et flanc droit", tempsEstime: 3.5, tempsPasse: 0, status: "non_commence" }
+      { id: "ro_7", designation: "Démontage pare-choc AR et pare-boue pour chiffrage expert", tempsEstime: 1.5, tempsPasse: 1.5, status: "done" },
+      { id: "ro_8", designation: "Mise sur marbre pour redressage de traverse arrière", tempsEstime: 4.0, tempsPasse: 0, status: "pending" },
+      { id: "ro_9", designation: "Peinture complète bouclier AR et flanc droit", tempsEstime: 3.5, tempsPasse: 0, status: "pending" }
     ],
     complements: [
       {
@@ -336,8 +336,8 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     statut: DossierStatus.BLOQUE,
     bloqueRaison: "Bornes d'essai AC de l'atelier occupées / Attente outillage diagnostic spécifique chargeur embarqué (OBC).",
     ordresReparation: [
-      { id: "ro_10", designation: "Lecture mémoire défaut de charge et télésurveillance", tempsEstime: 1.0, tempsPasse: 0.5, status: "suspendu" },
-      { id: "ro_11", designation: "Contrôle impédance de ligne & relais de sécurité OBC", tempsEstime: 2.0, tempsPasse: 0, status: "non_commence" }
+      { id: "ro_10", designation: "Lecture mémoire défaut de charge et télésurveillance", tempsEstime: 1.0, tempsPasse: 0.5, status: "blocked" },
+      { id: "ro_11", designation: "Contrôle impédance de ligne & relais de sécurité OBC", tempsEstime: 2.0, tempsPasse: 0, status: "pending" }
     ],
     complements: [],
     accords: [],
@@ -396,9 +396,9 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     technicienId: "tech_01",
     zoneAtelier: AtelierZone.CONTROLE_QUALITE,
     ordresReparation: [
-      { id: "ro_12", designation: "Contrôle étanchéité circuit de clim (R134a)", tempsEstime: 1.0, tempsPasse: 1.0, status: "termine" },
-      { id: "ro_13", designation: "Remplacement condenseur de clim fuyard sous garantie constructeur", tempsEstime: 2.5, tempsPasse: 2.3, status: "termine" },
-      { id: "ro_14", designation: "Recharge de gaz clim et contrôle de température différentielle", tempsEstime: 1.0, tempsPasse: 1.0, status: "termine" }
+      { id: "ro_12", designation: "Contrôle étanchéité circuit de clim (R134a)", tempsEstime: 1.0, tempsPasse: 1.0, status: "done" },
+      { id: "ro_13", designation: "Remplacement condenseur de clim fuyard sous garantie constructeur", tempsEstime: 2.5, tempsPasse: 2.3, status: "done" },
+      { id: "ro_14", designation: "Recharge de gaz clim et contrôle de température différentielle", tempsEstime: 1.0, tempsPasse: 1.0, status: "done" }
     ],
     complements: [],
     accords: [

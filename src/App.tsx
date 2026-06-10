@@ -28,6 +28,7 @@ import {
   isDossierSAV,
   isReclamationClient,
   isTechnicienResource,
+  normalizeDossierForRuntime,
   parseStoredArray,
   validateBackupPayload
 } from "./sav-core";
@@ -143,7 +144,7 @@ export default function App() {
 
   // Load initial states or restore from local storage
   useEffect(() => {
-    setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, INITIAL_DOSSIERS, isDossierSAV));
+    setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, INITIAL_DOSSIERS, isDossierSAV).map(normalizeDossierForRuntime));
     setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, INITIAL_RECLAMATIONS, isReclamationClient));
     setTechList(loadStoredArray(STORAGE_KEYS.techs, MOCK_TECHNICIENS, isTechnicienResource));
     setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, INITIAL_ACTIVITE_LOGS, isActiviteLog));
@@ -256,8 +257,9 @@ export default function App() {
           }
 
           if (validation.data.dossiers) {
-            setDossiers(validation.data.dossiers);
-            writeLocalStorageJSON(STORAGE_KEYS.dossiers, validation.data.dossiers);
+            const normalizedDossiers = validation.data.dossiers.map(normalizeDossierForRuntime);
+            setDossiers(normalizedDossiers);
+            writeLocalStorageJSON(STORAGE_KEYS.dossiers, normalizedDossiers);
           }
           if (validation.data.reclamations) {
             setReclamations(validation.data.reclamations);
@@ -460,6 +462,7 @@ export default function App() {
             /* Open detailed view of client/vehicle */
             <DossierDetail 
               dossier={selectedDossier}
+              dossiers={dossiers}
               userRole={activeRole}
               onBack={() => setSelectedDossierId(null)}
               onUpdateDossier={handleUpdateDossier}
@@ -596,6 +599,7 @@ export default function App() {
                   techniciens={techList}
                   dossiers={dossiers}
                   onSelectDossier={(id) => setSelectedDossierId(id)}
+                  onUpdateDossier={handleUpdateDossier}
                 />
               )}
 

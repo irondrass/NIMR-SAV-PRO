@@ -4,8 +4,17 @@
  */
 
 import React, { useState } from "react";
-import { DossierSAV, DossierStatus, TechnicienResource } from "../types";
-import { createRuntimeId } from "../sav-core";
+import { DossierSAV, DossierStatus, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource } from "../types";
+import {
+  addPhotoToDossier,
+  blockRepairOrder,
+  finishRepairOrder,
+  getRepairOrderStatusLabel,
+  normalizeRepairOrderStatus,
+  pauseRepairOrder,
+  startRepairOrder
+} from "../sav-core";
+import { fileToCameraPhoto } from "../photo-utils";
 import { 
   Play, 
   Pause, 
@@ -35,6 +44,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
   const [selectedTechId, setSelectedTechId] = useState<string>("tech_01");
   const [tempNote, setTempNote] = useState("");
   const [tempPhotoTitle, setTempPhotoTitle] = useState("");
+  const [tempPhotoCategory, setTempPhotoCategory] = useState<PhotoCategory>("autre");
 
   const activeTech = techniciens.find(t => t.id === selectedTechId);
 
@@ -44,27 +54,6 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
     d.statut !== DossierStatus.LIVRE && 
     d.statut !== DossierStatus.CLOTURE
   );
-
-  const handleUpdateTaskStatus = (dossierId: string, nextStatut: DossierStatus, extraArgs?: Partial<DossierSAV>) => {
-    const original = dossiers.find(d => d.id === dossierId);
-    if (!original) return;
-
-    const updated: DossierSAV = {
-      ...original,
-      statut: nextStatut,
-      dateDernierStatut: new Date().toISOString(),
-      ...extraArgs
-    };
-
-    // Auto-update action points
-    if (nextStatut === DossierStatus.BLOQUE) {
-      updated.prochaineActionRecommended = "Contacter le chef d'atelier ou attendre livraison de pièces détachées";
-    } else if (nextStatut === DossierStatus.EN_TRAVAUX) {
-      updated.prochaineActionRecommended = "Continuer les essais techniques et réparations de l'ordre de travaux";
-    }
-
-    onUpdateDossier(updated);
-  };
 
   const handleAddNoteLog = (dossierId: string) => {
     if (!tempNote.trim()) return;
@@ -84,31 +73,44 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
     alert("Note technique ajoutée au dossier avec succès !");
   };
 
-  const handleAddPhotoLog = (dossierId: string) => {
-    if (!tempPhotoTitle.trim()) return;
+  const handleRepairOrderAction = (dossierId: string, lineId: string, action: "start" | "pause" | "block" | "finish") => {
+    const reason = action === "block" ? prompt("Raison du blocage technique :")?.trim() : "";
+    if (action === "block" && !reason) return;
+
+    const result =
+      action === "start" ? startRepairOrder(dossiers, dossierId, lineId) :
+      action === "pause" ? pauseRepairOrder(dossiers, dossierId, lineId) :
+      action === "block" ? blockRepairOrder(dossiers, dossierId, lineId, reason) :
+      finishRepairOrder(dossiers, dossierId, lineId);
+
+    if (result.ok === false) {
+      alert(result.error);
+      return;
+    }
+    onUpdateDossier(result.dossier);
+  };
+
+  const handleAddPhotoFiles = async (dossierId: string, files: FileList | null) => {
+    if (!files || files.length === 0) return;
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
 
-    const mockPhotoArray = [
-      "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&auto=format&fit=crop&q=60",
-      "https://images.unsplash.com/photo-1617788138017-80ad40651399?w=400&auto=format&fit=crop&q=60"
-    ];
-    const newPh = {
-      id: createRuntimeId("photo_tech"),
-      url: mockPhotoArray[original.photosAvant.length % mockPhotoArray.length],
-      title: tempPhotoTitle.trim(),
-      date: new Date().toISOString().split("T")[0],
-      takenBy: activeTech?.nom || "Technicien"
-    };
-
-    const updated: DossierSAV = {
-      ...original,
-      photosAvant: [...original.photosAvant, newPh],
-      dateDernierStatut: new Date().toISOString()
-    };
-    onUpdateDossier(updated);
-    setTempPhotoTitle("");
-    alert("Photo de diagnostic ajoutée au dossier !");
+    try {
+      const currentCount = original.photosAvant.length;
+      const photos = await Promise.all(Array.from(files).map((file, index) => (
+        fileToCameraPhoto(file, {
+          title: tempPhotoTitle.trim() || `${tempPhotoCategory} ${currentCount + index + 1}`,
+          category: tempPhotoCategory,
+          takenBy: activeTech?.nom || "Technicien",
+        })
+      )));
+      const updated = photos.reduce((current, photo) => addPhotoToDossier(current, photo), original);
+      onUpdateDossier(updated);
+      setTempPhotoTitle("");
+      alert("Photo de diagnostic ajoutée au dossier !");
+    } catch {
+      alert("Impossible d'ajouter cette photo de diagnostic.");
+    }
   };
 
   return (
@@ -129,7 +131,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         <div>
           <label className="block text-[10px] uppercase font-bold text-slate-400 pb-1">Choisir Compagnon (Simulateur d'Accès) :</label>
           <select
-            className="w-full p-2 bg-slate-800 bg-slate-800 text-white border-2 border-slate-700 rounded font-bold text-xs"
+            className="w-full p-2 bg-slate-800 text-white border-2 border-slate-700 rounded font-bold text-xs"
             value={selectedTechId}
             onChange={(e) => setSelectedTechId(e.target.value)}
           >
@@ -156,9 +158,6 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         ) : (
           <div className="space-y-4 text-xs font-semibold">
             {techTasks.map(task => {
-              const isBlocked = task.statut === DossierStatus.BLOQUE;
-              const isRunning = task.statut === DossierStatus.EN_TRAVAUX;
-
               return (
                 <div key={task.id} className="bg-white dark:bg-neutral-900 border rounded-2xl shadow-sm overflow-hidden">
                   
@@ -197,52 +196,91 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
 
                     {/* Interactive controls */}
                     <div className="p-3 bg-blue-50/10 dark:bg-blue-950/25 border border-blue-100/40 rounded-lg space-y-2.5">
-                      <span className="text-[10px] text-blue-800 dark:text-blue-400 uppercase tracking-widest block font-bold font-display">Piloter mon intervention :</span>
-                      
-                      <div className="flex gap-2">
-                        {!isRunning ? (
-                          <button 
-                            onClick={() => handleUpdateTaskStatus(task.id, DossierStatus.EN_TRAVAUX)}
-                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded flex items-center justify-center gap-1 text-[11px] transition cursor-pointer"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                            Démarrer travaux
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => handleUpdateTaskStatus(task.id, DossierStatus.TRAVAUX_PLANIFIES)}
-                            className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded flex items-center justify-center gap-1 text-[11px] transition cursor-pointer"
-                          >
-                            <Pause className="w-3.5 h-3.5" />
-                            Mettre en Pause
-                          </button>
-                        )}
+                      <span className="text-[10px] text-blue-800 dark:text-blue-400 uppercase tracking-widest block font-bold font-display">Piloter mes tâches :</span>
+                      <div className="space-y-2">
+                        {task.ordresReparation.map(line => {
+                          const status = normalizeRepairOrderStatus(line.status);
+                          const activeLineInSameDossier = task.ordresReparation.find(current =>
+                            current.id !== line.id && normalizeRepairOrderStatus(current.status) === "in_progress"
+                          );
+                          const activeDossierForTechnician = dossiers.find(current =>
+                            current.id !== task.id &&
+                            current.technicienId === selectedTechId &&
+                            current.ordresReparation.some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
+                          );
+                          const startBlockedMessage = activeLineInSameDossier
+                            ? "Une tâche est déjà en cours pour ce dossier."
+                            : activeDossierForTechnician
+                              ? "Ce technicien a déjà une tâche en cours."
+                              : "";
+                          const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
 
-                        <button 
-                          onClick={() => {
-                            const cause = prompt("Raison du blocage technique :");
-                            if (cause) {
-                              handleUpdateTaskStatus(task.id, DossierStatus.BLOQUE, { bloqueRaison: cause });
-                            }
-                          }}
-                          className="py-2 px-3 bg-red-600 text-white bg-red-600 rounded font-bold hover:bg-red-700 text-[11px] transition"
-                        >
-                          Bloquer
-                        </button>
-
-                        <button 
-                          onClick={() => handleUpdateTaskStatus(task.id, DossierStatus.CONTROLE_QUALITE)}
-                          className="py-2 px-3 bg-green-600 text-white rounded font-bold hover:bg-green-700 text-[11px] transition"
-                        >
-                          Terminer travaux
-                        </button>
+                          return (
+                            <div key={line.id} className="p-2 bg-white dark:bg-neutral-900 border border-blue-100 dark:border-blue-900 rounded space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <span className="font-extrabold text-slate-800 dark:text-neutral-200 block">{line.designation}</span>
+                                  <span className="text-[10px] text-zinc-400 font-mono">{line.tempsPasse}H / {line.tempsEstime}H</span>
+                                </div>
+                                <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300">
+                                  {getRepairOrderStatusLabel(status)}
+                                </span>
+                              </div>
+                              {startBlockedMessage && status !== "done" && status !== "in_progress" && (
+                                <p className="text-[10px] text-rose-600 font-bold">{startBlockedMessage}</p>
+                              )}
+                              {status === "done" ? (
+                                <div className="py-1 text-green-700 dark:text-green-400 font-black text-[10px] uppercase flex items-center gap-1">
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  Statut terminé
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-1">
+                                  {status !== "in_progress" && (
+                                    <button
+                                      disabled={!canStartLine}
+                                      onClick={() => handleRepairOrderAction(task.id, line.id, "start")}
+                                      className="flex-1 min-w-24 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded flex items-center justify-center gap-1 text-[10px] transition cursor-pointer"
+                                    >
+                                      <Play className="w-3.5 h-3.5" />
+                                      {status === "pending" ? "Démarrer" : "Reprendre"}
+                                    </button>
+                                  )}
+                                  {status === "in_progress" && (
+                                    <>
+                                      <button
+                                        onClick={() => handleRepairOrderAction(task.id, line.id, "pause")}
+                                        className="flex-1 min-w-20 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded flex items-center justify-center gap-1 text-[10px] transition cursor-pointer"
+                                      >
+                                        <Pause className="w-3.5 h-3.5" />
+                                        Pause
+                                      </button>
+                                      <button
+                                        onClick={() => handleRepairOrderAction(task.id, line.id, "block")}
+                                        className="py-1.5 px-2.5 bg-red-600 text-white rounded font-bold hover:bg-red-700 text-[10px] transition"
+                                      >
+                                        Bloquer
+                                      </button>
+                                      <button
+                                        onClick={() => handleRepairOrderAction(task.id, line.id, "finish")}
+                                        className="py-1.5 px-2.5 bg-green-600 text-white rounded font-bold hover:bg-green-700 text-[10px] transition"
+                                      >
+                                        Terminer
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    {/* Quick photo upload simulation */}
+                    {/* Quick photo upload */}
                     <div className="pt-2 border-t border-slate-200 space-y-2 text-xs">
                       <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Preuve Photo d'intervention :</span>
-                      <div className="flex gap-2">
+                      <div className="grid grid-cols-1 gap-2">
                         <input 
                           type="text"
                           className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border rounded text-[11px] flex-1 font-semibold dark:text-neutral-100 placeholder-zinc-400"
@@ -250,12 +288,43 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                           value={tempPhotoTitle}
                           onChange={(e) => setTempPhotoTitle(e.target.value)}
                         />
-                        <button 
-                          onClick={() => handleAddPhotoLog(task.id)}
-                          className="px-3 py-1 bg-zinc-800 text-white font-bold rounded text-[11px] hover:bg-zinc-950"
+                        <select
+                          className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border rounded text-[11px] font-bold dark:text-neutral-100"
+                          value={tempPhotoCategory}
+                          onChange={(e) => setTempPhotoCategory(e.target.value as PhotoCategory)}
                         >
-                          Prendre photo
-                        </button>
+                          {PHOTO_CATEGORIES.map(category => (
+                            <option key={category} value={category}>{category}</option>
+                          ))}
+                        </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="px-3 py-1.5 bg-zinc-800 text-white font-bold rounded text-[11px] hover:bg-zinc-950 cursor-pointer text-center">
+                            Prendre
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              className="hidden"
+                              onChange={(e) => {
+                                void handleAddPhotoFiles(task.id, e.target.files);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                          <label className="px-3 py-1.5 bg-white dark:bg-neutral-900 border text-slate-700 dark:text-neutral-200 font-bold rounded text-[11px] hover:bg-zinc-50 dark:hover:bg-neutral-800 cursor-pointer text-center">
+                            Galerie
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                              onChange={(e) => {
+                                void handleAddPhotoFiles(task.id, e.target.files);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                        </div>
                       </div>
                     </div>
 

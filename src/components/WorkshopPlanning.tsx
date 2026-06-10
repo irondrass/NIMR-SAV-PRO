@@ -4,23 +4,75 @@
  */
 
 import React, { useState } from "react";
-import { TechnicienResource, DossierSAV, DossierStatus } from "../types";
-import { Calendar, UserCheck, AlertTriangle, Clock, Hammer, Search, SlidersHorizontal, Settings } from "lucide-react";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay } from "../types";
+import { normalizeRepairOrderStatus, suggestWorkshopSlot, WorkshopSlotSuggestion } from "../sav-core";
+import { Calendar, UserCheck, AlertTriangle, Clock, Hammer, Search, SlidersHorizontal, Settings, Sparkles, Check } from "lucide-react";
 import { LicencePlate, StatusBadge } from "./UIParts";
 
 interface WorkshopPlanningProps {
   techniciens: TechnicienResource[];
   dossiers: DossierSAV[];
   onSelectDossier: (id: string) => void;
+  onUpdateDossier: (updated: DossierSAV) => void;
 }
 
-export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossier }: WorkshopPlanningProps) {
+const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
+  { id: "bay_fast_01", name: "Pont rapide 1", zone: AtelierZone.MECANIQUE_RAPIDE },
+  { id: "bay_mech_01", name: "Pont mécanique 1", zone: AtelierZone.GRANDS_TRAVAUX },
+  { id: "bay_diag_01", name: "Pont diagnostic 1", zone: AtelierZone.ELECTRICITE_DIAG },
+  { id: "bay_body_01", name: "Pont carrosserie 1", zone: AtelierZone.CARROSSERIE },
+  { id: "bay_general_01", name: "Pont polyvalent" },
+];
+
+export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossier, onUpdateDossier }: WorkshopPlanningProps) {
   const [filterZone, setFilterZone] = useState<string>("Toutes");
+  const [suggestionTargetId, setSuggestionTargetId] = useState("");
+  const [suggestion, setSuggestion] = useState<WorkshopSlotSuggestion | null>(null);
+  const [suggestionError, setSuggestionError] = useState("");
 
   // Filter technicians
   const filteredTechs = filterZone === "Toutes" 
     ? techniciens 
     : techniciens.filter(t => t.zoneAffectee === filterZone);
+  const targetDossiers = dossiers.filter(dossier =>
+    dossier.statut !== DossierStatus.LIVRE &&
+    dossier.statut !== DossierStatus.CLOTURE &&
+    !dossier.ordresReparation.every(line => normalizeRepairOrderStatus(line.status) === "done")
+  );
+  const selectedTargetId = suggestionTargetId || targetDossiers[0]?.id || "";
+  const selectedTarget = targetDossiers.find(dossier => dossier.id === selectedTargetId);
+
+  const handleSuggestSlot = () => {
+    if (!selectedTarget) {
+      setSuggestionError("Aucun dossier actif disponible pour planification.");
+      setSuggestion(null);
+      return;
+    }
+
+    const estimatedHours = selectedTarget.ordresReparation.reduce((total, line) => (
+      normalizeRepairOrderStatus(line.status) === "done" ? total : total + line.tempsEstime
+    ), 0) || 1;
+    setSuggestion(suggestWorkshopSlot({
+      dossiers,
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+      estimatedHours,
+      desiredDate: new Date(),
+    }));
+    setSuggestionError("");
+  };
+
+  const handleApplySuggestion = () => {
+    if (!selectedTarget || !suggestion) return;
+    onUpdateDossier({
+      ...selectedTarget,
+      technicienId: suggestion.technicianId,
+      workshopBayId: suggestion.bayId,
+      statut: DossierStatus.TRAVAUX_PLANIFIES,
+      dateDernierStatut: new Date().toISOString(),
+      prochaineActionRecommended: `Planifier sur ${suggestion.bayName} avec ${suggestion.technicianName} de ${new Date(suggestion.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} à ${new Date(suggestion.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -52,6 +104,72 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         </div>
       </div>
 
+      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+          <div className="flex-1 space-y-1">
+            <span className="text-[10px] uppercase tracking-widest font-black text-slate-400">Suggestion automatique atelier</span>
+            <select
+              className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded text-xs font-bold text-slate-800 dark:text-neutral-300"
+              value={selectedTargetId}
+              onChange={(e) => {
+                setSuggestionTargetId(e.target.value);
+                setSuggestion(null);
+                setSuggestionError("");
+              }}
+            >
+              {targetDossiers.map(dossier => (
+                <option key={dossier.id} value={dossier.id}>
+                  {dossier.id} - {dossier.vehiculeMarque} {dossier.vehiculeModele}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleSuggestSlot}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            Suggérer meilleur créneau
+          </button>
+        </div>
+
+        {suggestionError && (
+          <p className="text-xs font-bold text-rose-600">{suggestionError}</p>
+        )}
+
+        {suggestion && (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 bg-blue-50/40 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900 rounded-lg text-xs">
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Technicien proposé</span>
+              <strong className="text-slate-800 dark:text-neutral-100">{suggestion.technicianName}</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Pont proposé</span>
+              <strong className="text-slate-800 dark:text-neutral-100">{suggestion.bayName}</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Heure début</span>
+              <strong className="text-slate-800 dark:text-neutral-100">{new Date(suggestion.startTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Heure fin</span>
+              <strong className="text-slate-800 dark:text-neutral-100">{new Date(suggestion.endTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</strong>
+            </div>
+            <div className="space-y-2">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Raison</span>
+              <p className="text-slate-600 dark:text-neutral-300 font-semibold">{suggestion.reason}</p>
+              <button
+                onClick={handleApplySuggestion}
+                className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Appliquer la suggestion
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Grid of technicans and Gantt representations */}
       <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 bg-slate-50 dark:bg-neutral-950 border-b border-slate-200 dark:border-neutral-800 flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -66,7 +184,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
             
             // Calculate active hours
             const totalHoursEst = assignedDossiers.reduce((acc, current) => {
-              const activeRO = current.ordresReparation.filter(r => r.status !== "termine");
+              const activeRO = current.ordresReparation.filter(r => normalizeRepairOrderStatus(r.status) !== "done");
               return acc + activeRO.reduce((sum, line) => sum + line.tempsEstime, 0);
             }, 0);
 

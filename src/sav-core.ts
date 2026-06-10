@@ -13,12 +13,21 @@ import {
   DossierSAV,
   DossierStatus,
   InterventionType,
+  PHOTO_CATEGORIES,
+  PhotoCategory,
   ReclammationClient,
+  RepairOrderLine,
+  RepairOrderStatus,
   TechnicienResource,
   UserRole,
+  WorkshopBay,
 } from "./types";
 
 const DELIVERY_OFFSET_MS = 48 * 3600 * 1000;
+const WORKDAY_START_HOUR = 8;
+const LUNCH_START_HOUR = 12;
+const LUNCH_END_HOUR = 13;
+const WORKDAY_END_HOUR = 17;
 let runtimeFallbackCounter = 0;
 
 type RecordLike = Record<string, unknown>;
@@ -35,7 +44,16 @@ export interface ReceptionPhotoInput {
   url: string;
   title: string;
   date: string;
+  category?: PhotoCategory;
+  takenBy?: string;
+  mimeType?: string;
+  sizeBytes?: number;
 }
+
+export type DossierPhotoInput = Omit<CameraPhoto, "takenBy" | "category"> & {
+  takenBy?: string;
+  category?: PhotoCategory;
+};
 
 export interface ReceptionDossierInput {
   clientNom: string;
@@ -73,6 +91,30 @@ export interface ReclamationInput {
   responsable: string;
   actionCorrective: string;
 }
+
+export interface WorkshopSlotSuggestionInput {
+  dossiers: DossierSAV[];
+  technicians: TechnicienResource[];
+  workshopBays: WorkshopBay[];
+  estimatedHours: number;
+  desiredDate: Date | string;
+}
+
+export interface WorkshopSlotSuggestion {
+  technicianId: string;
+  technicianName: string;
+  bayId: string;
+  bayName: string;
+  startTime: string;
+  endTime: string;
+  reason: string;
+  technicianLoad: number;
+  bayAvailability: string;
+}
+
+export type TaskMutationResult =
+  | { ok: true; dossiers: DossierSAV[]; dossier: DossierSAV; line: RepairOrderLine }
+  | { ok: false; error: string };
 
 export function createRuntimeId(prefix: string): string {
   if (globalThis.crypto?.randomUUID) {
@@ -123,7 +165,9 @@ export function createReceptionDossier(
     observationsReception: input.observationsReception.trim() || "Aucune observation particulière",
     photosAvant: input.photosAvant.map((photo): CameraPhoto => ({
       ...photo,
-      takenBy: "Conseiller Client NIMR",
+      title: photo.title.trim() || "Photo réception",
+      category: normalizePhotoCategory(photo.category),
+      takenBy: photo.takenBy || "Conseiller Client NIMR",
     })),
     niveauCarburant: fuelLevel,
     etatCarrosserie: input.etatCarrosserie,
@@ -137,14 +181,14 @@ export function createReceptionDossier(
         designation: `Opération initiale: ${input.typeDossier}`,
         tempsEstime: 2.5,
         tempsPasse: 0,
-        status: "non_commence",
+        status: "pending",
       },
       {
         id: createRuntimeId("ro_auto"),
         designation: "Contrôle global NIMR Premium (28 points de contrôle)",
         tempsEstime: 1.0,
         tempsPasse: 0,
-        status: "non_commence",
+        status: "pending",
       },
     ],
     complements: [],
@@ -154,6 +198,7 @@ export function createReceptionDossier(
     prochaineActionRecommended: "Affecter à un technicien selon disponibilité atelier",
     dateDernierStatut: receptionDate,
     avancementGlobal: 10,
+    historiqueLogs: [`${receptionDate} - Dossier créé en réception.`],
   };
 }
 
@@ -187,6 +232,283 @@ export function assignTechnicianToDossier(dossier: DossierSAV, techId: string, n
     statut: DossierStatus.EN_TRAVAUX,
     dateDernierStatut: now.toISOString(),
     prochaineActionRecommended: "Suivre la réalisation des ordres de travaux de réparation",
+  };
+}
+
+export function normalizeRepairOrderStatus(status: string): RepairOrderStatus {
+  const legacyStatuses: Record<string, RepairOrderStatus> = {
+    non_commence: "pending",
+    en_cours: "in_progress",
+    suspendu: "paused",
+    termine: "done",
+  };
+
+  if (legacyStatuses[status]) return legacyStatuses[status];
+  if (["pending", "in_progress", "paused", "blocked", "done", "reopened"].includes(status)) {
+    return status as RepairOrderStatus;
+  }
+  return "pending";
+}
+
+export function getRepairOrderStatusLabel(status: string): string {
+  const labels: Record<RepairOrderStatus, string> = {
+    pending: "à faire",
+    in_progress: "en cours",
+    paused: "suspendue",
+    blocked: "bloquée",
+    done: "terminée",
+    reopened: "réouverte",
+  };
+  return labels[normalizeRepairOrderStatus(status)];
+}
+
+export function isRepairOrderDone(line: RepairOrderLine): boolean {
+  return normalizeRepairOrderStatus(line.status) === "done";
+}
+
+export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
+  return {
+    ...dossier,
+    photosAvant: dossier.photosAvant.map(photo => ({
+      ...photo,
+      title: photo.title || "Photo dossier",
+      date: photo.date || new Date().toISOString(),
+      takenBy: photo.takenBy || "Utilisateur NIMR",
+      category: normalizePhotoCategory(photo.category),
+    })),
+    ordresReparation: dossier.ordresReparation.map(line => ({
+      ...line,
+      status: normalizeRepairOrderStatus(line.status),
+      history: line.history ?? [],
+    })),
+    historiqueLogs: dossier.historiqueLogs ?? [],
+  };
+}
+
+export function addPhotoToDossier(dossier: DossierSAV, photo: DossierPhotoInput, now = new Date()): DossierSAV {
+  const normalized = normalizeDossierForRuntime(dossier);
+  const timestamp = now.toISOString();
+  const newPhoto: CameraPhoto = {
+    ...photo,
+    title: photo.title.trim() || "Photo dossier",
+    date: photo.date || timestamp,
+    takenBy: photo.takenBy || "Utilisateur NIMR",
+    category: normalizePhotoCategory(photo.category),
+  };
+
+  return {
+    ...normalized,
+    photosAvant: [...normalized.photosAvant, newPhoto],
+    dateDernierStatut: timestamp,
+    historiqueLogs: [`${timestamp} - Photo ajoutée: ${newPhoto.title} (${newPhoto.category}).`, ...normalized.historiqueLogs],
+  };
+}
+
+export function removePhotoFromDossier(dossier: DossierSAV, photoId: string, now = new Date()): DossierSAV {
+  const normalized = normalizeDossierForRuntime(dossier);
+  const removedPhoto = normalized.photosAvant.find(photo => photo.id === photoId);
+  const timestamp = now.toISOString();
+
+  return {
+    ...normalized,
+    photosAvant: normalized.photosAvant.filter(photo => photo.id !== photoId),
+    dateDernierStatut: timestamp,
+    historiqueLogs: removedPhoto
+      ? [`${timestamp} - Photo supprimée: ${removedPhoto.title}.`, ...normalized.historiqueLogs]
+      : normalized.historiqueLogs,
+  };
+}
+
+export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, lineId: string, now = new Date()): TaskMutationResult {
+  return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ dossier, line, normalizedDossiers }) => {
+    const status = normalizeRepairOrderStatus(line.status);
+    if (status === "done") {
+      return { ok: false, error: "Une tâche terminée doit être réouverte avant reprise." };
+    }
+
+    const activeLineInDossier = dossier.ordresReparation.find(
+      current => current.id !== lineId && normalizeRepairOrderStatus(current.status) === "in_progress"
+    );
+    if (activeLineInDossier) {
+      return { ok: false, error: "Une tâche est déjà en cours pour ce dossier." };
+    }
+
+    if (dossier.technicienId) {
+      const activeForTechnician = normalizedDossiers.find(currentDossier =>
+        currentDossier.id !== dossierId &&
+        currentDossier.technicienId === dossier.technicienId &&
+        currentDossier.ordresReparation.some(current => normalizeRepairOrderStatus(current.status) === "in_progress")
+      );
+      if (activeForTechnician) {
+        return { ok: false, error: "Ce technicien a déjà une tâche en cours." };
+      }
+    }
+
+    return {
+      ok: true,
+      line: appendLineHistory({ ...line, status: "in_progress" }, now, "Tâche démarrée."),
+      dossierChanges: {
+        statut: DossierStatus.EN_TRAVAUX,
+        bloqueRaison: "",
+        prochaineActionRecommended: "Terminer la tâche en cours avant d'en démarrer une autre",
+      },
+    };
+  });
+}
+
+export function pauseRepairOrder(dossiers: DossierSAV[], dossierId: string, lineId: string, now = new Date()): TaskMutationResult {
+  return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
+    if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
+      return { ok: false, error: "Seule une tâche en cours peut être suspendue." };
+    }
+    return {
+      ok: true,
+      line: appendLineHistory({ ...line, status: "paused" }, now, "Tâche suspendue."),
+      dossierChanges: {
+        statut: DossierStatus.TRAVAUX_PLANIFIES,
+        prochaineActionRecommended: "Reprendre la tâche suspendue ou affecter une autre intervention",
+      },
+    };
+  });
+}
+
+export function blockRepairOrder(
+  dossiers: DossierSAV[],
+  dossierId: string,
+  lineId: string,
+  reason = "Blocage technique atelier",
+  now = new Date()
+): TaskMutationResult {
+  return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
+    if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
+      return { ok: false, error: "Seule une tâche en cours peut être bloquée." };
+    }
+    return {
+      ok: true,
+      line: appendLineHistory({ ...line, status: "blocked" }, now, `Tâche bloquée: ${reason}`),
+      dossierChanges: {
+        statut: DossierStatus.BLOQUE,
+        bloqueRaison: reason,
+        prochaineActionRecommended: `Lever le blocage atelier: ${reason}`,
+      },
+    };
+  });
+}
+
+export function finishRepairOrder(dossiers: DossierSAV[], dossierId: string, lineId: string, now = new Date()): TaskMutationResult {
+  return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ dossier, line }) => {
+    if (normalizeRepairOrderStatus(line.status) === "done") {
+      return { ok: false, error: "Cette tâche est déjà terminée." };
+    }
+    if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
+      return { ok: false, error: "Une tâche doit être en cours avant d'être terminée." };
+    }
+
+    const nextLine = appendLineHistory({ ...line, status: "done", tempsPasse: Math.max(line.tempsPasse, line.tempsEstime) }, now, "Tâche terminée.");
+    const nextLines = dossier.ordresReparation.map(current => current.id === lineId ? nextLine : current);
+    const allDone = nextLines.every(isRepairOrderDone);
+
+    return {
+      ok: true,
+      line: nextLine,
+      dossierChanges: {
+        statut: allDone ? DossierStatus.CONTROLE_QUALITE : DossierStatus.EN_TRAVAUX,
+        prochaineActionRecommended: allDone
+          ? "Lancer le contrôle qualité d'essai routier"
+          : "Continuer les ordres de réparation restants",
+      },
+    };
+  });
+}
+
+export function reopenRepairOrder(
+  dossiers: DossierSAV[],
+  dossierId: string,
+  lineId: string,
+  userRole: UserRole,
+  reason: string,
+  now = new Date()
+): TaskMutationResult {
+  return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
+    if (![UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole)) {
+      return { ok: false, error: "Seul le Directeur SAV ou le Chef Atelier peut réouvrir une tâche terminée." };
+    }
+    if (!reason.trim()) {
+      return { ok: false, error: "Le motif de réouverture est obligatoire." };
+    }
+    if (normalizeRepairOrderStatus(line.status) !== "done") {
+      return { ok: false, error: "Seule une tâche terminée peut être réouverte." };
+    }
+
+    return {
+      ok: true,
+      line: appendLineHistory({ ...line, status: "reopened", reopenedReason: reason.trim() }, now, `Tâche réouverte: ${reason.trim()}`),
+      dossierChanges: {
+        statut: DossierStatus.TRAVAUX_PLANIFIES,
+        prochaineActionRecommended: "Replanifier la tâche réouverte avant reprise",
+      },
+      dossierLog: `Réouverture de tâche ${line.designation}: ${reason.trim()}`,
+    };
+  });
+}
+
+export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): WorkshopSlotSuggestion {
+  const normalizedDossiers = input.dossiers.map(normalizeDossierForRuntime);
+  const durationHours = Math.max(0.5, Number.isFinite(input.estimatedHours) ? input.estimatedHours : 1);
+  const durationMinutes = Math.ceil(durationHours * 60);
+  const desiredDate = input.desiredDate instanceof Date ? input.desiredDate : new Date(input.desiredDate);
+  const usableTechnicians = input.technicians.filter(technician => !["absent", "formation"].includes(technician.disponibilite));
+  const technicians = usableTechnicians.length > 0 ? usableTechnicians : input.technicians;
+
+  for (let dayOffset = 0; dayOffset < 15; dayOffset += 1) {
+    const candidateDate = addCalendarDays(desiredDate, dayOffset);
+    if (!isWorkingDay(candidateDate)) continue;
+
+    const startBoundary = dayOffset === 0 ? alignToWorkingTime(candidateDate) : setTimeOnDate(candidateDate, WORKDAY_START_HOUR, 0);
+    const candidates = technicians
+      .map(technician => {
+        const load = dayOffset === 0 ? getTechnicianLoad(technician, normalizedDossiers) : getScheduledLoadForTechnician(technician.id, normalizedDossiers);
+        return { technician, load };
+      })
+      .filter(candidate => candidate.load + durationHours <= candidate.technician.capaciteJournaliere);
+
+    if (candidates.length === 0) continue;
+
+    candidates.sort((left, right) => left.load - right.load || technicians.indexOf(left.technician) - technicians.indexOf(right.technician));
+    for (const candidate of candidates) {
+      const loadStart = addWorkingMinutes(setTimeOnDate(candidateDate, WORKDAY_START_HOUR, 0), Math.round(candidate.load * 60));
+      const startTime = maxDate(loadStart, startBoundary);
+      const endTime = addWorkingMinutes(startTime, durationMinutes);
+      if (!isSameLocalDate(startTime, endTime) || endTime.getHours() > WORKDAY_END_HOUR) continue;
+
+      const bay = chooseWorkshopBay(input.workshopBays, candidate.technician.zoneAffectee);
+      return {
+        technicianId: candidate.technician.id,
+        technicianName: candidate.technician.nom,
+        bayId: bay.id,
+        bayName: bay.name,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        reason: `Technicien compatible avec ${formatHours(candidate.load)}h déjà planifiées et capacité restante suffisante.`,
+        technicianLoad: candidate.load,
+        bayAvailability: bay.zone ? `Pont compatible zone ${bay.zone}` : "Premier pont libre compatible",
+      };
+    }
+  }
+
+  const fallbackDate = setTimeOnDate(nextWorkingDay(desiredDate), WORKDAY_START_HOUR, 0);
+  const fallbackTechnician = technicians[0];
+  const fallbackBay = chooseWorkshopBay(input.workshopBays, fallbackTechnician?.zoneAffectee);
+  return {
+    technicianId: fallbackTechnician?.id ?? "tech_virtual",
+    technicianName: fallbackTechnician?.nom ?? "Technicien à affecter",
+    bayId: fallbackBay.id,
+    bayName: fallbackBay.name,
+    startTime: fallbackDate.toISOString(),
+    endTime: addWorkingMinutes(fallbackDate, durationMinutes).toISOString(),
+    reason: "Aucun créneau compatible immédiat: proposition au prochain jour ouvrable.",
+    technicianLoad: 0,
+    bayAvailability: fallbackBay.zone ? `Pont compatible zone ${fallbackBay.zone}` : "Premier pont libre compatible",
   };
 }
 
@@ -428,6 +750,179 @@ function createDeliveryProtocol(dateLivraisonPrevue: string): DeliveryProtocole 
     confirmationReceptionClient: false,
     clotureInterne: false,
   };
+}
+
+type RepairOrderMutationContext = {
+  normalizedDossiers: DossierSAV[];
+  dossier: DossierSAV;
+  line: RepairOrderLine;
+};
+
+type RepairOrderMutation =
+  | {
+      ok: true;
+      line: RepairOrderLine;
+      dossierChanges: Partial<DossierSAV>;
+      dossierLog?: string;
+    }
+  | { ok: false; error: string };
+
+function mutateRepairOrder(
+  dossiers: DossierSAV[],
+  dossierId: string,
+  lineId: string,
+  now: Date,
+  mutation: (context: RepairOrderMutationContext) => RepairOrderMutation
+): TaskMutationResult {
+  const normalizedDossiers = dossiers.map(normalizeDossierForRuntime);
+  const dossier = normalizedDossiers.find(current => current.id === dossierId);
+  if (!dossier) return { ok: false, error: "Dossier introuvable." };
+
+  const line = dossier.ordresReparation.find(current => current.id === lineId);
+  if (!line) return { ok: false, error: "Tâche atelier introuvable." };
+
+  const result = mutation({ normalizedDossiers, dossier, line });
+  if (result.ok === false) return result;
+
+  const timestamp = now.toISOString();
+  const nextLines = dossier.ordresReparation.map(current => current.id === lineId ? result.line : current);
+  const progress = calculateRepairProgress(nextLines);
+  const nextLogs = result.dossierLog
+    ? [`${timestamp} - ${result.dossierLog}`, ...(dossier.historiqueLogs ?? [])]
+    : dossier.historiqueLogs;
+
+  const nextDossier: DossierSAV = {
+    ...dossier,
+    ...result.dossierChanges,
+    ordresReparation: nextLines,
+    avancementGlobal: progress,
+    dateDernierStatut: timestamp,
+    historiqueLogs: nextLogs,
+  };
+
+  const nextDossiers = normalizedDossiers.map(current => current.id === dossierId ? nextDossier : current);
+  return { ok: true, dossiers: nextDossiers, dossier: nextDossier, line: result.line };
+}
+
+function appendLineHistory(line: RepairOrderLine, now: Date, action: string): RepairOrderLine {
+  return {
+    ...line,
+    history: [`${now.toISOString()} - ${action}`, ...(line.history ?? [])],
+  };
+}
+
+function calculateRepairProgress(lines: RepairOrderLine[]): number {
+  if (lines.length === 0) return 0;
+  const completedCount = lines.filter(isRepairOrderDone).length;
+  return Math.round((completedCount / lines.length) * 100);
+}
+
+function normalizePhotoCategory(category: unknown): PhotoCategory {
+  return typeof category === "string" && (PHOTO_CATEGORIES as readonly string[]).includes(category)
+    ? category as PhotoCategory
+    : "autre";
+}
+
+function getTechnicianLoad(technician: TechnicienResource, dossiers: DossierSAV[]): number {
+  return Math.max(technician.chargeActuelle || 0, getScheduledLoadForTechnician(technician.id, dossiers));
+}
+
+function getScheduledLoadForTechnician(technicianId: string, dossiers: DossierSAV[]): number {
+  return dossiers
+    .filter(dossier =>
+      dossier.technicienId === technicianId &&
+      dossier.statut !== DossierStatus.LIVRE &&
+      dossier.statut !== DossierStatus.CLOTURE
+    )
+    .reduce((total, dossier) => total + dossier.ordresReparation.reduce((lineTotal, line) => (
+      isRepairOrderDone(line) ? lineTotal : lineTotal + line.tempsEstime
+    ), 0), 0);
+}
+
+function chooseWorkshopBay(workshopBays: WorkshopBay[], technicianZone?: AtelierZone): WorkshopBay {
+  if (workshopBays.length === 0) return { id: "bay_virtual", name: "Pont atelier à confirmer" };
+  return workshopBays.find(bay => !bay.zone || bay.zone === technicianZone) ?? workshopBays[0];
+}
+
+function alignToWorkingTime(date: Date): Date {
+  if (!isWorkingDay(date)) return setTimeOnDate(nextWorkingDay(date), WORKDAY_START_HOUR, 0);
+
+  const aligned = new Date(date);
+  const minutes = aligned.getHours() * 60 + aligned.getMinutes();
+  const dayStart = WORKDAY_START_HOUR * 60;
+  const lunchStart = LUNCH_START_HOUR * 60;
+  const lunchEnd = LUNCH_END_HOUR * 60;
+  const dayEnd = WORKDAY_END_HOUR * 60;
+
+  if (minutes < dayStart) return setTimeOnDate(aligned, WORKDAY_START_HOUR, 0);
+  if (minutes >= lunchStart && minutes < lunchEnd) return setTimeOnDate(aligned, LUNCH_END_HOUR, 0);
+  if (minutes >= dayEnd) return setTimeOnDate(nextWorkingDay(aligned), WORKDAY_START_HOUR, 0);
+  return aligned;
+}
+
+function addWorkingMinutes(start: Date, minutes: number): Date {
+  let current = alignToWorkingTime(start);
+  let remaining = minutes;
+
+  while (remaining > 0) {
+    current = alignToWorkingTime(current);
+    const segmentEnd = current.getHours() < LUNCH_START_HOUR
+      ? setTimeOnDate(current, LUNCH_START_HOUR, 0)
+      : setTimeOnDate(current, WORKDAY_END_HOUR, 0);
+    const availableMinutes = Math.max(0, Math.round((segmentEnd.getTime() - current.getTime()) / 60000));
+
+    if (remaining <= availableMinutes) {
+      return new Date(current.getTime() + remaining * 60000);
+    }
+
+    remaining -= availableMinutes;
+    current = current.getHours() < LUNCH_START_HOUR
+      ? setTimeOnDate(current, LUNCH_END_HOUR, 0)
+      : setTimeOnDate(nextWorkingDay(current), WORKDAY_START_HOUR, 0);
+  }
+
+  return current;
+}
+
+function setTimeOnDate(date: Date, hours: number, minutes: number): Date {
+  const next = new Date(date);
+  next.setHours(hours, minutes, 0, 0);
+  return next;
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function nextWorkingDay(date: Date): Date {
+  let next = addCalendarDays(date, 1);
+  while (!isWorkingDay(next)) {
+    next = addCalendarDays(next, 1);
+  }
+  return next;
+}
+
+function isWorkingDay(date: Date): boolean {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+}
+
+function isSameLocalDate(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function maxDate(left: Date, right: Date): Date {
+  return left.getTime() > right.getTime() ? left : right;
+}
+
+function formatHours(hours: number): string {
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
 }
 
 function isRecord(value: unknown): value is RecordLike {

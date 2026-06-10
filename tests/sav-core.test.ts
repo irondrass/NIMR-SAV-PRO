@@ -5,21 +5,27 @@
 
 import assert from "node:assert/strict";
 import {
+  addPhotoToDossier,
   assignTechnicianToDossier,
   confirmDelivery,
   createBackupPayload,
   createReceptionDossier,
+  finishRepairOrder,
   isDossierSAV,
   markReadyForBilling,
   parseStoredArray,
+  removePhotoFromDossier,
+  reopenRepairOrder,
+  startRepairOrder,
   submitQualityControl,
+  suggestWorkshopSlot,
   validateBackupPayload,
 } from "../src/sav-core";
 import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-identity";
 import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TECHNICIENS } from "../src/data";
 import { canAccessTab, canChangeRole, getDefaultTabForRole, normalizeTabForRole, ROLE_TABS } from "../src/roles";
 import { LOCAL_STORAGE_PREFIX, STORAGE_KEYS } from "../src/storage-keys";
-import { DossierPriority, DossierStatus, InterventionType, UserRole } from "../src/types";
+import { DossierPriority, DossierSAV, DossierStatus, InterventionType, RepairOrderLine, TechnicienResource, UserRole, WorkshopBay } from "../src/types";
 
 const fixedNow = new Date("2026-06-09T10:00:00.000Z");
 
@@ -45,6 +51,7 @@ function createReceptionFixture(existingIds = ["NIMR-2026-001", "NIMR-2026-005"]
         url: "https://example.test/photo.jpg",
         title: "Face avant",
         date: "2026-06-09",
+        category: "réception avant",
       },
     ],
     niveauCarburant: 140,
@@ -71,8 +78,10 @@ function testReceptionCreation() {
   assert.equal(dossier.dateReception, fixedNow.toISOString());
   assert.equal(dossier.dateSouhaiteeLivraison, "2026-06-11T10:00:00.000Z");
   assert.equal(dossier.photosAvant[0].takenBy, "Conseiller Client NIMR");
+  assert.equal(dossier.photosAvant[0].category, "réception avant");
   assert.equal(dossier.ordresReparation.length, 2);
   assert.ok(dossier.ordresReparation.every(line => line.id.startsWith("ro_auto_")));
+  assert.ok(dossier.ordresReparation.every(line => line.status === "pending"));
 }
 
 function testTechnicianAssignment() {
@@ -137,6 +146,173 @@ function testImportExportValidation() {
   assert.equal(fallback.items, INITIAL_DOSSIERS);
 }
 
+function testPhotoMutationsAndImportExport() {
+  const dossier = createReceptionFixture();
+  const added = addPhotoToDossier(dossier, {
+    id: "photo_km",
+    url: "data:image/jpeg;base64,AAAA",
+    title: "Compteur 32000 km",
+    date: fixedNow.toISOString(),
+    takenBy: "Réceptionnaire Test",
+    category: "kilométrage",
+    mimeType: "image/jpeg",
+    sizeBytes: 3,
+  }, fixedNow);
+
+  assert.equal(added.photosAvant.length, dossier.photosAvant.length + 1);
+  assert.equal(added.photosAvant.at(-1)?.category, "kilométrage");
+  assert.match(added.historiqueLogs?.[0] ?? "", /Photo ajoutée/);
+
+  const backup = createBackupPayload([added], [], [], []);
+  const validation = validateBackupPayload(JSON.parse(JSON.stringify(backup)));
+  assert.equal(validation.ok, true);
+  if (validation.ok) {
+    assert.equal(validation.data.dossiers?.[0].photosAvant.at(-1)?.title, "Compteur 32000 km");
+    assert.equal(validation.data.dossiers?.[0].photosAvant.at(-1)?.category, "kilométrage");
+  }
+
+  const removed = removePhotoFromDossier(added, "photo_km", fixedNow);
+  assert.equal(removed.photosAvant.some(photo => photo.id === "photo_km"), false);
+  assert.match(removed.historiqueLogs?.[0] ?? "", /Photo supprimée/);
+}
+
+function createTaskDossier(id: string, technicianId: string, lines: RepairOrderLine[]): DossierSAV {
+  return {
+    ...createReceptionFixture([]),
+    id,
+    technicienId: technicianId,
+    statut: DossierStatus.EN_TRAVAUX,
+    ordresReparation: lines,
+  };
+}
+
+function createLine(id: string, status: RepairOrderLine["status"]): RepairOrderLine {
+  return {
+    id,
+    designation: `Tâche ${id}`,
+    tempsEstime: 1,
+    tempsPasse: status === "done" ? 1 : 0,
+    status,
+  };
+}
+
+function testTaskLockingSameDossier() {
+  const dossier = createTaskDossier("NIMR-LOCK-001", "tech_01", [
+    createLine("line_running", "in_progress"),
+    createLine("line_pending", "pending"),
+  ]);
+  const result = startRepairOrder([dossier], dossier.id, "line_pending", fixedNow);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error, "Une tâche est déjà en cours pour ce dossier.");
+}
+
+function testTaskLockingSameTechnician() {
+  const first = createTaskDossier("NIMR-LOCK-TECH-001", "tech_01", [createLine("line_running", "in_progress")]);
+  const second = createTaskDossier("NIMR-LOCK-TECH-002", "tech_01", [createLine("line_pending", "pending")]);
+  const result = startRepairOrder([first, second], second.id, "line_pending", fixedNow);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error, "Ce technicien a déjà une tâche en cours.");
+}
+
+function testDoneTaskCannotRestart() {
+  const dossier = createTaskDossier("NIMR-DONE-001", "tech_01", [createLine("line_done", "done")]);
+  const result = startRepairOrder([dossier], dossier.id, "line_done", fixedNow);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /réouverte/);
+}
+
+function testReopenDoneTaskByWorkshopChief() {
+  const dossier = createTaskDossier("NIMR-REOPEN-001", "tech_01", [createLine("line_done", "done")]);
+  const result = reopenRepairOrder([dossier], dossier.id, "line_done", UserRole.CHEF_ATELIER, "Retouche après QC", fixedNow);
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.line.status, "reopened");
+    assert.equal(result.line.reopenedReason, "Retouche après QC");
+    assert.match(result.dossier.historiqueLogs?.[0] ?? "", /Retouche après QC/);
+  }
+}
+
+function testTechnicianCannotReopenDoneTask() {
+  const dossier = createTaskDossier("NIMR-REOPEN-002", "tech_01", [createLine("line_done", "done")]);
+  const result = reopenRepairOrder([dossier], dossier.id, "line_done", UserRole.TECHNICIEN, "Retouche", fixedNow);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /Directeur SAV|Chef Atelier/);
+}
+
+function testFinishRequiresInProgress() {
+  const dossier = createTaskDossier("NIMR-FINISH-001", "tech_01", [createLine("line_blocked", "blocked")]);
+  const result = finishRepairOrder([dossier], dossier.id, "line_blocked", fixedNow);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /en cours/);
+}
+
+function testWorkshopSlotSuggestionFirstTechnicianAndBay() {
+  const technicians: TechnicienResource[] = [
+    { ...MOCK_TECHNICIENS[0], id: "tech_busy", nom: "Tech chargé", disponibilite: "disponible", chargeActuelle: 4 },
+    { ...MOCK_TECHNICIENS[1], id: "tech_free", nom: "Tech libre", disponibilite: "disponible", chargeActuelle: 1 },
+  ];
+  const bays: WorkshopBay[] = [
+    { id: "bay_01", name: "Pont 1" },
+    { id: "bay_02", name: "Pont 2" },
+  ];
+  const suggestion = suggestWorkshopSlot({
+    dossiers: [],
+    technicians,
+    workshopBays: bays,
+    estimatedHours: 1,
+    desiredDate: new Date("2026-06-10T08:00:00"),
+  });
+
+  assert.equal(suggestion.technicianId, "tech_free");
+  assert.equal(suggestion.bayId, "bay_01");
+}
+
+function testWorkshopSlotSuggestionLunchBreak() {
+  const technicians: TechnicienResource[] = [
+    { ...MOCK_TECHNICIENS[0], id: "tech_lunch", nom: "Tech midi", disponibilite: "disponible", chargeActuelle: 0 },
+  ];
+  const suggestion = suggestWorkshopSlot({
+    dossiers: [],
+    technicians,
+    workshopBays: [{ id: "bay_01", name: "Pont 1" }],
+    estimatedHours: 1,
+    desiredDate: new Date("2026-06-10T11:30:00"),
+  });
+  const start = new Date(suggestion.startTime);
+  const end = new Date(suggestion.endTime);
+
+  assert.equal(start.getHours(), 11);
+  assert.equal(start.getMinutes(), 30);
+  assert.equal(end.getHours(), 13);
+  assert.equal(end.getMinutes(), 30);
+}
+
+function testWorkshopSlotSuggestionNextWorkingDayWhenSaturated() {
+  const technicians: TechnicienResource[] = [
+    { ...MOCK_TECHNICIENS[0], id: "tech_full_1", disponibilite: "disponible", chargeActuelle: 8 },
+    { ...MOCK_TECHNICIENS[1], id: "tech_full_2", disponibilite: "disponible", chargeActuelle: 8 },
+  ];
+  const suggestion = suggestWorkshopSlot({
+    dossiers: [],
+    technicians,
+    workshopBays: [{ id: "bay_01", name: "Pont 1" }],
+    estimatedHours: 1,
+    desiredDate: new Date("2026-06-10T09:00:00"),
+  });
+  const start = new Date(suggestion.startTime);
+
+  assert.equal(start.getFullYear(), 2026);
+  assert.equal(start.getMonth(), 5);
+  assert.equal(start.getDate(), 11);
+  assert.equal(start.getHours(), 8);
+}
+
 function testRoleTabsAndPermissions() {
   assert.equal(getDefaultTabForRole(UserRole.DIRECTEUR_SAV), "dashboard");
   assert.equal(getDefaultTabForRole(UserRole.RECEPTIONNAIRE), "reception-rapide");
@@ -189,10 +365,10 @@ function testStorageKeysUseNewPrefixOnly() {
 
 function testApplicationIdentityVersion() {
   assert.equal(APP_NAME, "NIMR SAV PRO");
-  assert.equal(APP_VERSION, "1.0.0");
+  assert.equal(APP_VERSION, "1.0.1");
   assert.equal(APP_BASE_URL, "/NIMR-SAV-PRO/");
   assert.equal(LOCAL_STORAGE_PREFIX, "nimr-sav-pro");
-  assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.0.0");
+  assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.0.1");
 }
 
 testReceptionCreation();
@@ -200,6 +376,16 @@ testTechnicianAssignment();
 testQualityControl();
 testDeliveryAndBilling();
 testImportExportValidation();
+testPhotoMutationsAndImportExport();
+testTaskLockingSameDossier();
+testTaskLockingSameTechnician();
+testDoneTaskCannotRestart();
+testReopenDoneTaskByWorkshopChief();
+testTechnicianCannotReopenDoneTask();
+testFinishRequiresInProgress();
+testWorkshopSlotSuggestionFirstTechnicianAndBay();
+testWorkshopSlotSuggestionLunchBreak();
+testWorkshopSlotSuggestionNextWorkingDayWhenSaturated();
 testRoleTabsAndPermissions();
 testStorageKeysUseNewPrefixOnly();
 testApplicationIdentityVersion();

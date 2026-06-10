@@ -62,20 +62,40 @@ export enum AtelierZone {
   LAVAGE_FINITION = "Lavage / Finition"
 }
 
+export const PHOTO_CATEGORIES = [
+  "réception avant",
+  "réception arrière",
+  "côté gauche",
+  "côté droit",
+  "intérieur",
+  "kilométrage",
+  "défaut carrosserie",
+  "autre",
+] as const;
+
+export type PhotoCategory = typeof PHOTO_CATEGORIES[number];
+
 export interface CameraPhoto {
   id: string;
   url: string;
   title: string;
   date: string;
   takenBy: string;
+  category: PhotoCategory;
+  mimeType?: string;
+  sizeBytes?: number;
 }
+
+export type RepairOrderStatus = "pending" | "in_progress" | "paused" | "blocked" | "done" | "reopened";
 
 export interface RepairOrderLine {
   id: string;
   designation: string;
   tempsEstime: number; // in hours
   tempsPasse: number; // in hours
-  status: "non_commence" | "en_cours" | "suspendu" | "termine";
+  status: RepairOrderStatus;
+  reopenedReason?: string;
+  history?: string[];
 }
 
 export interface ComplementTravail {
@@ -162,6 +182,12 @@ export interface TechnicienResource {
   chargeActuelle: number; // sum of scheduled hours
 }
 
+export interface WorkshopBay {
+  id: string;
+  name: string;
+  zone?: AtelierZone;
+}
+
 export interface DossierSAV {
   id: string; // EX: NIMR-2026-001
   clientNom: string;
@@ -195,6 +221,7 @@ export interface DossierSAV {
   statut: DossierStatus;
   technicienId?: string; // current active task technician
   zoneAtelier?: AtelierZone;
+  workshopBayId?: string;
   
   // Sections Inside Tabbed detail view
   ordresReparation: RepairOrderLine[];
@@ -208,4 +235,5 @@ export interface DossierSAV {
   prochaineActionRecommended: string;
   dateDernierStatut: string;
   avancementGlobal: number; // progress indicator 0 - 100
+  historiqueLogs?: string[];
 }
