@@ -5,7 +5,7 @@
 
 import React, { useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
-import { DossierSAV, DossierStatus, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole } from "../types";
+import { DossierSAV, DossierStatus, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole, CameraPhoto } from "../types";
 import {
   addPhotoToDossier,
   blockRepairOrder,
@@ -41,11 +41,27 @@ interface TechnicianViewProps {
   onUpdateDossier: (updated: DossierSAV) => void;
 }
 
+const OBSERVATION_PRESETS = [
+  "Vis/Écrou grippé débloqué",
+  "Niveau liquide complété",
+  "Faisceau électrique vérifié",
+  "Essai statique conforme",
+  "Complément d'huile effectué",
+  "Plaquette de frein usée à remplacer"
+];
+
 export default function TechnicianView({ dossiers, techniciens, onUpdateDossier }: TechnicianViewProps) {
   const [selectedTechId, setSelectedTechId] = useState<string>("tech_01");
-  const [tempNote, setTempNote] = useState("");
+  const [tempNotes, setTempNotes] = useState<Record<string, string>>({});
   const [tempPhotoTitle, setTempPhotoTitle] = useState("");
   const [tempPhotoCategory, setTempPhotoCategory] = useState<PhotoCategory>("autre");
+
+  // Error/Success state messages for tactile feedback
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Photo viewer overlay state
+  const [activeViewerPhoto, setActiveViewerPhoto] = useState<CameraPhoto | null>(null);
 
   // Modal states for Lot 1
   const [modalActive, setModalActive] = useState<boolean>(false);
@@ -61,13 +77,29 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
     d.statut !== DossierStatus.CLOTURE
   );
 
+  const setNoteForDossier = (dossierId: string, val: string) => {
+    setTempNotes(prev => ({ ...prev, [dossierId]: val }));
+  };
+
+  const handleApplyPreset = (dossierId: string, preset: string) => {
+    const currentVal = tempNotes[dossierId] || "";
+    if (!currentVal.trim()) {
+      setNoteForDossier(dossierId, preset);
+    } else {
+      setNoteForDossier(dossierId, `${currentVal}, ${preset}`);
+    }
+  };
+
   const handleAddNoteLog = (dossierId: string) => {
-    if (!tempNote.trim()) return;
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    const noteText = tempNotes[dossierId] || "";
+    if (!noteText.trim()) return;
 
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
 
-    const finalNote = `[Note Technicien - ${activeTech?.nom}] : ${tempNote.trim()}`;
+    const finalNote = `[Note Technicien - ${activeTech?.nom}] : ${noteText.trim()}`;
     const updated: DossierSAV = {
       ...original,
       observationsReception: original.observationsReception 
@@ -76,11 +108,14 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
       dateDernierStatut: new Date().toISOString()
     };
     onUpdateDossier(updated);
-    setTempNote("");
-    alert("Note technique ajoutée au dossier avec succès !");
+    setNoteForDossier(dossierId, "");
+    setSuccessMsg("Note technique ajoutée au dossier avec succès !");
   };
 
   const handleRepairOrderAction = (dossierId: string, lineId: string, action: "start" | "pause" | "block" | "finish") => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
     if (action === "block") {
       setModalTargetDossierId(dossierId);
       setModalTargetLineId(lineId);
@@ -94,13 +129,16 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
       finishRepairOrder(dossiers, dossierId, lineId);
 
     if (result.ok === false) {
-      alert(result.error);
+      setErrorMsg(result.error || "Une erreur est survenue.");
       return;
     }
     onUpdateDossier(result.dossier);
+    setSuccessMsg(`Tâche ${action === "start" ? "démarrée" : action === "pause" ? "suspendue" : "terminée"} avec succès !`);
   };
 
   const handleBlockConfirm = (reason: string, details: string) => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
     const fullReason = details ? `${reason} : ${details}` : reason;
     if (modalTargetDossierId && modalTargetLineId) {
       const original = dossiers.find(d => d.id === modalTargetDossierId);
@@ -111,7 +149,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         
         const result = blockRepairOrder(dossiers, modalTargetDossierId, modalTargetLineId, fullReason);
         if (result.ok === false) {
-          alert(result.error);
+          setErrorMsg(result.error || "Impossible de bloquer la tâche.");
         } else {
           const updatedLogs = [
             `${new Date().toISOString()} - ${logMessage}`,
@@ -121,6 +159,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
             ...result.dossier,
             historiqueLogs: updatedLogs
           });
+          setSuccessMsg("Tâche bloquée avec succès !");
         }
       }
     }
@@ -130,6 +169,8 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
   };
 
   const handleAddPhotoFiles = async (dossierId: string, files: FileList | null) => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
     if (!files || files.length === 0) return;
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
@@ -146,9 +187,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
       const updated = photos.reduce((current, photo) => addPhotoToDossier(current, photo), original);
       onUpdateDossier(updated);
       setTempPhotoTitle("");
-      alert("Photo de diagnostic ajoutée au dossier !");
+      setSuccessMsg("Photo de diagnostic ajoutée au dossier avec succès !");
     } catch {
-      alert("Impossible d'ajouter cette photo de diagnostic.");
+      setErrorMsg("Impossible d'ajouter cette photo de diagnostic.");
     }
   };
 
@@ -172,7 +213,11 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
           <select
             className="w-full p-2 bg-slate-800 text-white border-2 border-slate-700 rounded font-bold text-xs"
             value={selectedTechId}
-            onChange={(e) => setSelectedTechId(e.target.value)}
+            onChange={(e) => {
+              setSelectedTechId(e.target.value);
+              setErrorMsg(null);
+              setSuccessMsg(null);
+            }}
           >
             {techniciens.map(t => (
               <option key={t.id} value={t.id}>
@@ -182,6 +227,40 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
           </select>
         </div>
       </div>
+
+      {/* DOM Notification messages for tactile use */}
+      {(errorMsg || successMsg) && (
+        <div className="space-y-2">
+          {errorMsg && (
+            <div 
+              data-testid="technician-error-message" 
+              className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl flex items-center justify-between font-bold text-xs shadow-xs"
+            >
+              <span>{errorMsg}</span>
+              <button 
+                onClick={() => setErrorMsg(null)} 
+                className="text-red-500 hover:text-red-700 font-extrabold px-2 py-1 text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {successMsg && (
+            <div 
+              data-testid="technician-success-message" 
+              className="bg-emerald-50 border border-emerald-200 text-emerald-805 p-4 rounded-xl flex items-center justify-between font-bold text-xs shadow-xs"
+            >
+              <span>{successMsg}</span>
+              <button 
+                onClick={() => setSuccessMsg(null)} 
+                className="text-emerald-500 hover:text-emerald-700 font-extrabold px-2 py-1 text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Primary tasks */}
       <div className="space-y-4">
@@ -197,9 +276,32 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         ) : (
           <div className="space-y-4 text-xs font-semibold">
             {techTasks.map(task => {
+              // Check if this dossier has any active (in_progress) task
+              const hasInProgressTask = task.ordresReparation.some(
+                line => normalizeRepairOrderStatus(line.status) === "in_progress"
+              );
+
               return (
-                <div key={task.id} className="bg-white  border rounded-2xl shadow-sm overflow-hidden">
+                <div 
+                  key={task.id} 
+                  className={`bg-white border rounded-2xl shadow-sm overflow-hidden transition-all duration-200 ${
+                    hasInProgressTask 
+                      ? "border-2 border-blue-500 ring-2 ring-blue-500/20 shadow-md" 
+                      : "border-gray-200"
+                  }`}
+                >
                   
+                  {/* Top active task banner */}
+                  {hasInProgressTask && (
+                    <div 
+                      data-testid="technician-active-task-banner" 
+                      className="bg-blue-600 text-white text-center py-2 text-xs font-black tracking-wider uppercase flex items-center justify-center gap-2"
+                    >
+                      <Clock className="w-4 h-4 animate-pulse" />
+                      <span>TRAVAIL EN COURS SUR CE VÉHICULE</span>
+                    </div>
+                  )}
+
                   {/* Top quick state info */}
                   <div className="p-4 bg-slate-50  border-b flex justify-between items-center font-display">
                     <div>
@@ -255,10 +357,10 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                           const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
 
                           return (
-                            <div key={line.id} className="p-2 bg-white  border border-blue-100  rounded space-y-2">
+                            <div key={line.id} className="p-3 bg-white  border border-blue-100  rounded-xl space-y-3 shadow-xs">
                               <div className="flex items-start justify-between gap-2">
                                 <div>
-                                  <span className="font-extrabold text-slate-800  block">{line.designation}</span>
+                                  <span className="font-extrabold text-slate-800 text-sm block">{line.designation}</span>
                                   <span className="text-[10px] text-zinc-400 font-mono">{line.tempsPasse}H / {line.tempsEstime}H</span>
                                 </div>
                                 <span 
@@ -268,51 +370,64 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                 </span>
                               </div>
                               {startBlockedMessage && status !== "done" && status !== "in_progress" && (
-                                <p className="text-[10px] text-rose-600 font-bold">{startBlockedMessage}</p>
+                                <div className="space-y-1.5 mt-1">
+                                  <p className="text-[10px] text-rose-600 font-bold">{startBlockedMessage}</p>
+                                  <div 
+                                    data-testid="technician-task-locked-message"
+                                    className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-700 font-bold flex items-center gap-1.5"
+                                  >
+                                    <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                                    <span>Impossible de démarrer : une tâche est déjà en cours.</span>
+                                  </div>
+                                </div>
                               )}
                               {status === "done" ? (
-                                <div className="py-1 text-green-700  font-black text-[10px] uppercase flex items-center gap-1">
-                                  <CheckCircle className="w-3.5 h-3.5" />
+                                <div className="py-1.5 text-green-700  font-black text-[11px] uppercase flex items-center gap-1">
+                                  <CheckCircle className="w-4 h-4" />
                                   Statut terminé
                                 </div>
                               ) : (
-                                <div className="flex flex-wrap gap-1">
+                                <div className="mt-2">
                                   {status !== "in_progress" && (
                                     <button
                                       disabled={!canStartLine}
                                       data-testid={`task-start-${line.id}`}
                                       onClick={() => handleRepairOrderAction(task.id, line.id, "start")}
-                                      className="flex-1 min-w-24 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded flex items-center justify-center gap-1 text-[10px] transition cursor-pointer"
+                                      className="w-full py-3.5 px-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-35 disabled:cursor-not-allowed text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer"
                                     >
-                                      <Play className="w-3.5 h-3.5" />
+                                      <Play className="w-4.5 h-4.5" />
                                       {status === "pending" ? "Démarrer" : "Reprendre"}
                                     </button>
                                   )}
                                   {status === "in_progress" && (
-                                    <>
+                                    <div className="flex flex-col sm:flex-row gap-2">
                                       <button
                                         data-testid={`task-pause-${line.id}`}
                                         onClick={() => handleRepairOrderAction(task.id, line.id, "pause")}
-                                        className="flex-1 min-w-20 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded flex items-center justify-center gap-1 text-[10px] transition cursor-pointer"
+                                        className="flex-1 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer"
                                       >
-                                        <Pause className="w-3.5 h-3.5" />
+                                        <Pause className="w-4.5 h-4.5" />
                                         Pause
                                       </button>
-                                      <button
-                                        data-testid={`task-block-${line.id}`}
-                                        onClick={() => handleRepairOrderAction(task.id, line.id, "block")}
-                                        className="py-1.5 px-2.5 bg-red-600 text-white rounded font-bold hover:bg-red-700 text-[10px] transition"
-                                      >
-                                        Bloquer
-                                      </button>
-                                      <button
-                                        data-testid={`task-finish-${line.id}`}
-                                        onClick={() => handleRepairOrderAction(task.id, line.id, "finish")}
-                                        className="py-1.5 px-2.5 bg-green-600 text-white rounded font-bold hover:bg-green-700 text-[10px] transition"
-                                      >
-                                        Terminer
-                                      </button>
-                                    </>
+                                      <div className="flex gap-2 flex-1">
+                                        <button
+                                          data-testid={`task-block-${line.id}`}
+                                          onClick={() => handleRepairOrderAction(task.id, line.id, "block")}
+                                          className="flex-1 py-3.5 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer"
+                                        >
+                                          <AlertTriangle className="w-4.5 h-4.5" />
+                                          Bloquer
+                                        </button>
+                                        <button
+                                          data-testid={`task-finish-${line.id}`}
+                                          onClick={() => handleRepairOrderAction(task.id, line.id, "finish")}
+                                          className="flex-1 py-3.5 bg-green-600 hover:bg-green-700 text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer"
+                                        >
+                                          <CheckCircle className="w-4.5 h-4.5" />
+                                          Terminer
+                                        </button>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
                               )}
@@ -322,19 +437,55 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                       </div>
                     </div>
 
+                    {/* Photos list gallery (Read-only) */}
+                    {task.photosAvant && task.photosAvant.length > 0 && (
+                      <div className="pt-2 border-t border-slate-200 space-y-2">
+                        <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">
+                          Photos du véhicule ({task.photosAvant.length}) :
+                        </span>
+                        <div 
+                          data-testid="technician-photo-gallery"
+                          className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-200"
+                        >
+                          {task.photosAvant.map((photo) => (
+                            <div 
+                              key={photo.id}
+                              className="flex-shrink-0 w-24 space-y-1 cursor-pointer group"
+                              onClick={() => setActiveViewerPhoto(photo)}
+                            >
+                              <div className="relative aspect-video w-24 bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
+                                <img 
+                                  src={photo.url} 
+                                  alt={photo.title} 
+                                  data-testid="technician-photo-thumbnail"
+                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-150"
+                                />
+                                <span className="absolute bottom-1 right-1 bg-black/60 text-white font-extrabold text-[8px] px-1 rounded uppercase pointer-events-none">
+                                  {photo.category}
+                                </span>
+                              </div>
+                              <span className="text-[9px] text-gray-500 font-semibold block truncate leading-tight">
+                                {photo.title}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Quick photo upload */}
                     <div className="pt-2 border-t border-slate-200 space-y-2 text-xs">
-                      <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Preuve Photo d'intervention :</span>
+                      <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Ajouter Preuve Photo :</span>
                       <div className="grid grid-cols-1 gap-2">
                         <input 
                           type="text"
-                          className="p-1 px-2.5 bg-slate-50  border rounded text-[11px] flex-1 font-semibold  placeholder-zinc-400"
+                          className="p-1.5 px-2.5 bg-slate-50 border border-gray-200 rounded-lg text-[11px] flex-1 font-semibold  placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                           placeholder="EX: Remplacement plaquette usée, filtre cassé..."
                           value={tempPhotoTitle}
                           onChange={(e) => setTempPhotoTitle(e.target.value)}
                         />
                         <select
-                          className="p-1 px-2.5 bg-slate-50  border rounded text-[11px] font-bold "
+                          className="p-1.5 px-2.5 bg-slate-50 border border-gray-200 rounded-lg text-[11px] font-bold focus:outline-none focus:ring-1 focus:ring-blue-500"
                           value={tempPhotoCategory}
                           onChange={(e) => setTempPhotoCategory(e.target.value as PhotoCategory)}
                         >
@@ -343,7 +494,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                           ))}
                         </select>
                         <div className="grid grid-cols-2 gap-2">
-                          <label className="px-3 py-1.5 bg-zinc-800 text-white font-bold rounded text-[11px] hover:bg-zinc-950 cursor-pointer text-center">
+                          <label className="px-3 py-2 bg-zinc-800 text-white font-bold rounded-xl text-[11px] hover:bg-zinc-950 cursor-pointer text-center transition">
                             Prendre
                             <input
                               type="file"
@@ -356,7 +507,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                               }}
                             />
                           </label>
-                          <label className="px-3 py-1.5 bg-white  border text-slate-700  font-bold rounded text-[11px] hover:bg-zinc-50  cursor-pointer text-center">
+                          <label className="px-3 py-2 bg-white border border-gray-200 text-slate-700 font-bold rounded-xl text-[11px] hover:bg-zinc-50 cursor-pointer text-center transition">
                             Galerie
                             <input
                               type="file"
@@ -374,25 +525,75 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                     </div>
 
                     {/* Adding note log */}
-                    <div className="space-y-2">
+                    <div className="pt-2 border-t border-slate-200 space-y-2">
                       <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Ajouter une note technique :</span>
-                      <div className="flex gap-2">
-                        <input 
-                          type="text"
-                          className="p-1 px-2.5 bg-slate-50  border rounded text-[11px] flex-1 font-semibold  placeholder-zinc-400"
-                          placeholder="EX: Vis oxydée débloquée, complément à prévoir..."
-                          value={tempNote}
-                          onChange={(e) => setTempNote(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && handleAddNoteLog(task.id)}
-                        />
-                        <button 
-                          onClick={() => handleAddNoteLog(task.id)}
-                          className="px-3 py-1 bg-blue-600 text-white font-bold rounded text-[11px] hover:bg-blue-700 cursor-pointer"
-                        >
-                          Sauver
-                        </button>
+                      
+                      {/* Textarea for observations */}
+                      <textarea 
+                        data-testid="technician-observation-textarea"
+                        className="w-full p-2.5 bg-slate-50 border border-gray-200 rounded-xl text-xs font-semibold placeholder-zinc-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none min-h-[80px] transition"
+                        placeholder="EX: Vis oxydée débloquée, complément à prévoir..."
+                        value={tempNotes[task.id] || ""}
+                        onChange={(e) => setNoteForDossier(task.id, e.target.value)}
+                      />
+
+                      {/* Presets buttons */}
+                      <div className="flex flex-wrap gap-1.5 mt-1 pb-1">
+                        {OBSERVATION_PRESETS.map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            data-testid={`technician-observation-preset-${idx}`}
+                            onClick={() => handleApplyPreset(task.id, preset)}
+                            className="px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-[10px] font-bold border border-gray-200 transition cursor-pointer"
+                          >
+                            + {preset}
+                          </button>
+                        ))}
                       </div>
+
+                      <button 
+                        onClick={() => handleAddNoteLog(task.id)}
+                        className="w-full py-2 bg-blue-600 text-white font-extrabold rounded-xl text-xs hover:bg-blue-700 cursor-pointer transition shadow-xs"
+                      >
+                        Sauvegarder la note
+                      </button>
                     </div>
+
+                    {/* Simplified historical logs */}
+                    {task.historiqueLogs && task.historiqueLogs.length > 0 && (
+                      <div className="pt-2 border-t border-slate-200 space-y-2">
+                        <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">
+                          Historique des opérations :
+                        </span>
+                        <div 
+                          data-testid="technician-task-history"
+                          className="bg-gray-50 p-3 rounded-xl border border-gray-200 max-h-32 overflow-y-auto space-y-2 scrollbar-thin scrollbar-thumb-gray-200"
+                        >
+                          {task.historiqueLogs.map((log, index) => {
+                            const parts = log.split(" - ");
+                            const dateStr = parts[0];
+                            const message = parts.slice(1).join(" - ");
+                            
+                            let formattedDate = "";
+                            try {
+                              formattedDate = new Date(dateStr).toLocaleTimeString("fr-FR", { hour: '2-digit', minute: '2-digit' });
+                            } catch {
+                              formattedDate = dateStr;
+                            }
+
+                            return (
+                              <div key={index} className="text-[10px] flex items-start gap-2 text-gray-600 font-semibold leading-normal">
+                                <span className="text-[9px] text-zinc-400 font-mono bg-gray-200/50 px-1 py-0.5 rounded flex-shrink-0 mt-0.5">
+                                  {formattedDate}
+                                </span>
+                                <span className="break-all">{message || log}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                   </div>
                 </div>
@@ -421,6 +622,39 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         ]}
         testIdPrefix="modal-task-block"
       />
+
+      {/* Full Photo Viewer Modal */}
+      {activeViewerPhoto && (
+        <div 
+          data-testid="technician-photo-viewer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-xs flex flex-col items-center justify-center z-50 p-4 transition-opacity duration-200"
+          onClick={() => setActiveViewerPhoto(null)}
+        >
+          <div 
+            className="relative max-w-full max-h-[85vh] bg-white rounded-2xl p-2 shadow-2xl overflow-hidden" 
+            onClick={e => e.stopPropagation()}
+          >
+            <img 
+              src={activeViewerPhoto.url} 
+              alt={activeViewerPhoto.title}
+              className="max-w-full max-h-[70vh] rounded-xl object-contain mx-auto"
+            />
+            <div className="p-4 bg-white border-t border-gray-100 space-y-1">
+              <h4 className="font-extrabold text-sm text-gray-900">{activeViewerPhoto.title}</h4>
+              <div className="flex justify-between text-[10px] text-gray-500 font-bold uppercase pt-1">
+                <span>Catégorie : {activeViewerPhoto.category}</span>
+                <span>Prise par : {activeViewerPhoto.takenBy}</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => setActiveViewerPhoto(null)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 hover:bg-black text-white font-extrabold flex items-center justify-center transition cursor-pointer text-sm shadow-md"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

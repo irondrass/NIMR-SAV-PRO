@@ -5,6 +5,17 @@ import { STORAGE_KEYS } from "../../src/storage-keys";
 import { DossierStatus } from "../../src/types";
 
 test.describe("Rôle : Technicien", () => {
+  const mockPhoto = {
+    id: "photo_test_1",
+    url: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><rect width='100' height='100' fill='blue'/></svg>",
+    title: "Vérification pare-chocs",
+    category: "défaut carrosserie" as const,
+    takenBy: "Réceptionnaire",
+    date: new Date().toISOString()
+  };
+
+  const mockLog = `${new Date().toISOString()} - [Technicien] - Initialisation de la tâche`;
+
   const dossierAssigned = createMockDossier({
     id: "NIMR-TECH-001",
     clientNom: "Assigned Client",
@@ -13,7 +24,9 @@ test.describe("Rôle : Technicien", () => {
     ordresReparation: [
       { id: "ro_tech_1", designation: "Tâche en attente", tempsEstime: 2.0, tempsPasse: 0, status: "pending" },
       { id: "ro_tech_done", designation: "Tâche finie", tempsEstime: 1.0, tempsPasse: 1.0, status: "done" }
-    ]
+    ],
+    photosAvant: [mockPhoto],
+    historiqueLogs: [mockLog]
   });
 
   const dossierUnassigned = createMockDossier({
@@ -44,23 +57,45 @@ test.describe("Rôle : Technicien", () => {
     await expect(page.locator(`text=${dossierUnassigned.id}`)).not.toBeVisible();
   });
 
-  test("Cycle de tâche : démarrer, suspendre et impossibilité de redémarrer une tâche terminée", async ({ page }) => {
+  test("Boutons XL et Cycle de tâche : démarrage, bandeau active visible, pause puis reprise", async ({ page }) => {
     await humanClick(page, page.locator('[data-testid="nav-technician"]'));
 
-    // 1. Start pending task
+    // 1. Verify Start button is visible and has large tactile styling (check classes containing 'py-3.5')
     const startBtn = page.locator('[data-testid="task-start-ro_tech_1"]');
     await expect(startBtn).toBeVisible();
+    await expect(startBtn).toHaveClass(/py-3\.5/);
+
+    // 2. Start the pending task
     await humanClick(page, startBtn);
+    
+    // Check custom success message
+    await expect(page.locator('[data-testid="technician-success-message"]')).toBeVisible();
+    await expect(page.locator('[data-testid="technician-success-message"]')).toContainText(/démarrée/i);
+    
+    // Status is now "En cours"
     await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/En cours/i);
 
-    // 2. Pause task
+    // 3. Verify active task banner is visible
+    const activeBanner = page.locator('[data-testid="technician-active-task-banner"]');
+    await expect(activeBanner).toBeVisible();
+    await expect(activeBanner).toContainText(/TRAVAIL EN COURS SUR CE VÉHICULE/i);
+
+    // 4. Pause the task
     const pauseBtn = page.locator('[data-testid="task-pause-ro_tech_1"]');
     await expect(pauseBtn).toBeVisible();
+    await expect(pauseBtn).toHaveClass(/py-3\.5/); // XL tactile classes
     await humanClick(page, pauseBtn);
-    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/Suspendu/i);
 
-    // 3. Try to reopen/restart a finished task
-    // Finish should not be visible. Start/reopen should not be visible on done task
+    // Check status is now "Suspendu" and active banner disappeared
+    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/Suspendu/i);
+    await expect(activeBanner).toHaveCount(0);
+
+    // 5. Resume task (start button should say "Reprendre" or start, but it's the start testid)
+    await humanClick(page, startBtn);
+    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/En cours/i);
+    await expect(activeBanner).toBeVisible();
+
+    // 6. Finished task cannot be restarted/reopened by tech
     await expect(page.locator('[data-testid="task-start-ro_tech_done"]')).not.toBeVisible();
     await expect(page.locator('[data-testid="task-reopen-ro_tech_done"]')).not.toBeVisible();
   });
@@ -86,15 +121,18 @@ test.describe("Rôle : Technicien", () => {
     await page.reload();
     await changeUserRole(page, "role-option-technicien");
 
-    // Go to dossierAssigned detail (which has a pending task)
     await humanClick(page, page.locator('[data-testid="nav-technician"]'));
 
     // Start button of the pending task should be disabled because the technician has an active task in another dossier
     const startBtn = page.locator('[data-testid="task-start-ro_tech_1"]');
     await expect(startBtn).toBeDisabled();
 
-    // Verify warning text is displayed
+    // Verify both warning texts are displayed (the old assertion and the new data-testid)
     await expect(page.locator('text=Ce technicien a déjà une tâche en cours.')).toBeVisible();
+    
+    const lockedMsg = page.locator('[data-testid="technician-task-locked-message"]');
+    await expect(lockedMsg).toBeVisible();
+    await expect(lockedMsg).toContainText(/Impossible de démarrer : une tâche est déjà en cours./i);
   });
 
   test("Technicien peut bloquer une tâche en cours avec motif obligatoire via le modal", async ({ page }) => {
@@ -103,7 +141,6 @@ test.describe("Rôle : Technicien", () => {
     // 1. Start pending task to make it in_progress
     const startBtn = page.locator('[data-testid="task-start-ro_tech_1"]');
     await humanClick(page, startBtn);
-    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/En cours/i);
 
     // 2. Click block button
     const blockBtn = page.locator('[data-testid="task-block-ro_tech_1"]');
@@ -140,5 +177,79 @@ test.describe("Rôle : Technicien", () => {
 
     // 11. Verify task status has updated to bloquée
     await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/bloquée/i);
+  });
+
+  test("Observations rapides et libres avec presets", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="nav-technician"]'));
+
+    const textarea = page.locator('[data-testid="technician-observation-textarea"]');
+    await expect(textarea).toBeVisible();
+    await expect(textarea).toHaveValue("");
+
+    // Click Preset 0
+    await humanClick(page, page.locator('[data-testid="technician-observation-preset-0"]'));
+    await expect(textarea).toHaveValue("Vis/Écrou grippé débloqué");
+
+    // Click Preset 2 (should append with comma)
+    await humanClick(page, page.locator('[data-testid="technician-observation-preset-2"]'));
+    await expect(textarea).toHaveValue("Vis/Écrou grippé débloqué, Faisceau électrique vérifié");
+
+    // Free text input
+    await textarea.type(" - complété manuellement");
+    await expect(textarea).toHaveValue("Vis/Écrou grippé débloqué, Faisceau électrique vérifié - complété manuellement");
+
+    // Save note
+    await humanClick(page, page.locator('text=Sauvegarder la note'));
+    await expect(page.locator('[data-testid="technician-success-message"]')).toBeVisible();
+    await expect(page.locator('[data-testid="technician-success-message"]')).toContainText(/Note technique ajoutée/i);
+    await expect(textarea).toHaveValue("");
+  });
+
+  test("Galerie photos visible, vignette et zoom viewer", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="nav-technician"]'));
+
+    // Photo gallery should be visible
+    const gallery = page.locator('[data-testid="technician-photo-gallery"]');
+    await expect(gallery).toBeVisible();
+
+    // Thumbnail should be visible
+    const thumbnail = page.locator('[data-testid="technician-photo-thumbnail"]');
+    await expect(thumbnail).toBeVisible();
+
+    // Zoom on thumbnail
+    await humanClick(page, thumbnail);
+    const viewer = page.locator('[data-testid="technician-photo-viewer"]');
+    await expect(viewer).toBeVisible();
+
+    // Close zoom viewer
+    await humanClick(page, viewer.locator('text=✕'));
+    await expect(viewer).toHaveCount(0);
+  });
+
+  test("Historique simplifié visible", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="nav-technician"]'));
+
+    // History log container should be visible
+    const history = page.locator('[data-testid="technician-task-history"]');
+    await expect(history).toBeVisible();
+    await expect(history).toContainText(/Initialisation de la tâche/i);
+  });
+
+  test("Persistance après refresh", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="nav-technician"]'));
+
+    // Start task
+    const startBtn = page.locator('[data-testid="task-start-ro_tech_1"]');
+    await humanClick(page, startBtn);
+    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/En cours/i);
+
+    // Refresh page
+    await page.reload();
+    await changeUserRole(page, "role-option-technicien");
+    await humanClick(page, page.locator('[data-testid="nav-technician"]'));
+
+    // Verify task is still in progress
+    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/En cours/i);
+    await expect(page.locator('[data-testid="technician-active-task-banner"]')).toBeVisible();
   });
 });
