@@ -4,7 +4,8 @@
  */
 
 import React, { useState } from "react";
-import { DossierSAV, DossierStatus, TechnicienResource, AtelierZone } from "../types";
+import StandardReasonModal from "./StandardReasonModal";
+import { DossierSAV, DossierStatus, TechnicienResource, AtelierZone, UserRole } from "../types";
 import {
   assignTechnicianToDossier,
   blockDossier,
@@ -45,6 +46,10 @@ export default function ChefAtelierView({
   
   const [selectedZoneFilter, setSelectedZoneFilter] = useState<string>("Toutes");
 
+  // Modal states for Lot 1
+  const [modalActive, setModalActive] = useState<boolean>(false);
+  const [modalTargetDossierId, setModalTargetDossierId] = useState<string | null>(null);
+
   // Get active files
   const activeFolders = dossiers.filter(d => d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE);
   
@@ -68,10 +73,29 @@ export default function ChefAtelierView({
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
 
-    const raison = prompt("Saisir la raison / cause du blocage :");
-    if (!raison) return;
+    setModalTargetDossierId(dossierId);
+    setModalActive(true);
+  };
 
-    onUpdateDossier(blockDossier(original, raison));
+  const handleBlockConfirm = (reason: string, details: string) => {
+    const fullReason = details ? `${reason} : ${details}` : reason;
+    if (modalTargetDossierId) {
+      const original = dossiers.find(d => d.id === modalTargetDossierId);
+      if (original) {
+        const logMessage = `[${UserRole.CHEF_ATELIER}] - Blocage Dossier - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+        const nextDossier = blockDossier(original, fullReason);
+        const updatedLogs = [
+          `${new Date().toISOString()} - ${logMessage}`,
+          ...(nextDossier.historiqueLogs || [])
+        ];
+        onUpdateDossier({
+          ...nextDossier,
+          historiqueLogs: updatedLogs
+        });
+      }
+    }
+    setModalActive(false);
+    setModalTargetDossierId(null);
   };
 
   const handleQuickEndWorks = (dossierId: string) => {
@@ -294,6 +318,25 @@ export default function ChefAtelierView({
         </div>
 
       </div>
+
+      <StandardReasonModal
+        isOpen={modalActive}
+        onClose={() => {
+          setModalActive(false);
+          setModalTargetDossierId(null);
+        }}
+        onConfirm={handleBlockConfirm}
+        title="Blocage du Dossier"
+        description="Veuillez spécifier la raison du blocage de ce dossier."
+        reasons={[
+          "Attente pièce de rechange (Magasin)",
+          "Attente accord client complémentaire",
+          "Outillage spécifique indisponible",
+          "Surcharge pont / ressource",
+          "Autre (saisie libre)"
+        ]}
+        testIdPrefix="modal-task-block"
+      />
 
     </div>
   );

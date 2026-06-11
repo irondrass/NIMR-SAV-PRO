@@ -66,33 +66,49 @@ test.describe("Rôle : Directeur SAV", () => {
   });
 
   test("Réouverture d'une tâche terminée avec motif obligatoire", async ({ page }) => {
-    // Set up dialog handler for reopen motif prompt
-    let promptMessageCalled = false;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "prompt" && dialog.message().toLowerCase().includes("motif")) {
-        promptMessageCalled = true;
-        await dialog.accept("Refus client suite essai");
-      } else {
-        await dialog.accept();
-      }
-    });
-
     // Go to dossier details
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${testDossier.id}`));
-
+ 
     // Switch to Ordres de travaux tab
     await humanClick(page, page.locator('[data-testid="tab-repair-orders"]'));
-
+ 
     // Check that reopen button is visible for the done task
     const reopenBtn = page.locator(`[data-testid="task-reopen-ro_dir_1"]`);
     await expect(reopenBtn).toBeVisible();
-
-    // Click reopen
+ 
+    // Click reopen to show modal
     await humanClick(page, reopenBtn);
 
-    // Expect dialog to have been handled and task to change back to reopened status
-    expect(promptMessageCalled).toBe(true);
+    // Modal should be visible
+    const modal = page.locator('[data-testid="modal-task-reopen"]');
+    await expect(modal).toBeVisible();
+
+    // Confirm button should be disabled initially
+    const confirmBtn = page.locator('[data-testid="modal-task-reopen-confirm"]');
+    await expect(confirmBtn).toBeDisabled();
+
+    // Select "Autre (saisie libre)"
+    const select = page.locator('[data-testid="modal-task-reopen-select"]');
+    await select.selectOption("Autre (saisie libre)");
+
+    // Confirm button should still be disabled because details are empty
+    await expect(confirmBtn).toBeDisabled();
+
+    // Fill details
+    const input = page.locator('[data-testid="modal-task-reopen-input"]');
+    await page.locator('[data-testid="modal-task-reopen-input"]').fill("Refus client suite essai");
+
+    // Confirm button should now be enabled
+    await expect(confirmBtn).toBeEnabled();
+
+    // Click confirm
+    await humanClick(page, confirmBtn);
+
+    // Modal should be gone
+    await expect(modal).toHaveCount(0);
+ 
+    // Expect task to change back to reopened status
     await expect(page.locator('[data-testid="task-status-ro_dir_1"]')).toHaveText(/Réouvert/i);
   });
 });

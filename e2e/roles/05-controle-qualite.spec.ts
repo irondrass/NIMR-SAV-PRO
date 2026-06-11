@@ -82,37 +82,63 @@ test.describe("Rôle : Contrôle Qualité", () => {
   });
 
   test("Refus de QC exige un motif obligatoire", async ({ page }) => {
-    // Setup dialog behavior to return empty string (motive omitted)
-    page.on("dialog", async (dialog) => {
-      await dialog.accept("");
-    });
-
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${qcDossier.id}`));
     await humanClick(page, page.locator('[data-testid="tab-quality-control"]'));
-
+ 
     // Click refuse
     await humanClick(page, page.locator('[data-testid="qc-refuse"]'));
-
-    // Verify DOM error banner shows up for missing motif
-    const errorBanner = page.locator('[data-testid="qc-error-message"]');
-    await expect(errorBanner).toBeVisible();
-    await expect(errorBanner).toHaveText(/motif/i);
+ 
+    const modal = page.locator('[data-testid="modal-qc-refuse"]');
+    await expect(modal).toBeVisible();
+ 
+    // Confirm button must be disabled initially
+    const confirmBtn = page.locator('[data-testid="modal-qc-refuse-confirm"]');
+    await expect(confirmBtn).toBeDisabled();
+ 
+    // Select "Autre (saisie libre)"
+    const select = page.locator('[data-testid="modal-qc-refuse-select"]');
+    await select.selectOption("Autre (saisie libre)");
+ 
+    // Confirm button must still be disabled because input details is empty
+    await expect(confirmBtn).toBeDisabled();
+ 
+    // Click cancel
+    const cancelBtn = page.locator('[data-testid="modal-qc-refuse-cancel"]');
+    await humanClick(page, cancelBtn);
+ 
+    // Modal should close
+    await expect(modal).toHaveCount(0);
+ 
+    // Dossier status should not be blocked
+    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: "Contrôle Qualité" })).toBeVisible();
   });
-
+ 
   test("Refus de QC avec motif valide bloque le dossier", async ({ page }) => {
-    // Setup dialog behavior to return a valid motive
-    page.on("dialog", async (dialog) => {
-      await dialog.accept("Bruit suspect moteur en charge");
-    });
-
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${qcDossier.id}`));
     await humanClick(page, page.locator('[data-testid="tab-quality-control"]'));
-
+ 
     // Click refuse
     await humanClick(page, page.locator('[data-testid="qc-refuse"]'));
-
+ 
+    const modal = page.locator('[data-testid="modal-qc-refuse"]');
+    await expect(modal).toBeVisible();
+ 
+    // Select standard reason "Bruit ou vibration persistant"
+    const select = page.locator('[data-testid="modal-qc-refuse-select"]');
+    await select.selectOption("Bruit ou vibration persistant");
+ 
+    // Confirm button should be enabled now
+    const confirmBtn = page.locator('[data-testid="modal-qc-refuse-confirm"]');
+    await expect(confirmBtn).toBeEnabled();
+ 
+    // Click confirm
+    await humanClick(page, confirmBtn);
+ 
+    // Modal should close
+    await expect(modal).toHaveCount(0);
+ 
     // Verify status has updated to Bloqué
     await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: "Bloqué" })).toBeVisible();
   });

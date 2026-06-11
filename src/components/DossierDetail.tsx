@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from "react";
+import StandardReasonModal from "./StandardReasonModal";
 import { 
   DossierSAV, 
   DossierStatus, 
@@ -91,6 +92,10 @@ export default function DossierDetail({
   const [qcError, setQcError] = useState<string | null>(null);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
 
+  // Modal states for Lot 1
+  const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | null>(null);
+  const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
+
   const updateDossierState = (changes: Partial<DossierSAV>) => {
     const updated = {
       ...dossier,
@@ -143,9 +148,8 @@ export default function DossierDetail({
   };
 
   const handleBlockROLine = (lineId: string) => {
-    const reason = prompt("Raison du blocage atelier :")?.trim();
-    if (!reason) return;
-    applyTaskMutation(blockRepairOrder(dossiers, dossier.id, lineId, reason));
+    setModalTargetLineId(lineId);
+    setModalActive("task-block");
   };
 
   const handleFinishROLine = (lineId: string) => {
@@ -153,12 +157,8 @@ export default function DossierDetail({
   };
 
   const handleReopenROLine = (lineId: string) => {
-    const reason = prompt("Motif obligatoire de réouverture :")?.trim();
-    if (!reason) {
-      alert("Le motif de réouverture est obligatoire.");
-      return;
-    }
-    applyTaskMutation(reopenRepairOrder(dossiers, dossier.id, lineId, userRole, reason));
+    setModalTargetLineId(lineId);
+    setModalActive("task-reopen");
   };
 
   const handleDossierPhotoFiles = async (files: FileList | null) => {
@@ -248,6 +248,76 @@ export default function DossierDetail({
   const handleFinalOperationalClose = () => {
     setDeliveryError(null);
     onUpdateDossier(markReadyForBilling(dossier));
+  };
+
+  const handleQCRefuseConfirm = (reason: string, details: string) => {
+    const fullReason = details ? `${reason} : ${details}` : reason;
+    const logMessage = `[${userRole}] - Refus QC - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+    const nextDossier = submitQualityControl(dossier, userRole, "refuse", fullReason);
+    
+    // Add history log
+    const updatedLogs = [
+      `${new Date().toISOString()} - ${logMessage}`,
+      ...(nextDossier.historiqueLogs || [])
+    ];
+    
+    onUpdateDossier({
+      ...nextDossier,
+      historiqueLogs: updatedLogs
+    });
+    setModalActive(null);
+  };
+
+  const handleReopenConfirm = (reason: string, details: string) => {
+    const fullReason = details ? `${reason} : ${details}` : reason;
+    if (modalTargetLineId) {
+      const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
+      const taskName = line ? line.designation : modalTargetLineId;
+      const logMessage = `[${userRole}] - Réouverture Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+      
+      const result = reopenRepairOrder(dossiers, dossier.id, modalTargetLineId, userRole, fullReason);
+      if (result.ok === false) {
+        setTaskError(result.error);
+      } else {
+        const updatedLogs = [
+          `${new Date().toISOString()} - ${logMessage}`,
+          ...(result.dossier.historiqueLogs || [])
+        ];
+        onUpdateDossier({
+          ...result.dossier,
+          historiqueLogs: updatedLogs
+        });
+        setTaskError(null);
+      }
+    }
+    setModalActive(null);
+    setModalTargetLineId(null);
+  };
+
+  const handleBlockConfirm = (reason: string, details: string) => {
+    const fullReason = details ? `${reason} : ${details}` : reason;
+    if (modalTargetLineId) {
+      const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
+      const taskName = line ? line.designation : modalTargetLineId;
+      const logMessage = `[${userRole}] - Blocage Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+      
+      const result = blockRepairOrder(dossiers, dossier.id, modalTargetLineId, fullReason);
+      if (result.ok === false) {
+        setTaskError(result.error);
+      } else {
+        const updatedLogs = [
+          `${new Date().toISOString()} - ${logMessage}`,
+          ...(result.dossier.historiqueLogs || [])
+        ];
+        onUpdateDossier({
+          ...result.dossier,
+          historiqueLogs: updatedLogs
+        });
+        setTaskError(null);
+      }
+    }
+    setModalActive(null);
+    setModalTargetLineId(null);
   };
 
   const canManageDossier = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole);
@@ -1078,13 +1148,7 @@ export default function DossierDetail({
 
                       <button 
                         onClick={() => {
-                          const cause = prompt("Veuillez saisir la cause ou le motif de refus qualité :");
-                          if (cause) {
-                            handleQCSubmit("refuse", cause);
-                          } else {
-                            // Enforce refusing QC without prompt by showing error!
-                            handleQCSubmit("refuse", "");
-                          }
+                          setModalActive("qc-refuse");
                         }}
                         data-testid="qc-refuse"
                         className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
@@ -1203,6 +1267,60 @@ export default function DossierDetail({
 
           </div>
         )}
+
+        {/* Tactile reason modals for Lot 1 */}
+        <StandardReasonModal
+          isOpen={modalActive === "qc-refuse"}
+          onClose={() => setModalActive(null)}
+          onConfirm={handleQCRefuseConfirm}
+          title="Refus du Contrôle Qualité"
+          description="Veuillez sélectionner le motif principal de refus pour renvoyer le dossier à l'atelier."
+          reasons={[
+            "Essai routier non validé",
+            "Défaut d'aspect carrosserie",
+            "Bruit ou vibration persistant",
+            "Voyant anomalie actif",
+            "Autre (saisie libre)"
+          ]}
+          testIdPrefix="modal-qc-refuse"
+        />
+
+        <StandardReasonModal
+          isOpen={modalActive === "task-reopen"}
+          onClose={() => {
+            setModalActive(null);
+            setModalTargetLineId(null);
+          }}
+          onConfirm={handleReopenConfirm}
+          title="Réouverture de la tâche"
+          description="Le motif de réouverture de la tâche est obligatoire."
+          reasons={[
+            "Retour client sous garantie",
+            "Complément de travaux requis",
+            "Erreur de saisie statut",
+            "Autre (saisie libre)"
+          ]}
+          testIdPrefix="modal-task-reopen"
+        />
+
+        <StandardReasonModal
+          isOpen={modalActive === "task-block"}
+          onClose={() => {
+            setModalActive(null);
+            setModalTargetLineId(null);
+          }}
+          onConfirm={handleBlockConfirm}
+          title="Blocage de la tâche"
+          description="Veuillez spécifier la raison du blocage technique de cette tâche."
+          reasons={[
+            "Attente pièce de rechange (Magasin)",
+            "Attente accord client complémentaire",
+            "Outillage spécifique indisponible",
+            "Surcharge pont / ressource",
+            "Autre (saisie libre)"
+          ]}
+          testIdPrefix="modal-task-block"
+        />
 
       </div>
     </div>

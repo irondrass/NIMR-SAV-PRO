@@ -96,4 +96,49 @@ test.describe("Rôle : Technicien", () => {
     // Verify warning text is displayed
     await expect(page.locator('text=Ce technicien a déjà une tâche en cours.')).toBeVisible();
   });
+
+  test("Technicien peut bloquer une tâche en cours avec motif obligatoire via le modal", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="nav-technician"]'));
+
+    // 1. Start pending task to make it in_progress
+    const startBtn = page.locator('[data-testid="task-start-ro_tech_1"]');
+    await humanClick(page, startBtn);
+    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/En cours/i);
+
+    // 2. Click block button
+    const blockBtn = page.locator('[data-testid="task-block-ro_tech_1"]');
+    await expect(blockBtn).toBeVisible();
+    await humanClick(page, blockBtn);
+
+    // 3. Modal task-block should be visible
+    const modal = page.locator('[data-testid="modal-task-block"]');
+    await expect(modal).toBeVisible();
+
+    // 4. Confirm button should be disabled initially
+    const confirmBtn = page.locator('[data-testid="modal-task-block-confirm"]');
+    await expect(confirmBtn).toBeDisabled();
+
+    // 5. Select "Autre (saisie libre)"
+    const select = page.locator('[data-testid="modal-task-block-select"]');
+    await select.selectOption("Autre (saisie libre)");
+
+    // 6. Confirm button should still be disabled because details are empty
+    await expect(confirmBtn).toBeDisabled();
+
+    // 7. Fill details
+    const input = page.locator('[data-testid="modal-task-block-input"]');
+    await input.fill("Attente pièce de rechange critique");
+
+    // 8. Confirm button should now be enabled
+    await expect(confirmBtn).toBeEnabled();
+
+    // 9. Click confirm
+    await humanClick(page, confirmBtn);
+
+    // 10. Modal should close
+    await expect(modal).toHaveCount(0);
+
+    // 11. Verify task status has updated to bloquée
+    await expect(page.locator('[data-testid="task-status-ro_tech_1"]')).toHaveText(/bloquée/i);
+  });
 });

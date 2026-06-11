@@ -4,7 +4,8 @@
  */
 
 import React, { useState } from "react";
-import { DossierSAV, DossierStatus, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource } from "../types";
+import StandardReasonModal from "./StandardReasonModal";
+import { DossierSAV, DossierStatus, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole } from "../types";
 import {
   addPhotoToDossier,
   blockRepairOrder,
@@ -46,6 +47,11 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
   const [tempPhotoTitle, setTempPhotoTitle] = useState("");
   const [tempPhotoCategory, setTempPhotoCategory] = useState<PhotoCategory>("autre");
 
+  // Modal states for Lot 1
+  const [modalActive, setModalActive] = useState<boolean>(false);
+  const [modalTargetDossierId, setModalTargetDossierId] = useState<string | null>(null);
+  const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
+
   const activeTech = techniciens.find(t => t.id === selectedTechId);
 
   // Filter tasks specific to this technician
@@ -57,6 +63,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
 
   const handleAddNoteLog = (dossierId: string) => {
     if (!tempNote.trim()) return;
+
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
 
@@ -74,13 +81,16 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
   };
 
   const handleRepairOrderAction = (dossierId: string, lineId: string, action: "start" | "pause" | "block" | "finish") => {
-    const reason = action === "block" ? prompt("Raison du blocage technique :")?.trim() : "";
-    if (action === "block" && !reason) return;
+    if (action === "block") {
+      setModalTargetDossierId(dossierId);
+      setModalTargetLineId(lineId);
+      setModalActive(true);
+      return;
+    }
 
     const result =
       action === "start" ? startRepairOrder(dossiers, dossierId, lineId) :
       action === "pause" ? pauseRepairOrder(dossiers, dossierId, lineId) :
-      action === "block" ? blockRepairOrder(dossiers, dossierId, lineId, reason) :
       finishRepairOrder(dossiers, dossierId, lineId);
 
     if (result.ok === false) {
@@ -88,6 +98,35 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
       return;
     }
     onUpdateDossier(result.dossier);
+  };
+
+  const handleBlockConfirm = (reason: string, details: string) => {
+    const fullReason = details ? `${reason} : ${details}` : reason;
+    if (modalTargetDossierId && modalTargetLineId) {
+      const original = dossiers.find(d => d.id === modalTargetDossierId);
+      if (original) {
+        const line = original.ordresReparation.find(l => l.id === modalTargetLineId);
+        const taskName = line ? line.designation : modalTargetLineId;
+        const logMessage = `[${UserRole.TECHNICIEN}] - Blocage Tâche "${taskName}" (Rapport Tech) - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+        
+        const result = blockRepairOrder(dossiers, modalTargetDossierId, modalTargetLineId, fullReason);
+        if (result.ok === false) {
+          alert(result.error);
+        } else {
+          const updatedLogs = [
+            `${new Date().toISOString()} - ${logMessage}`,
+            ...(result.dossier.historiqueLogs || [])
+          ];
+          onUpdateDossier({
+            ...result.dossier,
+            historiqueLogs: updatedLogs
+          });
+        }
+      }
+    }
+    setModalActive(false);
+    setModalTargetDossierId(null);
+    setModalTargetLineId(null);
   };
 
   const handleAddPhotoFiles = async (dossierId: string, files: FileList | null) => {
@@ -260,6 +299,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                         Pause
                                       </button>
                                       <button
+                                        data-testid={`task-block-${line.id}`}
                                         onClick={() => handleRepairOrderAction(task.id, line.id, "block")}
                                         className="py-1.5 px-2.5 bg-red-600 text-white rounded font-bold hover:bg-red-700 text-[10px] transition"
                                       >
@@ -361,6 +401,26 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
           </div>
         )}
       </div>
+
+      <StandardReasonModal
+        isOpen={modalActive}
+        onClose={() => {
+          setModalActive(false);
+          setModalTargetDossierId(null);
+          setModalTargetLineId(null);
+        }}
+        onConfirm={handleBlockConfirm}
+        title="Blocage de la tâche"
+        description="Veuillez spécifier la raison du blocage technique de cette tâche."
+        reasons={[
+          "Attente pièce de rechange (Magasin)",
+          "Attente accord client complémentaire",
+          "Outillage spécifique indisponible",
+          "Surcharge pont / ressource",
+          "Autre (saisie libre)"
+        ]}
+        testIdPrefix="modal-task-block"
+      />
 
     </div>
   );
