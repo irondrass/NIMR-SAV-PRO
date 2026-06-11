@@ -113,6 +113,40 @@ export interface WorkshopSlotSuggestion {
   bayAvailability: string;
 }
 
+export type PlanningBlockingCode =
+  | "planning-collision-tech"
+  | "planning-collision-bay"
+  | "planning-collision-overload"
+  | "planning-collision-hours"
+  | "planning-collision-saturday-afternoon"
+  | "planning-collision-sunday"
+  | "planning-collision-lunch"
+  | "planning-segments-invalid";
+
+export interface PlanningAssignmentInput {
+  dossiers: DossierSAV[];
+  dossierId: string;
+  lineId: string;
+  technicianId: string;
+  bayId: string;
+  start: Date | string;
+  end: Date | string;
+  planningSegments?: Array<{ start: string; end: string }>;
+  technicianDailyCapacityHours?: number;
+}
+
+export interface PlanningAssignmentValidation {
+  allowed: boolean;
+  codes: PlanningBlockingCode[];
+  reasons: string[];
+  segments: Array<{ start: string; end: string }>;
+}
+
+export interface DossierDeliveryGate {
+  allowed: boolean;
+  reasons: string[];
+}
+
 export type TaskMutationResult =
   | { ok: true; dossiers: DossierSAV[]; dossier: DossierSAV; line: RepairOrderLine }
   | { ok: false; error: string };
@@ -326,6 +360,14 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
     if (status === "done") {
       return { ok: false, error: "Une tâche terminée doit être réouverte avant reprise." };
     }
+    if (status === "blocked") {
+      return { ok: false, error: "Lever le blocage avant de reprendre la tâche." };
+    }
+
+    const assignedTechnicianId = line.plannedTechnicianId || dossier.technicienId;
+    if (!assignedTechnicianId) {
+      return { ok: false, error: "Affecter un technicien avant de démarrer la tâche." };
+    }
 
     const activeLineInDossier = dossier.ordresReparation.find(
       current => current.id !== lineId && normalizeRepairOrderStatus(current.status) === "in_progress"
@@ -334,10 +376,10 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
       return { ok: false, error: "Une tâche est déjà en cours pour ce dossier." };
     }
 
-    if (dossier.technicienId) {
+    if (assignedTechnicianId) {
       const activeForTechnician = normalizedDossiers.find(currentDossier =>
         currentDossier.id !== dossierId &&
-        currentDossier.technicienId === dossier.technicienId &&
+        currentDossier.technicienId === assignedTechnicianId &&
         currentDossier.ordresReparation.some(current => normalizeRepairOrderStatus(current.status) === "in_progress")
       );
       if (activeForTechnician) {
@@ -350,9 +392,42 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
       line: appendLineHistory({ ...line, status: "in_progress" }, now, "Tâche démarrée."),
       dossierChanges: {
         statut: DossierStatus.EN_TRAVAUX,
+        technicienId: assignedTechnicianId,
         bloqueRaison: "",
         prochaineActionRecommended: "Terminer la tâche en cours avant d'en démarrer une autre",
       },
+    };
+  });
+}
+
+export function releaseRepairOrderBlock(
+  dossiers: DossierSAV[],
+  dossierId: string,
+  lineId: string,
+  userRole: UserRole,
+  reason: string,
+  now = new Date()
+): TaskMutationResult {
+  return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
+    if (![UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole)) {
+      return { ok: false, error: "Seul le Directeur SAV ou le Chef Atelier peut lever un blocage." };
+    }
+    if (!reason.trim()) {
+      return { ok: false, error: "Le motif de levée de blocage est obligatoire." };
+    }
+    if (normalizeRepairOrderStatus(line.status) !== "blocked") {
+      return { ok: false, error: "Seule une tâche bloquée peut être débloquée." };
+    }
+
+    return {
+      ok: true,
+      line: appendLineHistory({ ...line, status: "paused" }, now, `Blocage levé: ${reason.trim()}`),
+      dossierChanges: {
+        statut: DossierStatus.TRAVAUX_PLANIFIES,
+        bloqueRaison: "",
+        prochaineActionRecommended: "Reprendre la tâche après levée du blocage",
+      },
+      dossierLog: `Levée de blocage tâche ${line.designation}: ${reason.trim()}`,
     };
   });
 }
@@ -563,6 +638,73 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
   };
 }
 
+export function canSavePlanningAssignment(input: PlanningAssignmentInput): boolean {
+  return validatePlanningAssignment(input).allowed;
+}
+
+export function validatePlanningAssignment(input: PlanningAssignmentInput): PlanningAssignmentValidation {
+  const codes: PlanningBlockingCode[] = [];
+  const start = parsePlanningDate(input.start);
+  const end = parsePlanningDate(input.end);
+  const pushIssue = (code: PlanningBlockingCode) => {
+    if (!codes.includes(code)) codes.push(code);
+  };
+
+  if (!start || !end || end.getTime() <= start.getTime()) {
+    pushIssue("planning-segments-invalid");
+    return buildPlanningValidationResult(codes, []);
+  }
+
+  if (!isWorkingDay(start)) {
+    pushIssue("planning-collision-sunday");
+  }
+
+  if (!isSameLocalDate(start, end)) {
+    pushIssue("planning-collision-hours");
+  }
+
+  const startMin = getMinutesSinceMidnight(start);
+  const endMin = getMinutesSinceMidnight(end);
+  const isSaturday = start.getDay() === 6;
+
+  if (isSaturday && (startMin >= LUNCH_START_HOUR * 60 || endMin > LUNCH_START_HOUR * 60)) {
+    pushIssue("planning-collision-saturday-afternoon");
+  }
+
+  if (!isStartInsideWorkingWindow(start) || !isEndAllowedForWorkingDate(end, isSaturday)) {
+    pushIssue("planning-collision-hours");
+  }
+
+  const expectedSegments = buildPlanningSegments(start, end);
+  const submittedSegments = input.planningSegments && input.planningSegments.length > 0
+    ? input.planningSegments
+    : expectedSegments;
+
+  if (!arePlanningSegmentsValidForInterval(start, end, submittedSegments, expectedSegments)) {
+    pushIssue("planning-segments-invalid");
+  }
+  if (submittedSegments.some(segmentOverlapsLunch)) {
+    pushIssue("planning-collision-lunch");
+  }
+
+  if (detectTechnicianCollision(input.dossiers, input.technicianId, start, end, input.lineId)) {
+    pushIssue("planning-collision-tech");
+  }
+  if (detectBayCollision(input.dossiers, input.bayId, start, end, input.lineId)) {
+    pushIssue("planning-collision-bay");
+  }
+
+  const planningDate = getLocalDateKey(start);
+  const maxCapacity = input.technicianDailyCapacityHours ?? (isSaturday ? 4 : 8);
+  const requestedHours = calculateSegmentHoursForDate(submittedSegments, planningDate);
+  const currentDailyLoad = calculateTechnicianDailyLoad(input.technicianId, planningDate, input.dossiers, input.lineId);
+  if (currentDailyLoad + requestedHours > maxCapacity) {
+    pushIssue("planning-collision-overload");
+  }
+
+  return buildPlanningValidationResult(codes, submittedSegments);
+}
+
 export function blockDossier(dossier: DossierSAV, reason: string, now = new Date()): DossierSAV {
   return {
     ...dossier,
@@ -627,7 +769,46 @@ export function submitQualityControl(
   };
 }
 
+export function canDeliverDossier(dossier: DossierSAV): DossierDeliveryGate {
+  const reasons: string[] = [];
+  const repairStatuses = dossier.ordresReparation.map(line => normalizeRepairOrderStatus(line.status));
+
+  if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.PRET_FACTURATION || dossier.statut === DossierStatus.CLOTURE) {
+    reasons.push("Le dossier est déjà livré ou clôturé.");
+  }
+  if (dossier.statut !== DossierStatus.PRET_A_LIVRER) {
+    reasons.push("Le statut doit être Prêt à livrer.");
+  }
+  if (dossier.checklistQC.validationGlobale !== "valide") {
+    reasons.push("Contrôle qualité accepté obligatoire.");
+  }
+  if (dossier.checklistQC.validationGlobale === "refuse") {
+    reasons.push("Contrôle qualité refusé : retour atelier requis.");
+  }
+  if (repairStatuses.some(status => status === "in_progress")) {
+    reasons.push("Une tâche atelier est encore en cours.");
+  }
+  if (repairStatuses.some(status => status === "blocked")) {
+    reasons.push("Une tâche atelier est bloquée.");
+  }
+  if (!dossier.ordresReparation.every(isRepairOrderDone)) {
+    reasons.push("Toutes les tâches obligatoires doivent être terminées.");
+  }
+  if (dossier.statut === DossierStatus.BLOQUE || Boolean(dossier.bloqueRaison?.trim())) {
+    reasons.push("Le dossier est bloqué.");
+  }
+
+  return {
+    allowed: reasons.length === 0,
+    reasons: Array.from(new Set(reasons)),
+  };
+}
+
 export function confirmDelivery(dossier: DossierSAV, now = new Date()): DossierSAV {
+  if (!canDeliverDossier(dossier).allowed) {
+    return dossier;
+  }
+
   const livraison: DeliveryProtocole = {
     ...dossier.livraison,
     controleQualiteOk: true,
@@ -710,7 +891,69 @@ export function validateBackupPayload(value: unknown): { ok: true; data: Partial
     return { ok: false, error: "Aucune section importable n'a été trouvée." };
   }
 
+  if (data.dossiers) {
+    const invariantError = validateImportedDossierInvariants(data.dossiers);
+    if (invariantError) {
+      return { ok: false, error: invariantError };
+    }
+  }
+
   return { ok: true, data };
+}
+
+function validateImportedDossierInvariants(dossiers: DossierSAV[]): string | null {
+  for (const dossier of dossiers) {
+    const statuses = dossier.ordresReparation.map(line => normalizeRepairOrderStatus(line.status));
+    const hasActiveTask = statuses.includes("in_progress");
+    const hasBlockedTask = statuses.includes("blocked");
+    const allTasksDone = dossier.ordresReparation.every(isRepairOrderDone);
+    const isDeliveredOrClosed = [DossierStatus.LIVRE, DossierStatus.PRET_FACTURATION, DossierStatus.CLOTURE].includes(dossier.statut);
+
+    if (dossier.statut === DossierStatus.PRET_A_LIVRER) {
+      const deliveryGate = canDeliverDossier(dossier);
+      if (!deliveryGate.allowed) {
+        return `Dossier ${dossier.id} prêt à livrer incohérent: ${deliveryGate.reasons.join(" ")}`;
+      }
+    }
+
+    if (isDeliveredOrClosed) {
+      if (dossier.checklistQC.validationGlobale !== "valide") {
+        return `Dossier ${dossier.id} livré/clôturé sans QC accepté.`;
+      }
+      if (hasActiveTask || hasBlockedTask || !allTasksDone) {
+        return `Dossier ${dossier.id} livré/clôturé avec tâches atelier non terminées.`;
+      }
+      if (dossier.statut === DossierStatus.BLOQUE || Boolean(dossier.bloqueRaison?.trim())) {
+        return `Dossier ${dossier.id} livré/clôturé alors qu'il est bloqué.`;
+      }
+    }
+
+    for (const line of dossier.ordresReparation) {
+      const hasPlanningData = Boolean(line.planningStart || line.planningEnd || line.planningSegments?.length || line.plannedTechnicianId || line.plannedBayId);
+      if (!hasPlanningData) continue;
+
+      if (!line.planningStart || !line.planningEnd || !line.plannedTechnicianId || !line.plannedBayId) {
+        return `Planning incomplet pour la tâche ${line.id} du dossier ${dossier.id}.`;
+      }
+
+      const planningValidation = validatePlanningAssignment({
+        dossiers,
+        dossierId: dossier.id,
+        lineId: line.id,
+        technicianId: line.plannedTechnicianId,
+        bayId: line.plannedBayId,
+        start: line.planningStart,
+        end: line.planningEnd,
+        planningSegments: line.planningSegments,
+      });
+
+      if (!planningValidation.allowed) {
+        return `Planning invalide pour la tâche ${line.id} du dossier ${dossier.id}: ${planningValidation.reasons.join(" ")}`;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function isDossierSAV(value: unknown): value is DossierSAV {
@@ -1021,6 +1264,103 @@ export function buildPlanningSegments(start: Date, end: Date): Array<{ start: st
   return segments;
 }
 
+function buildPlanningValidationResult(
+  codes: PlanningBlockingCode[],
+  segments: Array<{ start: string; end: string }>
+): PlanningAssignmentValidation {
+  const labels: Record<PlanningBlockingCode, string> = {
+    "planning-collision-tech": "Le technicien est déjà affecté sur un autre dossier durant cette période.",
+    "planning-collision-bay": "Le pont d'atelier sélectionné est déjà occupé durant cette période.",
+    "planning-collision-overload": "La tâche dépasse la capacité journalière restante du technicien.",
+    "planning-collision-hours": "Créneau en dehors des horaires d'ouverture de l'atelier.",
+    "planning-collision-saturday-afternoon": "Samedi après-midi fermé.",
+    "planning-collision-sunday": "Dimanche fermé.",
+    "planning-collision-lunch": "Le créneau ne doit pas créer de bloc sur la pause déjeuner.",
+    "planning-segments-invalid": "Segments de planning invalides.",
+  };
+
+  return {
+    allowed: codes.length === 0,
+    codes,
+    reasons: codes.map(code => labels[code]),
+    segments,
+  };
+}
+
+function parsePlanningDate(value: Date | string): Date | null {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function arePlanningSegmentsValidForInterval(
+  start: Date,
+  end: Date,
+  submittedSegments: Array<{ start: string; end: string }>,
+  expectedSegments: Array<{ start: string; end: string }>
+): boolean {
+  if (submittedSegments.length === 0 || expectedSegments.length === 0) return false;
+  if (!segmentsMatch(submittedSegments, expectedSegments)) return false;
+
+  const firstStart = new Date(submittedSegments[0].start);
+  const lastEnd = new Date(submittedSegments[submittedSegments.length - 1].end);
+  if (firstStart.getTime() !== start.getTime() || lastEnd.getTime() !== end.getTime()) return false;
+
+  return submittedSegments.every(segment => {
+    const segmentStart = parsePlanningDate(segment.start);
+    const segmentEnd = parsePlanningDate(segment.end);
+    if (!segmentStart || !segmentEnd || segmentEnd.getTime() <= segmentStart.getTime()) return false;
+    return isIntervalInsideWorkingWindow(segmentStart, segmentEnd);
+  });
+}
+
+function segmentsMatch(
+  left: Array<{ start: string; end: string }>,
+  right: Array<{ start: string; end: string }>
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((segment, index) => {
+    const other = right[index];
+    return (
+      new Date(segment.start).getTime() === new Date(other.start).getTime() &&
+      new Date(segment.end).getTime() === new Date(other.end).getTime()
+    );
+  });
+}
+
+function isIntervalInsideWorkingWindow(start: Date, end: Date): boolean {
+  return getWorkingWindowsForDate(start).some(window =>
+    start.getTime() >= window.start.getTime() &&
+    end.getTime() <= window.end.getTime()
+  );
+}
+
+function segmentOverlapsLunch(segment: { start: string; end: string }): boolean {
+  const start = parsePlanningDate(segment.start);
+  const end = parsePlanningDate(segment.end);
+  if (!start || !end || start.getDay() === 6) return false;
+  const lunchStart = setTimeOnDate(start, LUNCH_START_HOUR, 0);
+  const lunchEnd = setTimeOnDate(start, LUNCH_END_HOUR, 0);
+  return start.getTime() < lunchEnd.getTime() && lunchStart.getTime() < end.getTime();
+}
+
+function isStartInsideWorkingWindow(start: Date): boolean {
+  return getWorkingWindowsForDate(start).some(window =>
+    start.getTime() >= window.start.getTime() &&
+    start.getTime() < window.end.getTime()
+  );
+}
+
+function isEndAllowedForWorkingDate(end: Date, isSaturday: boolean): boolean {
+  if (!isWorkingDay(end)) return false;
+  const min = getMinutesSinceMidnight(end);
+  if (isSaturday) return min <= WORKDAY_START_HOUR * 60 + 4 * 60;
+  return min <= WORKDAY_END_HOUR * 60;
+}
+
+function getMinutesSinceMidnight(date: Date): number {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
 export function detectTechnicianCollision(
   dossiers: DossierSAV[],
   techId: string,
@@ -1069,11 +1409,12 @@ export function detectBayCollision(
   return false;
 }
 
-export function calculateTechnicianDailyLoad(techId: string, dateStr: string, dossiers: DossierSAV[]): number {
+export function calculateTechnicianDailyLoad(techId: string, dateStr: string, dossiers: DossierSAV[], ignoreTaskId?: string): number {
   let total = 0;
   for (const dossier of dossiers) {
     if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
     for (const line of dossier.ordresReparation) {
+      if (ignoreTaskId && line.id === ignoreTaskId) continue;
       if (line.plannedTechnicianId === techId && line.planningDate === dateStr) {
         total += calculateSegmentHoursForDate(getLinePlanningSegments(line), dateStr);
       }
@@ -1141,6 +1482,13 @@ function isSameLocalDate(left: Date, right: Date): boolean {
     left.getMonth() === right.getMonth() &&
     left.getDate() === right.getDate()
   );
+}
+
+function getLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function maxDate(left: Date, right: Date): Date {

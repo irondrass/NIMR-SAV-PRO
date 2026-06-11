@@ -1,19 +1,41 @@
 # Validation fonctionnelle NIMR SAV PRO v1.1.0
 
 Date audit : 2026-06-11  
-Périmètre : pré-Lot 5, après Lot 4A Planning Chef Atelier avancé.  
-Décision : **Corrections obligatoires avant Lot 5**.
+Périmètre : pré-Lot 5, après Lot 4A Planning Chef Atelier avancé.
+Mise à jour Lot 4C : **P0/P1 demandés corrigés, OK technique pour validation terrain pré-Lot 5**. Lot 5 non commencé.
+
+## Mise à jour Lot 4C
+
+Mini-lot exécuté : **NIMR SAV PRO v1.1.0 — Lot 4C Corrections Pré-Lot 5**
+Date de validation technique : 2026-06-11
+Tag release : aucun tag `v1.1.0` créé.
+
+| Priorité | Module | Statut Lot 4C | Validation |
+|---|---|---|---|
+| P0 | Planning | Corrigé : `validatePlanningAssignment` / `canSavePlanningAssignment` bloquent collision technicien, collision pont, surcharge, dimanche, samedi après-midi, horaires fermés et segments invalides. Le bouton `planning-manual-submit` est désactivé avec le message "Corriger le créneau avant sauvegarde." | Tests unitaires + E2E planning desktop/mobile/tablette. |
+| P0 | Livraison | Corrigé : `canDeliverDossier` centralise les règles; `confirmDelivery` ne livre plus un dossier incohérent. L'UI désactive `delivery-submit` et affiche les raisons. | Tests unitaires + E2E livraison. |
+| P0 | Forçage statut | Corrigé : `force-status-select` retiré de `DossierDetail`. Aucun mode diagnostic de forçage n'a été créé dans ce lot. | E2E rôles Directeur/Chef/Réceptionnaire/Technicien/QC/Lecture seule. |
+| P1 | Démarrage tâche sans technicien | Corrigé : `startRepairOrder` exige un technicien dossier ou tâche planifiée. | Tests unitaires + E2E technicien. |
+| P1 | Tâche bloquée | Corrigé : action "Lever blocage" avec motif obligatoire, réservée Directeur SAV / Chef Atelier; reprise directe bloquée. | Tests unitaires + E2E Directeur. |
+| P1 | Import JSON métier | Corrigé : `validateBackupPayload` refuse les dossiers livrés avec tâches actives/bloquées, prêts à livrer avec QC refusé, planning incomplet/invalide, collisions technicien/pont et statuts incohérents. | Tests unitaires + E2E import/export. |
+
+Validation exécutée :
+
+- `npm test` : OK
+- `npm run lint` : OK
+- `npm run build` : OK
+- `npm run test:e2e` : OK, **138 tests passés**
 
 ## A. Recette par rôle
 
 | Rôle | Recette couverte | Résultat | Points de vigilance |
 | --- | --- | --- | --- |
 | Directeur SAV | Tableau de bord, accès global, changement rôle, dossier, QC, livraison, paramètres, import/export | OK fonctionnel | Le forçage manuel de statut reste trop puissant pour un usage terrain. |
-| Chef Atelier | Planning Gantt, affectation technicien, blocage/reprise, réouverture tâche, planification | OK avec réserve | Collisions planning visibles mais pas toutes bloquantes à l'enregistrement. |
+| Chef Atelier | Planning Gantt, affectation technicien, blocage/reprise, réouverture tâche, planification | OK Lot 4C | Collisions planning bloquées en dur; levée de blocage avec motif ajoutée. |
 | Réceptionnaire | Réception guidée, photos, dossier, livraison | OK avec réserve | Champs critiques téléphone/VIN peuvent rester faux ou générés automatiquement. |
 | Technicien | Vue tactile, démarrage/pause/reprise/blocage/fin tâche, photos, notes | OK avec réserve | Une tâche peut encore être lancée depuis certains écrans si le dossier n'a pas de technicien. |
 | Contrôle Qualité | Checklist, acceptation, refus avec motif | OK | Le statut forcé peut contourner indirectement le verrou QC. |
-| Livraison | Signature simulée, restitution, prêt facturation | Partiel | Signature non persistée et garde-fous livraison insuffisants si statut forcé/importé. |
+| Livraison | Signature simulée, restitution, prêt facturation | OK Lot 4C avec dette UX | Garde-fous livraison centralisés; signature reste simulée et à remplacer par capture réelle ultérieure. |
 | Lecture seule | Consultation sans actions critiques | OK | Continuer à vérifier l'absence DOM des actions sensibles à chaque lot. |
 
 Validation automatique disponible au dernier passage Lot 4A :
@@ -23,6 +45,8 @@ Validation automatique disponible au dernier passage Lot 4A :
 - `npm run test:e2e` OK, 135 tests passés desktop/mobile/tablette
 
 ## B. Audit métier SAV
+
+Lecture du tableau : problèmes détectés avant Lot 4C. Les lignes P0/P1 prises dans le mini-lot sont marquées corrigées dans la section "Mise à jour Lot 4C".
 
 | Module | Rôle concerné | Problème | Impact SAV | Gravité | Recommandation | Priorité |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -66,20 +90,21 @@ Validation automatique disponible au dernier passage Lot 4A :
 
 ## E. Recommandations avant Lot 5
 
-Mini-lot proposé : **NIMR SAV PRO v1.1.0 — Lot 4C Corrections Pré-Lot 5**
+Mini-lot réalisé : **NIMR SAV PRO v1.1.0 — Lot 4C Corrections Pré-Lot 5**
 
-Priorité P0, à faire avant Lot 5 :
-1. Bloquer l'enregistrement planning si collision technicien, collision pont ou surcharge.
-2. Ajouter garde-fou métier central `canDeliverDossier` et bloquer `confirmDelivery` si QC non accepté ou tâche non terminée.
-3. Retirer ou verrouiller "Forcer le statut (Démo)" hors fiche opérationnelle.
+Corrigé en Lot 4C :
+1. Bloquer l'enregistrement planning si collision technicien, collision pont, surcharge, dimanche, samedi après-midi, horaires fermés ou segments invalides.
+2. Ajouter garde-fou métier central `canDeliverDossier` et bloquer `confirmDelivery` si QC non accepté, tâche active/bloquée/non terminée, dossier bloqué, déjà livré ou statut incohérent.
+3. Retirer "Forcer le statut (Démo)" de la fiche opérationnelle.
+4. Interdire le démarrage d'une tâche sans technicien affecté au dossier ou à la tâche.
+5. Ajouter action "Lever blocage" avec motif obligatoire, historique et rôles autorisés.
+6. Renforcer la validation métier d'import JSON.
 
-Priorité P1, fortement recommandé avant Lot 5 :
-1. Interdire démarrage tâche sans technicien/tâche planifiée selon règle choisie.
-2. Remplacer la livraison simulée par une vraie signature persistée.
-3. Ajouter action "Lever blocage" avec motif et historique.
-4. Afficher l'historique de tâche OR.
-5. Valider téléphone/VIN/immatriculation avec messages inline.
-6. Normaliser et valider les champs planning à l'import JSON.
+Reste recommandé avant industrialisation terrain large :
+1. Remplacer la livraison simulée par une vraie signature persistée.
+2. Afficher l'historique de tâche OR de façon plus complète dans la fiche dossier.
+3. Valider téléphone/VIN/immatriculation avec messages inline.
+4. Créer tâche de retouche ciblée lors d'un refus QC.
 
 Priorité P2/P3 :
 1. Remplacer les `alert(...)` restants par modal/toast homogène.
@@ -89,10 +114,10 @@ Priorité P2/P3 :
 
 ## Décision finale
 
-**Corrections obligatoires avant Lot 5.**
+**OK technique pour validation terrain pré-Lot 5.**
 
-La base v1.1.0 Lot 4A est techniquement stable et testée, mais le passage au Lot 5 doit attendre le mini-lot :
+Les blocages P0 et les P1 demandés pour **NIMR SAV PRO v1.1.0 — Lot 4C Corrections Pré-Lot 5** sont corrigés et validés par tests automatisés.
 
-**NIMR SAV PRO v1.1.0 — Lot 4C Corrections Pré-Lot 5**
-
-Raison : les collisions planning enregistrables, la livraison insuffisamment verrouillée et le forçage de statut opérationnel peuvent gêner ou fausser un circuit SAV réel.
+Lot 5 : **non commencé**.
+Lot 6 : **non commencé**.
+Tag `v1.1.0` : **non créé**.

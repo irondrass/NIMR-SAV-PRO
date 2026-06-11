@@ -21,6 +21,7 @@ import {
 import {
   addPhotoToDossier,
   blockRepairOrder,
+  canDeliverDossier,
   confirmDelivery,
   createRuntimeId,
   finishRepairOrder,
@@ -29,6 +30,7 @@ import {
   markReadyForBilling,
   normalizeRepairOrderStatus,
   pauseRepairOrder,
+  releaseRepairOrderBlock,
   removePhotoFromDossier,
   reopenRepairOrder,
   startRepairOrder,
@@ -91,9 +93,10 @@ export default function DossierDetail({
   const [taskError, setTaskError] = useState<string | null>(null);
   const [qcError, setQcError] = useState<string | null>(null);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
+  const [signatureCaptured, setSignatureCaptured] = useState(false);
 
   // Modal states for Lot 1
-  const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | null>(null);
+  const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | "task-unblock" | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
 
   const updateDossierState = (changes: Partial<DossierSAV>) => {
@@ -132,7 +135,6 @@ export default function DossierDetail({
   const applyTaskMutation = (result: ReturnType<typeof startRepairOrder>) => {
     if (result.ok === false) {
       setTaskError(result.error);
-      alert(result.error);
       return;
     }
     setTaskError(null);
@@ -150,6 +152,11 @@ export default function DossierDetail({
   const handleBlockROLine = (lineId: string) => {
     setModalTargetLineId(lineId);
     setModalActive("task-block");
+  };
+
+  const handleUnblockROLine = (lineId: string) => {
+    setModalTargetLineId(lineId);
+    setModalActive("task-unblock");
   };
 
   const handleFinishROLine = (lineId: string) => {
@@ -237,8 +244,9 @@ export default function DossierDetail({
 
   // 5. Handover / Delivery functions
   const handleDeliveryConfirm = () => {
-    if (dossier.checklistQC.validationGlobale !== "valide") {
-      setDeliveryError("Le contrôle qualité doit être validé avant la livraison.");
+    const deliveryGate = canDeliverDossier(dossier);
+    if (!deliveryGate.allowed) {
+      setDeliveryError(deliveryGate.reasons.join(" "));
       return;
     }
     setDeliveryError(null);
@@ -320,11 +328,38 @@ export default function DossierDetail({
     setModalTargetLineId(null);
   };
 
+  const handleUnblockConfirm = (reason: string, details: string) => {
+    const fullReason = details ? `${reason} : ${details}` : reason;
+    if (modalTargetLineId) {
+      const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
+      const taskName = line ? line.designation : modalTargetLineId;
+      const logMessage = `[${userRole}] - Levée Blocage Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+
+      const result = releaseRepairOrderBlock(dossiers, dossier.id, modalTargetLineId, userRole, fullReason);
+      if (result.ok === false) {
+        setTaskError(result.error);
+      } else {
+        const updatedLogs = [
+          `${new Date().toISOString()} - ${logMessage}`,
+          ...(result.dossier.historiqueLogs || [])
+        ];
+        onUpdateDossier({
+          ...result.dossier,
+          historiqueLogs: updatedLogs
+        });
+        setTaskError(null);
+      }
+    }
+    setModalActive(null);
+    setModalTargetLineId(null);
+  };
+
   const canManageDossier = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole);
   const canUpdateWorkOrders = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER, UserRole.TECHNICIEN].includes(userRole);
   const canHandleApprovals = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE].includes(userRole);
   const canValidateQuality = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER, UserRole.CONTROLE_QUALITE].includes(userRole);
   const canDeliverVehicle = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE].includes(userRole);
+  const deliveryGate = canDeliverDossier(dossier);
 
   return (
     <div className="space-y-6">
@@ -340,19 +375,7 @@ export default function DossierDetail({
 
         {canManageDossier && (
           <div className="flex flex-wrap gap-2">
-            {/* Quick manual status trigger for demonstration */}
-            <span className="text-xs font-bold text-neutral-400 self-center">Forcer le statut (Démo) :</span>
-            <select
-              data-testid="force-status-select"
-              className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
-              value={dossier.statut}
-              onChange={(e) => updateDossierState({ statut: e.target.value as DossierStatus })}
-            >
-              {Object.values(DossierStatus).map((st) => (
-                <option key={st} value={st}>{st}</option>
-              ))}
-            </select>
-
+            <span className="text-xs font-bold text-neutral-400 self-center">Priorité dossier :</span>
             <select
               data-testid="force-priority-select"
               className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
@@ -679,21 +702,26 @@ export default function DossierDetail({
             <div className="space-y-2.5">
               {dossier.ordresReparation.map((line) => {
                 const status = normalizeRepairOrderStatus(line.status);
+                const assignedTechnicianId = line.plannedTechnicianId || dossier.technicienId;
                 const activeLineInSameDossier = dossier.ordresReparation.find(current =>
                   current.id !== line.id && normalizeRepairOrderStatus(current.status) === "in_progress"
                 );
-                const activeDossierForTechnician = dossier.technicienId
+                const activeDossierForTechnician = assignedTechnicianId
                   ? dossiers.find(current =>
                     current.id !== dossier.id &&
-                    current.technicienId === dossier.technicienId &&
+                    current.technicienId === assignedTechnicianId &&
                     current.ordresReparation.some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
                   )
                   : undefined;
-                const startBlockedMessage = activeLineInSameDossier
-                  ? "Une tâche est déjà en cours pour ce dossier."
-                  : activeDossierForTechnician
-                    ? "Ce technicien a déjà une tâche en cours."
-                    : "";
+                const startBlockedMessage = !assignedTechnicianId
+                  ? "Affecter un technicien avant de démarrer la tâche."
+                  : status === "blocked"
+                    ? "Lever le blocage avant de reprendre la tâche."
+                    : activeLineInSameDossier
+                      ? "Une tâche est déjà en cours pour ce dossier."
+                      : activeDossierForTechnician
+                        ? "Ce technicien a déjà une tâche en cours."
+                        : "";
                 const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
                 const badgeStyle = {
                   pending: "bg-stone-100 text-stone-600",
@@ -757,6 +785,17 @@ export default function DossierDetail({
                           </div>
                         ) : (
                           <div className="flex flex-wrap justify-end gap-1">
+                            {status === "blocked" && canManageDossier && (
+                              <button
+                                onClick={() => handleUnblockROLine(line.id)}
+                                data-testid={`task-unblock-${line.id}`}
+                                className="p-1 px-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
+                                title="Lever le blocage avec motif obligatoire"
+                              >
+                                <Lock className="w-3 h-3" />
+                                Lever blocage
+                              </button>
+                            )}
                             {status !== "in_progress" && (
                               <button
                                 disabled={!canStartLine}
@@ -1200,9 +1239,9 @@ export default function DossierDetail({
 
                 <div className="flex items-center gap-2">
                   <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white font-bold ${
-                    dossier.ordresReparation.every(isRepairOrderDone) ? "bg-green-500" : "bg-blue-500"
+                    dossier.ordresReparation.every(isRepairOrderDone) ? "bg-green-500" : "bg-red-500"
                   }`}>
-                    ✓
+                    {dossier.ordresReparation.every(isRepairOrderDone) ? "✓" : "!"}
                   </span>
                   <span className="font-semibold text-slate-700 ">
                     Tous les ordres de réparation d'origine validés : 
@@ -1212,6 +1251,13 @@ export default function DossierDetail({
                   </span>
                 </div>
               </div>
+              {!deliveryGate.allowed && (
+                <div data-testid="delivery-blocking-reasons" className="mt-3 p-3 bg-red-50 border border-red-100 rounded-lg text-red-700 font-bold space-y-1">
+                  {deliveryGate.reasons.map(reason => (
+                    <p key={reason}>- {reason}</p>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Complete Handover section */}
@@ -1224,9 +1270,9 @@ export default function DossierDetail({
                   <div 
                     data-testid="delivery-signature"
                     className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
-                    onClick={() => alert("Signature sécurisée capturée sur tablette NIMR.")}
+                    onClick={() => setSignatureCaptured(true)}
                   >
-                    [ Cliquer ici pour simuler la signature tactile du client ]
+                    {signatureCaptured ? "[ Signature client capturée ]" : "[ Cliquer ici pour simuler la signature tactile du client ]"}
                   </div>
 
                   <p className="text-[10px] text-zinc-400">La signature certifie la restitution du véhicule, le contrôle de propreté et la remise des objets personnels listés.</p>
@@ -1236,7 +1282,9 @@ export default function DossierDetail({
                   <button 
                     onClick={handleDeliveryConfirm}
                     data-testid="delivery-submit"
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
+                    disabled={!deliveryGate.allowed}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:hover:bg-gray-300 disabled:text-gray-500 text-white font-bold rounded text-xs transition duration-200 cursor-pointer disabled:cursor-not-allowed"
+                    title={deliveryGate.allowed ? "Restituer le véhicule" : deliveryGate.reasons.join(" ")}
                   >
                     Restituer le Véhicule au client
                   </button>
@@ -1320,6 +1368,25 @@ export default function DossierDetail({
             "Autre (saisie libre)"
           ]}
           testIdPrefix="modal-task-block"
+        />
+
+        <StandardReasonModal
+          isOpen={modalActive === "task-unblock"}
+          onClose={() => {
+            setModalActive(null);
+            setModalTargetLineId(null);
+          }}
+          onConfirm={handleUnblockConfirm}
+          title="Levée de blocage"
+          description="Le motif de levée de blocage est obligatoire avant toute reprise atelier."
+          reasons={[
+            "Pièce reçue et contrôlée",
+            "Accord client obtenu",
+            "Outillage de nouveau disponible",
+            "Pont / ressource libéré",
+            "Autre (saisie libre)"
+          ]}
+          testIdPrefix="modal-task-unblock"
         />
 
       </div>

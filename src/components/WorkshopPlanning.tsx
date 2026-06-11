@@ -14,9 +14,8 @@ import {
   alignToWorkingTime,
   addWorkingMinutes,
   buildPlanningSegments,
-  detectTechnicianCollision,
-  detectBayCollision,
-  calculateTechnicianDailyLoad
+  calculateTechnicianDailyLoad,
+  validatePlanningAssignment
 } from "../sav-core";
 import { 
   Calendar, 
@@ -239,69 +238,40 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
   const checkManualCollisions = () => {
     if (!manualDossierId || !manualTaskId || !manualTechId || !manualBayId) return [];
     
-    const { start, end, estimatedHours } = getManualInterval();
-    const warnings: string[] = [];
-
-    // 1. Working hours check
-    const startMin = start.getHours() * 60 + start.getMinutes();
-    const endMin = end.getHours() * 60 + end.getMinutes();
-    const limitMax = isSat ? 12 * 60 : 17 * 60;
-    
-    if (isClosedDay) {
-      warnings.push("planning-collision-sunday");
-    }
-
-    if (isSat && startMin >= 12 * 60) {
-      warnings.push("planning-collision-saturday-afternoon");
-    }
-
-    if (startMin < 8 * 60 || startMin >= limitMax || endMin > limitMax || getLocalDateStr(start) !== getLocalDateStr(end)) {
-      warnings.push("planning-collision-hours");
-    }
-
-    // 2. Lunch break check
-    if (!isSat && ((startMin >= 12 * 60 && startMin < 13 * 60) || (endMin > 12 * 60 && startMin < 13 * 60))) {
-      warnings.push("planning-collision-lunch");
-    }
-
-    // 3. Technician collision
-    if (detectTechnicianCollision(dossiers, manualTechId, start, end, manualTaskId)) {
-      warnings.push("planning-collision-tech");
-    }
-
-    // 4. Bay collision
-    if (detectBayCollision(dossiers, manualBayId, start, end, manualTaskId)) {
-      warnings.push("planning-collision-bay");
-    }
-
-    // 5. Daily load overflow
-    const maxCap = isSat ? 4 : 8;
-    const currentDailyLoad = calculateTechnicianDailyLoad(manualTechId, selectedDateStr, dossiers);
-    if (currentDailyLoad + estimatedHours > maxCap) {
-      warnings.push("planning-collision-overload");
-    }
-
-    return warnings;
+    const { start, end } = getManualInterval();
+    return validatePlanningAssignment({
+      dossiers,
+      dossierId: manualDossierId,
+      lineId: manualTaskId,
+      technicianId: manualTechId,
+      bayId: manualBayId,
+      start,
+      end,
+    }).codes;
   };
 
   const manualWarnings = checkManualCollisions();
+  const isManualSaveBlocked = manualWarnings.length > 0;
 
   const handleSaveManualPlanning = () => {
     if (!activeManualDossier || !manualTaskId || !manualTechId || !manualBayId) return;
 
     const { start, end } = getManualInterval();
+    const validation = validatePlanningAssignment({
+      dossiers,
+      dossierId: activeManualDossier.id,
+      lineId: manualTaskId,
+      technicianId: manualTechId,
+      bayId: manualBayId,
+      start,
+      end,
+    });
 
-    // Prevent saving if there are fatal off-hours or collision errors
-    if (
-      manualWarnings.includes("planning-collision-hours") ||
-      manualWarnings.includes("planning-collision-sunday") ||
-      manualWarnings.includes("planning-collision-saturday-afternoon")
-    ) {
-      alert("Erreur : Impossible de planifier en dehors des heures d'ouverture de l'atelier.");
+    if (!validation.allowed) {
       return;
     }
 
-    const segments = buildPlanningSegments(start, end);
+    const segments = validation.segments.length > 0 ? validation.segments : buildPlanningSegments(start, end);
     const updatedLines = activeManualDossier.ordresReparation.map(line => {
       if (line.id === manualTaskId) {
         return {
@@ -653,10 +623,12 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                   type="button"
                   onClick={handleSaveManualPlanning}
                   data-testid="planning-manual-submit"
-                  className="w-full py-3 bg-gray-900 hover:bg-black text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition"
+                  disabled={isManualSaveBlocked}
+                  className="w-full py-3 bg-gray-900 hover:bg-black disabled:bg-gray-300 disabled:hover:bg-gray-300 disabled:text-gray-500 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:cursor-not-allowed transition"
+                  title={isManualSaveBlocked ? "Corriger le créneau avant sauvegarde." : "Enregistrer la planification"}
                 >
                   <Save className="w-4 h-4" />
-                  Enregistrer
+                  {isManualSaveBlocked ? "Corriger le créneau" : "Enregistrer"}
                 </button>
               </div>
             </div>
@@ -665,8 +637,8 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
           {/* Manual Assignment Collisions warnings */}
           {manualWarnings.length > 0 && (
             <div className="space-y-1.5 p-3.5 bg-red-50 border border-red-100 rounded-xl">
-              <span className="text-[10px] text-red-800 font-extrabold block uppercase tracking-wider">
-                Alerte de collision détectée :
+              <span data-testid="planning-save-blocked-message" className="text-[10px] text-red-800 font-extrabold block uppercase tracking-wider">
+                Corriger le créneau avant sauvegarde.
               </span>
               <div className="space-y-1">
                 {manualWarnings.includes("planning-collision-hours") && (
@@ -709,6 +681,12 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                   <p data-testid="planning-collision-overload" className="text-[10px] text-amber-700 font-bold flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" />
                     Surcharge : La tâche dépasse la capacité journalière restante du technicien.
+                  </p>
+                )}
+                {manualWarnings.includes("planning-segments-invalid") && (
+                  <p data-testid="planning-segments-invalid" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Segments invalides : aucune plage ne doit couvrir pause midi ou heures fermées.
                   </p>
                 )}
               </div>

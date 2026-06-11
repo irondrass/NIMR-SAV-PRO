@@ -349,11 +349,13 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                             current.technicienId === selectedTechId &&
                             current.ordresReparation.some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
                           );
-                          const startBlockedMessage = activeLineInSameDossier
-                            ? "Une tâche est déjà en cours pour ce dossier."
-                            : activeDossierForTechnician
-                              ? "Ce technicien a déjà une tâche en cours."
-                              : "";
+                          const startBlockedMessage = status === "blocked"
+                            ? "Lever le blocage avant de reprendre la tâche."
+                            : activeLineInSameDossier
+                              ? "Une tâche est déjà en cours pour ce dossier."
+                              : activeDossierForTechnician
+                                ? "Ce technicien a déjà une tâche en cours."
+                                : "";
                           const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
 
                           return (
@@ -377,7 +379,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                     className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-700 font-bold flex items-center gap-1.5"
                                   >
                                     <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-                                    <span>Impossible de démarrer : une tâche est déjà en cours.</span>
+                                    <span>{startBlockedMessage}</span>
                                   </div>
                                 </div>
                               )}

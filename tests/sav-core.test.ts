@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   addPhotoToDossier,
   assignTechnicianToDossier,
+  canDeliverDossier,
+  canSavePlanningAssignment,
   confirmDelivery,
   createBackupPayload,
   createReceptionDossier,
@@ -14,6 +16,7 @@ import {
   isDossierSAV,
   markReadyForBilling,
   parseStoredArray,
+  releaseRepairOrderBlock,
   removePhotoFromDossier,
   reopenRepairOrder,
   startRepairOrder,
@@ -28,6 +31,7 @@ import {
   detectTechnicianCollision,
   detectBayCollision,
   calculateTechnicianDailyLoad,
+  validatePlanningAssignment,
 } from "../src/sav-core";
 import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-identity";
 import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TECHNICIENS } from "../src/data";
@@ -74,6 +78,23 @@ function createReceptionFixture(existingIds = ["NIMR-2026-001", "NIMR-2026-005"]
   }, existingIds, fixedNow);
 }
 
+function completeAllRepairOrders(dossier: DossierSAV): DossierSAV {
+  return {
+    ...dossier,
+    ordresReparation: dossier.ordresReparation.map(line => ({
+      ...line,
+      status: "done",
+      tempsPasse: Math.max(line.tempsPasse, line.tempsEstime),
+    })),
+    avancementGlobal: 100,
+  };
+}
+
+function createReadyForDeliveryFixture(): DossierSAV {
+  const completed = completeAllRepairOrders(createReceptionFixture());
+  return submitQualityControl(completed, UserRole.CHEF_ATELIER, "valide", "", fixedNow);
+}
+
 function testReceptionCreation() {
   const dossier = createReceptionFixture();
 
@@ -118,7 +139,10 @@ function testQualityControl() {
 }
 
 function testDeliveryAndBilling() {
-  const ready = submitQualityControl(createReceptionFixture(), UserRole.CHEF_ATELIER, "valide", "", fixedNow);
+  const ready = createReadyForDeliveryFixture();
+  const deliveryGate = canDeliverDossier(ready);
+  assert.equal(deliveryGate.allowed, true);
+
   const delivered = confirmDelivery(ready, fixedNow);
 
   assert.equal(delivered.statut, DossierStatus.LIVRE);
@@ -130,6 +154,37 @@ function testDeliveryAndBilling() {
   const billing = markReadyForBilling(delivered, fixedNow);
   assert.equal(billing.statut, DossierStatus.PRET_FACTURATION);
   assert.match(billing.prochaineActionRecommended, /comptabilité|ERP/i);
+}
+
+function testDeliveryGuards() {
+  const baseReady = createReadyForDeliveryFixture();
+
+  const withoutQc = { ...baseReady, checklistQC: { ...baseReady.checklistQC, validationGlobale: "en_attente" as const } };
+  assert.equal(canDeliverDossier(withoutQc).allowed, false);
+  assert.equal(confirmDelivery(withoutQc, fixedNow).statut, DossierStatus.PRET_A_LIVRER);
+
+  const activeTask = {
+    ...baseReady,
+    ordresReparation: baseReady.ordresReparation.map((line, index) => index === 0 ? { ...line, status: "in_progress" as const } : line),
+  };
+  assert.equal(canDeliverDossier(activeTask).allowed, false);
+
+  const blockedTask = {
+    ...baseReady,
+    ordresReparation: baseReady.ordresReparation.map((line, index) => index === 0 ? { ...line, status: "blocked" as const } : line),
+  };
+  assert.equal(canDeliverDossier(blockedTask).allowed, false);
+
+  const qcRejected = {
+    ...baseReady,
+    checklistQC: { ...baseReady.checklistQC, validationGlobale: "refuse" as const },
+    statut: DossierStatus.BLOQUE,
+    bloqueRaison: "Refus qualité",
+  };
+  assert.equal(canDeliverDossier(qcRejected).allowed, false);
+
+  const delivered = confirmDelivery(baseReady, fixedNow);
+  assert.equal(canDeliverDossier(delivered).allowed, false);
 }
 
 function testImportExportValidation() {
@@ -144,6 +199,25 @@ function testImportExportValidation() {
 
   const invalid = validateBackupPayload({ dossiers: [{ id: "cassé" }] });
   assert.equal(invalid.ok, false);
+
+  const deliveredWithActiveTask = {
+    ...createReadyForDeliveryFixture(),
+    statut: DossierStatus.LIVRE,
+    ordresReparation: createReadyForDeliveryFixture().ordresReparation.map((line, index) => (
+      index === 0 ? { ...line, status: "in_progress" as const } : line
+    )),
+  };
+  const invalidDelivered = validateBackupPayload(createBackupPayload([deliveredWithActiveTask], [], [], []));
+  assert.equal(invalidDelivered.ok, false);
+  if (!invalidDelivered.ok) assert.match(invalidDelivered.error, /tâches atelier non terminées/i);
+
+  const readyWithQcRefused = {
+    ...createReadyForDeliveryFixture(),
+    checklistQC: { ...createReadyForDeliveryFixture().checklistQC, validationGlobale: "refuse" as const },
+  };
+  const invalidReady = validateBackupPayload(createBackupPayload([readyWithQcRefused], [], [], []));
+  assert.equal(invalidReady.ok, false);
+  if (!invalidReady.ok) assert.match(invalidReady.error, /prêt à livrer incohérent/i);
 
   const parsed = parseStoredArray(JSON.stringify(INITIAL_DOSSIERS), [], isDossierSAV);
   assert.equal(parsed.usedFallback, false);
@@ -224,6 +298,14 @@ function testTaskLockingSameTechnician() {
   if (!result.ok) assert.equal(result.error, "Ce technicien a déjà une tâche en cours.");
 }
 
+function testTaskCannotStartWithoutTechnician() {
+  const dossier = createTaskDossier("NIMR-NO-TECH-001", "", [createLine("line_pending", "pending")]);
+  const result = startRepairOrder([dossier], dossier.id, "line_pending", fixedNow);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error, "Affecter un technicien avant de démarrer la tâche.");
+}
+
 function testDoneTaskCannotRestart() {
   const dossier = createTaskDossier("NIMR-DONE-001", "tech_01", [createLine("line_done", "done")]);
   const result = startRepairOrder([dossier], dossier.id, "line_done", fixedNow);
@@ -258,6 +340,25 @@ function testFinishRequiresInProgress() {
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.error, /en cours/);
+}
+
+function testBlockedTaskRequiresUnblockBeforeRestart() {
+  const dossier = createTaskDossier("NIMR-BLOCK-001", "tech_01", [createLine("line_blocked", "blocked")]);
+  const startBlocked = startRepairOrder([dossier], dossier.id, "line_blocked", fixedNow);
+
+  assert.equal(startBlocked.ok, false);
+  if (!startBlocked.ok) assert.match(startBlocked.error, /Lever le blocage/);
+
+  const noReason = releaseRepairOrderBlock([dossier], dossier.id, "line_blocked", UserRole.CHEF_ATELIER, "", fixedNow);
+  assert.equal(noReason.ok, false);
+
+  const released = releaseRepairOrderBlock([dossier], dossier.id, "line_blocked", UserRole.CHEF_ATELIER, "Pièce reçue", fixedNow);
+  assert.equal(released.ok, true);
+  if (released.ok) {
+    assert.equal(released.line.status, "paused");
+    assert.match(released.line.history?.[0] ?? "", /Pièce reçue/);
+    assert.equal(released.dossier.bloqueRaison, "");
+  }
 }
 
 function testWorkshopSlotSuggestionFirstTechnicianAndBay() {
@@ -508,20 +609,118 @@ function testAdvancedPlanningHelpers() {
     ]
   };
   assert.equal(calculateTechnicianDailyLoad("tech_02", "2026-06-15", [splitLoadDossier]), 3);
+
+  const planningTechCollision = validatePlanningAssignment({
+    dossiers: mockDossiers,
+    dossierId: "NIMR-PLAN-NEW",
+    lineId: "ro_new",
+    technicianId: "tech_01",
+    bayId: "bay_02",
+    start: new Date(2026, 5, 15, 10, 0, 0),
+    end: new Date(2026, 5, 15, 11, 0, 0),
+  });
+  assert.equal(planningTechCollision.allowed, false);
+  assert.ok(planningTechCollision.codes.includes("planning-collision-tech"));
+
+  const planningBayCollision = validatePlanningAssignment({
+    dossiers: mockDossiers,
+    dossierId: "NIMR-PLAN-NEW",
+    lineId: "ro_new",
+    technicianId: "tech_02",
+    bayId: "bay_01",
+    start: new Date(2026, 5, 15, 10, 0, 0),
+    end: new Date(2026, 5, 15, 11, 0, 0),
+  });
+  assert.equal(planningBayCollision.allowed, false);
+  assert.ok(planningBayCollision.codes.includes("planning-collision-bay"));
+
+  const saturatedDossier: DossierSAV = {
+    ...createReceptionFixture([]),
+    id: "NIMR-PLAN-SATURATED",
+    statut: DossierStatus.TRAVAUX_PLANIFIES,
+    ordresReparation: [
+      {
+        ...createLine("line_saturated", "pending"),
+        tempsEstime: 8,
+        plannedTechnicianId: "tech_03",
+        plannedBayId: "bay_03",
+        planningDate: "2026-06-15",
+        planningStart: new Date(2026, 5, 15, 8, 0, 0).toISOString(),
+        planningEnd: new Date(2026, 5, 15, 17, 0, 0).toISOString(),
+        planningSegments: buildPlanningSegments(new Date(2026, 5, 15, 8, 0, 0), new Date(2026, 5, 15, 17, 0, 0)),
+      }
+    ]
+  };
+  const planningOverload = validatePlanningAssignment({
+    dossiers: [saturatedDossier],
+    dossierId: "NIMR-PLAN-NEW",
+    lineId: "ro_new",
+    technicianId: "tech_03",
+    bayId: "bay_04",
+    start: new Date(2026, 5, 15, 16, 0, 0),
+    end: new Date(2026, 5, 15, 17, 0, 0),
+  });
+  assert.equal(planningOverload.allowed, false);
+  assert.ok(planningOverload.codes.includes("planning-collision-overload"));
+
+  const saturdayAfternoon = validatePlanningAssignment({
+    dossiers: [],
+    dossierId: "NIMR-PLAN-SATURDAY",
+    lineId: "ro_sat",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: new Date(2026, 5, 20, 13, 0, 0),
+    end: new Date(2026, 5, 20, 14, 0, 0),
+  });
+  assert.equal(saturdayAfternoon.allowed, false);
+  assert.ok(saturdayAfternoon.codes.includes("planning-collision-saturday-afternoon"));
+
+  const sundayClosed = validatePlanningAssignment({
+    dossiers: [],
+    dossierId: "NIMR-PLAN-SUNDAY",
+    lineId: "ro_sun",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: new Date(2026, 5, 21, 9, 0, 0),
+    end: new Date(2026, 5, 21, 10, 0, 0),
+  });
+  assert.equal(sundayClosed.allowed, false);
+  assert.ok(sundayClosed.codes.includes("planning-collision-sunday"));
+
+  const lunchSplit = {
+    dossiers: [],
+    dossierId: "NIMR-PLAN-LUNCH",
+    lineId: "ro_lunch",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: taskStart,
+    end: taskEnd,
+  };
+  assert.equal(canSavePlanningAssignment(lunchSplit), true);
+
+  const invalidLunchBlock = validatePlanningAssignment({
+    ...lunchSplit,
+    planningSegments: [{ start: taskStart.toISOString(), end: taskEnd.toISOString() }],
+  });
+  assert.equal(invalidLunchBlock.allowed, false);
+  assert.ok(invalidLunchBlock.codes.includes("planning-collision-lunch"));
 }
 
 testReceptionCreation();
 testTechnicianAssignment();
 testQualityControl();
 testDeliveryAndBilling();
+testDeliveryGuards();
 testImportExportValidation();
 testPhotoMutationsAndImportExport();
 testTaskLockingSameDossier();
 testTaskLockingSameTechnician();
+testTaskCannotStartWithoutTechnician();
 testDoneTaskCannotRestart();
 testReopenDoneTaskByWorkshopChief();
 testTechnicianCannotReopenDoneTask();
 testFinishRequiresInProgress();
+testBlockedTaskRequiresUnblockBeforeRestart();
 testWorkshopSlotSuggestionFirstTechnicianAndBay();
 testWorkshopSlotSuggestionLunchBreak();
 testWorkshopSlotSuggestionNextWorkingDayWhenSaturated();

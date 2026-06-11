@@ -13,13 +13,23 @@ test.describe("Rôle : Directeur SAV", () => {
       { id: "ro_dir_1", designation: "Contrôle moteur", tempsEstime: 2.0, tempsPasse: 2.0, status: "done" }
     ]
   });
+  const blockedDossier = createMockDossier({
+    id: "NIMR-DIR-BLOCKED",
+    clientNom: "Directeur Blocage Test",
+    statut: DossierStatus.BLOQUE,
+    technicienId: "tech_01",
+    bloqueRaison: "Attente pièce",
+    ordresReparation: [
+      { id: "ro_dir_blocked", designation: "Tâche bloquée", tempsEstime: 1.0, tempsPasse: 0.5, status: "blocked" }
+    ]
+  });
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await page.evaluate(({ key, value }) => {
       localStorage.clear();
       localStorage.setItem(key, JSON.stringify(value));
-    }, { key: STORAGE_KEYS.dossiers, value: [testDossier] });
+    }, { key: STORAGE_KEYS.dossiers, value: [testDossier, blockedDossier] });
     await page.reload();
     await changeUserRole(page, "role-option-directeur");
   });
@@ -35,21 +45,17 @@ test.describe("Rôle : Directeur SAV", () => {
     await expect(page.locator('[data-testid="nav-settings"]')).toBeVisible();
   });
 
-  test("Forçage arbitraire du statut et de la priorité d'un dossier", async ({ page }) => {
+  test("Le forçage statut est absent de la fiche opérationnelle, la priorité reste éditable", async ({ page }) => {
     // Navigate to dossiers list and click our test dossier
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${testDossier.id}`));
 
-    // Check selectors for forcing status and priority exist for Director
+    // Status forcing must not exist in the operational dossier detail view.
     const statusSelect = page.locator('[data-testid="force-status-select"]');
     const prioritySelect = page.locator('[data-testid="force-priority-select"]');
 
-    await expect(statusSelect).toBeVisible();
+    await expect(statusSelect).toHaveCount(0);
     await expect(prioritySelect).toBeVisible();
-
-    // Force status to PRET_A_LIVRER
-    await statusSelect.selectOption(DossierStatus.PRET_A_LIVRER);
-    await humanWait(page, 200);
 
     // Force priority to URGENTE
     await prioritySelect.selectOption(DossierPriority.URGENTE);
@@ -61,8 +67,30 @@ test.describe("Rôle : Directeur SAV", () => {
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${testDossier.id}`));
 
-    // Assert forced values are saved
-    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: DossierStatus.PRET_A_LIVRER })).toBeVisible();
+    // Assert status has not been bypassed
+    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: DossierStatus.EN_TRAVAUX })).toBeVisible();
+  });
+
+  test("Levée de blocage avec motif obligatoire avant reprise", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
+    await humanClick(page, page.locator(`text=${blockedDossier.id}`));
+    await humanClick(page, page.locator('[data-testid="tab-repair-orders"]'));
+
+    const startBtn = page.locator('[data-testid="task-start-ro_dir_blocked"]');
+    await expect(startBtn).toBeDisabled();
+    await expect(page.locator('[data-testid="task-unblock-ro_dir_blocked"]')).toBeVisible();
+
+    await humanClick(page, page.locator('[data-testid="task-unblock-ro_dir_blocked"]'));
+    const modal = page.locator('[data-testid="modal-task-unblock"]');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('[data-testid="modal-task-unblock-confirm"]')).toBeDisabled();
+
+    await page.locator('[data-testid="modal-task-unblock-select"]').selectOption("Pièce reçue et contrôlée");
+    await expect(page.locator('[data-testid="modal-task-unblock-confirm"]')).toBeEnabled();
+    await humanClick(page, page.locator('[data-testid="modal-task-unblock-confirm"]'));
+
+    await expect(page.locator('[data-testid="task-status-ro_dir_blocked"]')).toHaveText(/suspendue/i);
+    await expect(page.locator('[data-testid="task-start-ro_dir_blocked"]')).toBeEnabled();
   });
 
   test("Réouverture d'une tâche terminée avec motif obligatoire", async ({ page }) => {

@@ -273,12 +273,15 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await selectManualBase(page);
     await selectManualSlot(page, techA.id, "bay_general_01", "09", "30");
     await expect(page.locator('[data-testid="planning-collision-tech"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-save-blocked-message"]')).toHaveText("Corriger le créneau avant sauvegarde.");
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeDisabled();
   });
 
   test("détecte une collision pont", async ({ page }) => {
     await selectManualBase(page);
     await selectManualSlot(page, techFree.id, "bay_fast_01", "09", "30");
     await expect(page.locator('[data-testid="planning-collision-bay"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeDisabled();
   });
 
   test("accepte le samedi matin", async ({ page }) => {
@@ -286,6 +289,7 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await selectManualBase(page);
     await selectManualSlot(page, techFree.id, "bay_general_01", "09", "00");
     await expect(page.locator('[data-testid="planning-collision-saturday-afternoon"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeEnabled();
     await humanClick(page, page.locator('[data-testid="planning-manual-submit"]'));
     await expect(page.locator('[data-testid="planning-saved-indicator"]')).toBeVisible();
   });
@@ -295,6 +299,7 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await selectManualBase(page);
     await selectManualSlot(page, techFree.id, "bay_general_01", "13", "00");
     await expect(page.locator('[data-testid="planning-collision-saturday-afternoon"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeDisabled();
 
     await page.locator('[data-testid="planning-suggest-dossier"]').selectOption(dossierLongSaturday.id);
     await humanClick(page, page.locator('[data-testid="planning-suggest-submit"]'));
@@ -315,12 +320,14 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await selectManualBase(page);
     await selectManualSlot(page, techFree.id, "bay_general_01", "09", "00");
     await expect(page.locator('[data-testid="planning-collision-sunday"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeDisabled();
   });
 
   test("persiste une planification après refresh", async ({ page }) => {
     await setPlanningDate(page, "2026-06-16");
     await selectManualBase(page);
     await selectManualSlot(page, techFree.id, "bay_general_01", "09", "00");
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeEnabled();
     await humanClick(page, page.locator('[data-testid="planning-manual-submit"]'));
     await expect(page.locator('[data-testid="planning-saved-indicator"]')).toBeVisible();
 

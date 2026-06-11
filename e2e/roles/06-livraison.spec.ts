@@ -57,27 +57,22 @@ test.describe("Rôle : Livraison", () => {
     await humanClick(page, page.locator(`text=${dossierNoQc.id}`));
     await humanClick(page, page.locator('[data-testid="tab-deliveries"]'));
 
-    // Click deliver
-    await humanClick(page, page.locator('[data-testid="delivery-submit"]'));
+    const submit = page.locator('[data-testid="delivery-submit"]');
+    await expect(submit).toBeDisabled();
 
-    // Assert DOM error banner
-    const errorBanner = page.locator('[data-testid="delivery-error-message"]');
-    await expect(errorBanner).toBeVisible();
-    await expect(errorBanner).toHaveText(/qualité/i);
+    const reasons = page.locator('[data-testid="delivery-blocking-reasons"]');
+    await expect(reasons).toBeVisible();
+    await expect(reasons).toHaveText(/qualité/i);
   });
 
   test("Livraison réussie après signature client et clôture facturation", async ({ page }) => {
-    // Setup alert dialog handler for signature tactile click
-    page.on("dialog", async (dialog) => {
-      await dialog.accept();
-    });
-
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${dossierReady.id}`));
     await humanClick(page, page.locator('[data-testid="tab-deliveries"]'));
 
     // Click signature pad mock
     await humanClick(page, page.locator('[data-testid="delivery-signature"]'));
+    await expect(page.locator('[data-testid="delivery-signature"]')).toContainText("Signature client capturée");
 
     // Click deliver
     await humanClick(page, page.locator('[data-testid="delivery-submit"]'));

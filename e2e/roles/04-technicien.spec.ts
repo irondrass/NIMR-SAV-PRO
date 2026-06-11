@@ -127,12 +127,10 @@ test.describe("Rôle : Technicien", () => {
     const startBtn = page.locator('[data-testid="task-start-ro_tech_1"]');
     await expect(startBtn).toBeDisabled();
 
-    // Verify both warning texts are displayed (the old assertion and the new data-testid)
-    await expect(page.locator('text=Ce technicien a déjà une tâche en cours.')).toBeVisible();
-    
+    // Verify the locked task banner explains the active technician conflict.
     const lockedMsg = page.locator('[data-testid="technician-task-locked-message"]');
     await expect(lockedMsg).toBeVisible();
-    await expect(lockedMsg).toContainText(/Impossible de démarrer : une tâche est déjà en cours./i);
+    await expect(lockedMsg).toContainText(/Ce technicien a déjà une tâche en cours./i);
   });
 
   test("Technicien peut bloquer une tâche en cours avec motif obligatoire via le modal", async ({ page }) => {

@@ -65,15 +65,15 @@ test.describe("Sécurité des rôles et contrôle de forçage", () => {
     }
   });
 
-  test("Visibilité et utilisation des contrôles de forçage selon les privilèges", async ({ page }) => {
+  test("Absence du forçage statut opérationnel et visibilité limitée de la priorité", async ({ page }) => {
     // We will check multiple roles on the dossier detail page
     const rolesConfig = [
-      { roleId: "role-option-technicien", label: "Technicien", canForce: false },
-      { roleId: "role-option-lecture-seule", label: "Lecture seule", canForce: false },
-      { roleId: "role-option-controle-qualite", label: "Contrôle Qualité", canForce: false },
-      { roleId: "role-option-receptionnaire", label: "Réceptionnaire", canForce: false },
-      { roleId: "role-option-chef-atelier", label: "Chef d’atelier", canForce: true },
-      { roleId: "role-option-directeur", label: "Directeur SAV", canForce: true }
+      { roleId: "role-option-technicien", label: "Technicien", canEditPriority: false },
+      { roleId: "role-option-lecture-seule", label: "Lecture seule", canEditPriority: false },
+      { roleId: "role-option-controle-qualite", label: "Contrôle Qualité", canEditPriority: false },
+      { roleId: "role-option-receptionnaire", label: "Réceptionnaire", canEditPriority: false },
+      { roleId: "role-option-chef-atelier", label: "Chef d’atelier", canEditPriority: true },
+      { roleId: "role-option-directeur", label: "Directeur SAV", canEditPriority: true }
     ];
 
     for (const conf of rolesConfig) {
@@ -92,12 +92,11 @@ test.describe("Sécurité des rôles et contrôle de forçage", () => {
         await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
         await humanClick(page, page.locator(`text=${testDossier.id}`));
 
-        if (conf.canForce) {
-          await expect(page.locator('[data-testid="force-status-select"]')).toBeVisible();
+        await expect(page.locator('[data-testid="force-status-select"]')).toHaveCount(0);
+        if (conf.canEditPriority) {
           await expect(page.locator('[data-testid="force-priority-select"]')).toBeVisible();
           await expect(page.locator('[data-testid="assign-technicien-select"]')).toBeVisible();
         } else {
-          await expect(page.locator('[data-testid="force-status-select"]')).toHaveCount(0);
           await expect(page.locator('[data-testid="force-priority-select"]')).toHaveCount(0);
           await expect(page.locator('[data-testid="assign-technicien-select"]')).toHaveCount(0);
         }
