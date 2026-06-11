@@ -137,13 +137,13 @@ export function FuelIndicator({ level }: { level: number }) {
   const isLow = level <= 20;
   return (
     <div className="flex items-center gap-2">
-      <div className="w-full bg-zinc-200 dark:bg-zinc-700 rounded-full h-2.5 max-w-[80px] overflow-hidden">
+      <div className="w-full bg-zinc-200  rounded-full h-2.5 max-w-[80px] overflow-hidden">
         <div 
           className={`h-full rounded-full transition-all duration-300 ${isLow ? "bg-red-500 animate-pulse" : "bg-emerald-600"}`}
           style={{ width: `${level}%` }}
         />
       </div>
-      <span className={`text-xs font-semibold ${isLow ? "text-red-500 font-bold" : "text-zinc-600 dark:text-zinc-300"}`}>
+      <span className={`text-xs font-semibold ${isLow ? "text-red-500 font-bold" : "text-zinc-600 "}`}>
         {level}%
       </span>
     </div>
@@ -156,7 +156,7 @@ export function MiniProgress({ val }: { val: number }) {
   if (val < 30) color = "bg-blue-500";
   return (
     <div className="flex items-center gap-1.5">
-      <div className="w-16 bg-neutral-100 dark:bg-neutral-800 rounded-full h-1.5 overflow-hidden">
+      <div className="w-16 bg-neutral-100  rounded-full h-1.5 overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${val}%` }} />
       </div>
       <span className="text-[10px] font-mono font-bold text-neutral-500">{val}%</span>

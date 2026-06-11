@@ -76,10 +76,10 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
     <div className="space-y-6">
       
       {/* Title card */}
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm">
+      <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-sm font-black text-slate-900 dark:text-neutral-100 uppercase tracking-wider flex items-center gap-2">
+            <h2 className="text-sm font-black text-slate-900  uppercase tracking-wider flex items-center gap-2">
               <ShieldAlert className="w-5 h-5 text-red-600" />
               RÉCLAMATIONS CLIENTS & CONTENTIEUX SAV
             </h2>
@@ -88,7 +88,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
 
           <div className="flex gap-2">
             <select
-              className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded text-xs font-bold text-slate-800 dark:text-neutral-300 focus:outline-none"
+              className="p-1 px-2.5 bg-slate-50  border border-slate-200  rounded text-xs font-bold text-slate-800  focus:outline-none"
               value={selectedCriticFilter}
               onChange={(e) => setSelectedCriticFilter(e.target.value)}
             >
@@ -111,15 +111,15 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
 
       {/* Saisir form dropdown overlay block */}
       {showAddForm && (
-        <div className="bg-white dark:bg-neutral-900 border border-red-200 dark:border-red-950 rounded-2xl p-5 shadow-md space-y-4 max-w-2xl mx-auto text-xs animate-fade-in">
-          <span className="font-bold text-sm text-red-700 dark:text-red-400 block border-b pb-1.5 uppercase">Nouveau Dossier de litige client SAV</span>
+        <div className="bg-white  border border-red-200  rounded-2xl p-5 shadow-md space-y-4 max-w-2xl mx-auto text-xs animate-fade-in">
+          <span className="font-bold text-sm text-red-700  block border-b pb-1.5 uppercase">Nouveau Dossier de litige client SAV</span>
           
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Nom du client *</label>
               <input 
                 type="text" 
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded font-semibold dark:text-neutral-100" 
+                className="w-full p-2 bg-slate-50  border rounded font-semibold " 
                 placeholder="Ex: Client Démo 001"
                 value={clientNom}
                 onChange={(e) => setClientNom(e.target.value)}
@@ -130,7 +130,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Dossier technique lié</label>
               <input 
                 type="text" 
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded font-bold dark:text-neutral-100" 
+                className="w-full p-2 bg-slate-50  border rounded font-bold " 
                 placeholder="Ex: NIMR-2026-002"
                 value={dossierId}
                 onChange={(e) => setDossierId(e.target.value)}
@@ -143,7 +143,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Véhicule & Immatriculation</label>
               <input 
                 type="text" 
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded font-medium dark:text-neutral-100" 
+                className="w-full p-2 bg-slate-50  border rounded font-medium " 
                 placeholder="Forthing T5 EVO - 000 TU 0001"
                 value={vehiculeNom}
                 onChange={(e) => setVehiculeNom(e.target.value)}
@@ -153,7 +153,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
             <div>
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Criticité du mécontentement</label>
               <select
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded font-semibold text-slate-700 dark:text-neutral-300"
+                className="w-full p-2 bg-slate-50  border rounded font-semibold text-slate-700 "
                 value={criticite}
                 onChange={(e) => setCriticite(e.target.value as any)}
               >
@@ -168,7 +168,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
             <div>
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Description / Motif de la plainte *</label>
               <textarea 
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded h-16 dark:text-neutral-100" 
+                className="w-full p-2 bg-slate-50  border rounded h-16 " 
                 placeholder="Problème de traces de doigts, pièces démontées non restituées..."
                 value={motif}
                 onChange={(e) => setMotif(e.target.value)}
@@ -179,7 +179,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Mesures correctives immédiates proposées</label>
               <input 
                 type="text" 
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded dark:text-neutral-100" 
+                className="w-full p-2 bg-slate-50  border rounded " 
                 placeholder="Prise en charge nettoyage, lavage gratuit, véhicule courtoisie..."
                 value={actionCorrective}
                 onChange={(e) => setActionCorrective(e.target.value)}
@@ -190,7 +190,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               <label className="block text-[11px] font-bold text-zinc-600 uppercase mb-1">Responsable désigné pour suivi</label>
               <input 
                 type="text" 
-                className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border rounded dark:text-neutral-100" 
+                className="w-full p-2 bg-slate-50  border rounded " 
                 placeholder="Ex: Responsable Démo SAV (Directeur SAV)"
                 value={responsable}
                 onChange={(e) => setResponsable(e.target.value)}
@@ -218,11 +218,11 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
       {/* Grid of active tickets */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredRecs.map(rec => {
-          let criticalStyle = "border-amber-200 bg-amber-50/10 dark:border-amber-950";
+          let criticalStyle = "border-amber-200 bg-amber-50/10 ";
           let cBadge = "bg-amber-100 text-amber-800";
           
           if (rec.criticite === "critique") {
-            criticalStyle = "border-red-300 bg-red-50/10 dark:border-red-950";
+            criticalStyle = "border-red-300 bg-red-50/10 ";
             cBadge = "bg-red-200 text-red-900 font-extrabold animate-pulse";
           } else if (rec.criticite === "haute") {
             criticalStyle = "border-orange-200 bg-orange-50/10";
@@ -235,12 +235,12 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               <div className="flex justify-between items-start gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-zinc-900 dark:text-neutral-100 text-sm">{rec.id}</span>
+                    <span className="font-mono font-bold text-zinc-900  text-sm">{rec.id}</span>
                     <span className="text-zinc-400">•</span>
                     <span className="text-zinc-500 text-[11px]">Dossier lié : {rec.dossierId}</span>
                   </div>
-                  <h4 className="font-extrabold text-slate-800 dark:text-neutral-200 text-sm leading-tight">{rec.clientNom}</h4>
-                  <p className="text-[11px] text-slate-400 dark:text-neutral-400">{rec.vehiculeNom}</p>
+                  <h4 className="font-extrabold text-slate-800  text-sm leading-tight">{rec.clientNom}</h4>
+                  <p className="text-[11px] text-slate-400 ">{rec.vehiculeNom}</p>
                 </div>
 
                 <span className={`px-2 py-0.5 rounded text-[9px] uppercase tracking-wider ${cBadge}`}>
@@ -249,7 +249,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               </div>
 
               {/* Litige description */}
-              <div className="p-3 bg-white dark:bg-neutral-950 rounded-lg border text-[11px] font-medium leading-relaxed text-zinc-600">
+              <div className="p-3 bg-white  rounded-lg border text-[11px] font-medium leading-relaxed text-zinc-600">
                 <span className="font-extrabold text-red-700 block mb-0.5">Motif du Mécontentement :</span>
                 {rec.motif}
               </div>
@@ -258,15 +258,15 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
               <div className="space-y-1.5 text-[11px]">
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Action corrective en cours :</span>
-                  <span className="text-blue-600 dark:text-blue-400 font-extrabold">{rec.actionCorrective}</span>
+                  <span className="text-blue-600  font-extrabold">{rec.actionCorrective}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Responsable affecté :</span>
-                  <span className="text-zinc-700 dark:text-zinc-400">{rec.responsable}</span>
+                  <span className="text-zinc-700 ">{rec.responsable}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Délai estimé :</span>
-                  <span className="text-zinc-700 dark:text-zinc-400">{rec.delaiTraitement}</span>
+                  <span className="text-zinc-700 ">{rec.delaiTraitement}</span>
                 </div>
               </div>
 
@@ -276,7 +276,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
                 
                 <div className="flex gap-1.5">
                   <select
-                    className="p-1 bg-white dark:bg-neutral-900 border rounded font-bold text-[10px] dark:text-neutral-100"
+                    className="p-1 bg-white  border rounded font-bold text-[10px] "
                     value={rec.statut}
                     onChange={(e) => handleUpdateStatus(rec.id, e.target.value as any)}
                   >

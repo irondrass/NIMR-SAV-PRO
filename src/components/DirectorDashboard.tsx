@@ -107,7 +107,7 @@ export default function DirectorDashboard({
       </div>
 
       {/* KPI Cards Row 1 - Operational Flux */}
-      <h2 className="text-xs font-bold text-slate-900 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2 font-display">
+      <h2 className="text-xs font-bold text-slate-900  uppercase tracking-wider flex items-center gap-2 font-display">
         <Activity className="w-5 h-5 text-blue-600" />
         Flux Opérationnel Atelier NIMR
       </h2>
@@ -116,12 +116,12 @@ export default function DirectorDashboard({
         {/* Total active card */}
         <button 
           onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
+          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
         >
-          <div className="text-[11px] font-bold text-slate-500 dark:text-neutral-400 uppercase tracking-wider">Dossiers Actifs</div>
+          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Dossiers Actifs</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform duration-150 origin-left font-display">{totalActifs}</span>
-            <span className="bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
+            <span className="text-3xl font-extrabold text-blue-600  group-hover:scale-105 transition-transform duration-150 origin-left font-display">{totalActifs}</span>
+            <span className="bg-blue-50  text-blue-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
               Atelier
             </span>
           </div>
@@ -130,12 +130,12 @@ export default function DirectorDashboard({
         {/* Attendus card */}
         <button
           onClick={() => onNavigateToTab("reception-rapide")}
-          className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
+          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
         >
-          <div className="text-[11px] font-bold text-slate-500 dark:text-neutral-400 uppercase tracking-wider">Attendus Auj.</div>
+          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Attendus Auj.</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-amber-600 dark:text-amber-400 font-display">{attendusAuj}</span>
-            <span className="bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
+            <span className="text-3xl font-extrabold text-amber-600  font-display">{attendusAuj}</span>
+            <span className="bg-amber-50  text-amber-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
               RDV
             </span>
           </div>
@@ -144,12 +144,12 @@ export default function DirectorDashboard({
         {/* Reçus card */}
         <button 
           onClick={() => onNavigateToTab("chef-atelier")}
-          className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
+          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
         >
-          <div className="text-[11px] font-bold text-slate-500 dark:text-neutral-400 uppercase tracking-wider">Véhicules reçus</div>
+          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Véhicules reçus</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-teal-600 dark:text-teal-400 font-display">{recusAuj}</span>
-            <span className="bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono font-medium">
+            <span className="text-3xl font-extrabold text-teal-600  font-display">{recusAuj}</span>
+            <span className="bg-teal-50  text-teal-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono font-medium">
               Reçus
             </span>
           </div>
@@ -158,12 +158,12 @@ export default function DirectorDashboard({
         {/* En travaux card */}
         <button 
           onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
+          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
         >
-          <div className="text-[11px] font-bold text-slate-500 dark:text-neutral-400 uppercase tracking-wider">En travaux</div>
+          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">En travaux</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-sky-600 dark:text-sky-400 font-display">{enTravaux}</span>
-            <span className="bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 text-[10px] font-bold px-1.5 py-0.5 rounded animate-pulse font-mono">
+            <span className="text-3xl font-extrabold text-sky-600  font-display">{enTravaux}</span>
+            <span className="bg-sky-50  text-sky-600  text-[10px] font-bold px-1.5 py-0.5 rounded animate-pulse font-mono">
               Prod
             </span>
           </div>
@@ -172,15 +172,15 @@ export default function DirectorDashboard({
         {/* Bloqués card */}
         <button 
           onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-zinc-50 dark:bg-neutral-950 border-2 border-red-200 dark:border-red-950 rounded-lg p-4 text-left shadow-sm hover:border-red-400 transition group"
+          className="bg-zinc-50  border-2 border-red-200  rounded-lg p-4 text-left shadow-sm hover:border-red-400 transition group"
         >
-          <div className="text-[11px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider flex items-center gap-1 font-mono">
+          <div className="text-[11px] font-bold text-red-600  uppercase tracking-wider flex items-center gap-1 font-mono">
             <AlertCircle className="w-3.5 h-3.5 text-red-600" />
             Bloqués / Stop
           </div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-red-600 dark:text-red-400 font-display">{bloques}</span>
-            <span className="bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-400 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
+            <span className="text-3xl font-extrabold text-red-600  font-display">{bloques}</span>
+            <span className="bg-red-100  text-red-700  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
               Alerte
             </span>
           </div>
@@ -189,12 +189,12 @@ export default function DirectorDashboard({
         {/* Prêts card */}
         <button 
           onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
+          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
         >
-          <div className="text-[11px] font-bold text-slate-500 dark:text-neutral-400 uppercase tracking-wider">Prêts à livrer</div>
+          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Prêts à livrer</div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-green-600 dark:text-green-500 font-display">{pretsLivrer}</span>
-            <span className="bg-green-50 dark:bg-green-950/40 text-green-600 dark:text-green-400 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
+            <span className="text-3xl font-extrabold text-green-600  font-display">{pretsLivrer}</span>
+            <span className="bg-green-50  text-green-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
               OK
             </span>
           </div>
@@ -204,38 +204,38 @@ export default function DirectorDashboard({
       {/* Accord States Alerts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Accord client */}
-        <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-4 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-purple-50 dark:bg-purple-950 text-purple-600 dark:text-purple-400 rounded-xl">
+        <div className="bg-white  border border-slate-200  rounded-xl p-4 shadow-sm flex items-center gap-4">
+          <div className="p-3 bg-purple-50  text-purple-600  rounded-xl">
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-bold dark:text-neutral-100">{accordsClientAttente}</div>
-            <div className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase">Accords Clients Requis</div>
-            <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">Compléments de travaux signalés</p>
+            <div className="text-2xl font-bold ">{accordsClientAttente}</div>
+            <div className="text-xs font-semibold text-neutral-500  uppercase">Accords Clients Requis</div>
+            <p className="text-[10px] text-neutral-400  mt-0.5">Compléments de travaux signalés</p>
           </div>
         </div>
 
         {/* Accord Assurance */}
-        <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-4 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400 rounded-xl">
+        <div className="bg-white  border border-slate-200  rounded-xl p-4 shadow-sm flex items-center gap-4">
+          <div className="p-3 bg-sky-50  text-sky-600  rounded-xl">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-bold dark:text-neutral-100">{accordsAssuranceAttente}</div>
-            <div className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase">Accords GAT/Assurances</div>
-            <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">Chiffres de carrosserie en validation d'expert</p>
+            <div className="text-2xl font-bold ">{accordsAssuranceAttente}</div>
+            <div className="text-xs font-semibold text-neutral-500  uppercase">Accords GAT/Assurances</div>
+            <p className="text-[10px] text-neutral-400  mt-0.5">Chiffres de carrosserie en validation d'expert</p>
           </div>
         </div>
 
         {/* Accord Garantie */}
-        <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-4 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-pink-50 dark:bg-pink-950 text-pink-600 dark:text-pink-400 rounded-xl">
+        <div className="bg-white  border border-slate-200  rounded-xl p-4 shadow-sm flex items-center gap-4">
+          <div className="p-3 bg-pink-50  text-pink-600  rounded-xl">
             <Zap className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-bold dark:text-neutral-100">{accordsGarantieAttente}</div>
-            <div className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase">Garanties Constructeurs</div>
-            <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">Soumissions Dongfeng/DFSK/Forthing</p>
+            <div className="text-2xl font-bold ">{accordsGarantieAttente}</div>
+            <div className="text-xs font-semibold text-neutral-500  uppercase">Garanties Constructeurs</div>
+            <p className="text-[10px] text-neutral-400  mt-0.5">Soumissions Dongfeng/DFSK/Forthing</p>
           </div>
         </div>
       </div>
@@ -244,13 +244,13 @@ export default function DirectorDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Side recommendations (4 cols) */}
-        <div className="lg:col-span-5 bg-gradient-to-b from-blue-50/10 to-white dark:from-neutral-900/30 dark:to-neutral-900 border border-blue-100/50 dark:border-neutral-800 rounded-lg p-5 shadow-sm space-y-4">
+        <div className="lg:col-span-5 bg-gradient-to-b from-blue-50/10 to-white   border border-blue-100/50  rounded-lg p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-blue-600 text-white rounded">
               <ListTodo className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-extrabold text-slate-950 dark:text-neutral-100 text-sm font-display">PLAN D'ACTION CONSEILLÉ</h3>
+              <h3 className="font-extrabold text-slate-950  text-sm font-display">PLAN D'ACTION CONSEILLÉ</h3>
               <p className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Génération d'assistance locale NIMR</p>
             </div>
           </div>
@@ -259,17 +259,17 @@ export default function DirectorDashboard({
             {metricsSuggestions.map((item, index) => (
               <div 
                 key={index} 
-                className="flex items-start gap-2.5 p-3 rounded-md bg-white dark:bg-zinc-950 border border-slate-100 dark:border-neutral-800/80 hover:border-blue-200 dark:hover:border-neutral-700 transition shadow-sm text-xs"
+                className="flex items-start gap-2.5 p-3 rounded-md bg-white  border border-slate-100  hover:border-blue-200  transition shadow-sm text-xs"
               >
-                <span className="flex-shrink-0 w-5 h-5 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center font-bold text-[10px] font-mono">
+                <span className="flex-shrink-0 w-5 h-5 bg-blue-50  text-blue-600  rounded-full flex items-center justify-center font-bold text-[10px] font-mono">
                   {index + 1}
                 </span>
-                <span className="text-slate-700 dark:text-neutral-300 font-medium leading-relaxed">{item}</span>
+                <span className="text-slate-700  font-medium leading-relaxed">{item}</span>
               </div>
             ))}
           </div>
 
-          <div className="pt-2 border-t border-blue-100 dark:border-neutral-800">
+          <div className="pt-2 border-t border-blue-100 ">
             <button 
               onClick={() => onNavigateToTab("atelier-kanban")} 
               className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs transition duration-200 shadow-sm cursor-pointer"
@@ -280,19 +280,19 @@ export default function DirectorDashboard({
         </div>
 
         {/* Interactive mock performance graphs (7 cols) */}
-        <div className="lg:col-span-7 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-5 shadow-sm space-y-4">
+        <div className="lg:col-span-7 bg-white  border border-slate-200  rounded-lg p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-neutral-100 text-sm font-display">Rentabilité & Délais Opérationnels</h3>
+              <h3 className="font-bold text-slate-900  text-sm font-display">Rentabilité & Délais Opérationnels</h3>
               <p className="text-slate-400 text-xs text-left">Heures vendues vs. Heures passées (Semaine en cours)</p>
             </div>
-            <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-100 dark:border-emerald-900">
+            <span className="text-[10px] bg-emerald-50  text-emerald-600  font-bold px-2 py-0.5 rounded border border-emerald-100 ">
               Efficacité : 94%
             </span>
           </div>
 
           {/* Graphical representation in clean vector SVG */}
-          <div className="h-44 flex items-end justify-between px-2 pt-2 pb-1 bg-slate-50 dark:bg-zinc-950 rounded-lg relative">
+          <div className="h-44 flex items-end justify-between px-2 pt-2 pb-1 bg-slate-50  rounded-lg relative">
             
             {/* SVG Background grids */}
             <div className="absolute inset-0 flex flex-col justify-between p-4 pointer-events-none opacity-20">
@@ -304,7 +304,7 @@ export default function DirectorDashboard({
             {/* Monday */}
             <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
               <div className="flex gap-1 items-end h-[60%]">
-                <div className="w-3 bg-zinc-400 dark:bg-zinc-700 h-10 rounded-t" title="Passé: 10h"></div>
+                <div className="w-3 bg-zinc-400  h-10 rounded-t" title="Passé: 10h"></div>
                 <div className="w-3 bg-blue-600 h-12 rounded-t" title="Vendu: 12h"></div>
               </div>
               <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Lun</span>
@@ -317,7 +317,7 @@ export default function DirectorDashboard({
             {/* Tuesday */}
             <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
               <div className="flex gap-1 items-end h-[70%]">
-                <div className="w-3 bg-zinc-400 dark:bg-zinc-700 h-16 rounded-t" title="Passé: 16h"></div>
+                <div className="w-3 bg-zinc-400  h-16 rounded-t" title="Passé: 16h"></div>
                 <div className="w-3 bg-blue-600 h-14 rounded-t" title="Vendu: 14h"></div>
               </div>
               <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Mar</span>
@@ -329,7 +329,7 @@ export default function DirectorDashboard({
             {/* Wednesday */}
             <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
               <div className="flex gap-1 items-end h-[85%]">
-                <div className="w-3 bg-zinc-400 dark:bg-zinc-700 h-16 rounded-t"></div>
+                <div className="w-3 bg-zinc-400  h-16 rounded-t"></div>
                 <div className="w-3 bg-blue-600 h-20 rounded-t"></div>
               </div>
               <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Mer</span>
@@ -341,7 +341,7 @@ export default function DirectorDashboard({
             {/* Thursday */}
             <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
               <div className="flex gap-1 items-end h-[95%]">
-                <div className="w-3 bg-zinc-400 dark:bg-zinc-700 h-20 rounded-t"></div>
+                <div className="w-3 bg-zinc-400  h-20 rounded-t"></div>
                 <div className="w-3 bg-blue-600 h-24 rounded-t"></div>
               </div>
               <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Jeu</span>
@@ -353,7 +353,7 @@ export default function DirectorDashboard({
             {/* Friday */}
             <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
               <div className="flex gap-1 items-end h-[50%]">
-                <div className="w-3 bg-zinc-400 dark:bg-zinc-700 h-12 rounded-t"></div>
+                <div className="w-3 bg-zinc-400  h-12 rounded-t"></div>
                 <div className="w-3 bg-blue-600 h-12 rounded-t"></div>
               </div>
               <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Ven</span>
@@ -365,7 +365,7 @@ export default function DirectorDashboard({
             {/* Saturday */}
             <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
               <div className="flex gap-1 items-end h-[35%]">
-                <div className="w-3 bg-zinc-400 dark:bg-zinc-700 h-6 rounded-t"></div>
+                <div className="w-3 bg-zinc-400  h-6 rounded-t"></div>
                 <div className="w-3 bg-blue-600 h-8 rounded-t"></div>
               </div>
               <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Sam</span>
@@ -377,11 +377,11 @@ export default function DirectorDashboard({
           </div>
           
           <div className="flex items-center justify-center gap-6 text-[11px] font-semibold">
-            <span className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+            <span className="flex items-center gap-1.5 text-zinc-500 ">
               <span className="w-3 h-3 bg-zinc-400 rounded-xs inline-block"></span>
               Temps Ateliers Réel (Heures Passées)
             </span>
-            <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+            <span className="flex items-center gap-1.5 text-blue-600 ">
               <span className="w-3 h-3 bg-blue-600 rounded-xs inline-block"></span>
               Temps Facturable Vendu (ERP)
             </span>
@@ -392,10 +392,10 @@ export default function DirectorDashboard({
       </div>
 
       {/* Recue Table - Selected Live Operational Dossiers */}
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-lg p-5 shadow-sm">
+      <div className="bg-white  border border-slate-200  rounded-lg p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
           <div>
-            <h3 className="font-extrabold text-slate-900 dark:text-neutral-100 text-sm font-display uppercase">SUIVI ET TRAÇABILITÉ DES DOSSIERS DE SAV ACTIFS</h3>
+            <h3 className="font-extrabold text-slate-900  text-sm font-display uppercase">SUIVI ET TRAÇABILITÉ DES DOSSIERS DE SAV ACTIFS</h3>
             <p className="text-slate-400 text-xs">Aperçu rapide des statuts opérationnels sans facturation</p>
           </div>
           
@@ -411,7 +411,7 @@ export default function DirectorDashboard({
         <div className="overflow-x-auto min-w-full">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-neutral-800 text-slate-400 font-semibold uppercase tracking-wider bg-slate-50/50 dark:bg-neutral-950/40 font-display">
+              <tr className="border-b border-slate-200  text-slate-400 font-semibold uppercase tracking-wider bg-slate-50/50  font-display">
                 <th className="py-2.5 px-3">Dossier</th>
                 <th className="py-2.5 px-3">Client & Véhicule</th>
                 <th className="py-2.5 px-3">Type / Raison</th>
@@ -420,18 +420,18 @@ export default function DirectorDashboard({
                 <th className="py-2.5 px-3 text-right font-semibold">Fiche</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-neutral-800">
+            <tbody className="divide-y divide-slate-100 ">
               {dossiers.map(dossier => (
                 <tr 
                   key={dossier.id}
-                  className="hover:bg-slate-50/40 dark:hover:bg-neutral-800/45 cursor-pointer transition"
+                  className="hover:bg-slate-50/40  cursor-pointer transition"
                   onClick={() => onSelectDossier(dossier.id)}
                 >
-                  <td className="py-3 px-3 font-mono font-bold text-neutral-800 dark:text-neutral-200">
+                  <td className="py-3 px-3 font-mono font-bold text-neutral-800 ">
                     {dossier.id}
                   </td>
                   <td className="py-3 px-3 space-y-1">
-                    <div className="font-bold text-slate-800 dark:text-neutral-200 leading-none font-display">
+                    <div className="font-bold text-slate-800  leading-none font-display">
                       {dossier.clientNom}
                     </div>
                     <div className="flex items-center gap-2 text-slate-400 text-[11px]">
@@ -441,8 +441,8 @@ export default function DirectorDashboard({
                     </div>
                   </td>
                   <td className="py-3 px-3">
-                    <div className="font-semibold text-neutral-700 dark:text-neutral-300 font-mono text-[11px]">{dossier.typeDossier}</div>
-                    <div className="text-neutral-500 dark:text-neutral-500 text-[10px] line-clamp-1 max-w-[200px]" title={dossier.plainteClient}>
+                    <div className="font-semibold text-neutral-700  font-mono text-[11px]">{dossier.typeDossier}</div>
+                    <div className="text-neutral-500  text-[10px] line-clamp-1 max-w-[200px]" title={dossier.plainteClient}>
                       {dossier.plainteClient}
                     </div>
                   </td>
@@ -454,7 +454,7 @@ export default function DirectorDashboard({
                   </td>
                   <td className="py-3 px-3 text-right">
                     <button 
-                      className="px-3 py-1.5 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-300 hover:bg-neutral-200 text-neutral-700 rounded-md font-semibold text-[11px] transition cursor-pointer"
+                      className="px-3 py-1.5 bg-neutral-100   hover:bg-neutral-200 text-neutral-700 rounded-md font-semibold text-[11px] transition cursor-pointer"
                       onClick={(e) => {
                         e.stopPropagation();
                         onSelectDossier(dossier.id);

@@ -78,10 +78,10 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
     <div className="space-y-6">
       
       {/* Title & quick instructions */}
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm">
+      <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-sm font-black text-slate-900 dark:text-neutral-100 uppercase tracking-widest flex items-center gap-2 font-display">
+            <h2 className="text-sm font-black text-slate-900  uppercase tracking-widest flex items-center gap-2 font-display">
               <Calendar className="w-5 h-5 text-blue-600" />
               PLANNING & CHARGE DES TECHNICIENS DE L’ATELIER
             </h2>
@@ -91,7 +91,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4 text-slate-400" />
             <select
-              className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded text-xs font-bold text-slate-800 dark:text-neutral-300"
+              className="p-1 px-2.5 bg-slate-50  border border-slate-200  rounded text-xs font-bold text-slate-800 "
               value={filterZone}
               onChange={(e) => setFilterZone(e.target.value)}
             >
@@ -104,13 +104,13 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         </div>
       </div>
 
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm space-y-4">
+      <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-end gap-3">
           <div className="flex-1 space-y-1">
             <span className="text-[10px] uppercase tracking-widest font-black text-slate-400">Suggestion automatique atelier</span>
             <select
               data-testid="planning-suggest-dossier"
-              className="w-full p-2 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded text-xs font-bold text-slate-800 dark:text-neutral-300"
+              className="w-full p-2 bg-slate-50  border border-slate-200  rounded text-xs font-bold text-slate-800 "
               value={selectedTargetId}
               onChange={(e) => {
                 setSuggestionTargetId(e.target.value);
@@ -140,26 +140,26 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         )}
 
         {suggestion && (
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 bg-blue-50/40 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900 rounded-lg text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 bg-blue-50/40  border border-blue-100  rounded-lg text-xs">
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Technicien proposé</span>
-              <strong data-testid="planning-suggest-tech" className="text-slate-800 dark:text-neutral-100">{suggestion.technicianName}</strong>
+              <strong data-testid="planning-suggest-tech" className="text-slate-800 ">{suggestion.technicianName}</strong>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Pont proposé</span>
-              <strong data-testid="planning-suggest-bay" className="text-slate-800 dark:text-neutral-100">{suggestion.bayName}</strong>
+              <strong data-testid="planning-suggest-bay" className="text-slate-800 ">{suggestion.bayName}</strong>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Heure début</span>
-              <strong className="text-slate-800 dark:text-neutral-100">{new Date(suggestion.startTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</strong>
+              <strong className="text-slate-800 ">{new Date(suggestion.startTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</strong>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Heure fin</span>
-              <strong className="text-slate-800 dark:text-neutral-100">{new Date(suggestion.endTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</strong>
+              <strong className="text-slate-800 ">{new Date(suggestion.endTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</strong>
             </div>
             <div className="space-y-2">
               <span className="text-[10px] text-slate-400 font-bold uppercase block">Raison</span>
-              <p className="text-slate-600 dark:text-neutral-300 font-semibold">{suggestion.reason}</p>
+              <p className="text-slate-600  font-semibold">{suggestion.reason}</p>
               <button
                 onClick={handleApplySuggestion}
                 data-testid="planning-suggest-apply"
@@ -174,13 +174,13 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
       </div>
 
       {/* Grid of technicans and Gantt representations */}
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="p-4 bg-slate-50 dark:bg-neutral-950 border-b border-slate-200 dark:border-neutral-800 flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
+      <div className="bg-white  border border-slate-200  rounded-xl overflow-hidden shadow-sm">
+        <div className="p-4 bg-slate-50  border-b border-slate-200  flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
           <span className="w-2/5">Technicien / Spécialité</span>
           <span className="w-3/5 text-center">Charge Horaire Journalière Globale (Capacité standard 8H)</span>
         </div>
 
-        <div className="divide-y divide-slate-200 dark:divide-neutral-800">
+        <div className="divide-y divide-slate-200 ">
           {filteredTechs.map(tech => {
             // Find dossiers assigned to this technician
             const assignedDossiers = dossiers.filter(d => d.technicienId === tech.id && d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE);
@@ -202,14 +202,14 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
             const isOverloaded = totalHoursEst > 8;
 
             return (
-              <div key={tech.id} data-testid={`tech-row-${tech.id}`} className="flex flex-col md:flex-row p-4 items-stretch gap-4 hover:bg-slate-50/50 dark:hover:bg-neutral-950/40 transition">
+              <div key={tech.id} data-testid={`tech-row-${tech.id}`} className="flex flex-col md:flex-row p-4 items-stretch gap-4 hover:bg-slate-50/50  transition">
                 
                 {/* Tech Profile Panel */}
                 <div className="md:w-2/5 space-y-1.5 flex flex-col justify-center">
                   <div className="flex items-center gap-2">
                     <span className={`w-2.5 h-2.5 rounded-full ${statusColor}`} title={tech.disponibilite}></span>
-                    <span data-testid={`tech-name-${tech.id}`} className="font-bold text-slate-800 dark:text-neutral-100 text-xs">{tech.nom}</span>
-                    <span className="bg-zinc-100 dark:bg-neutral-800 text-zinc-500 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+                    <span data-testid={`tech-name-${tech.id}`} className="font-bold text-slate-800  text-xs">{tech.nom}</span>
+                    <span className="bg-zinc-100  text-zinc-500 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
                       {tech.zoneAffectee}
                     </span>
                   </div>
@@ -219,7 +219,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                   {/* Competencies badges */}
                   <div className="flex flex-wrap gap-1">
                     {tech.compétences.map((comp, idx) => (
-                      <span key={idx} className="bg-slate-100 dark:bg-neutral-800 text-slate-500 text-[9px] px-1.5 py-0.5 rounded">
+                      <span key={idx} className="bg-slate-100  text-slate-500 text-[9px] px-1.5 py-0.5 rounded">
                         {comp}
                       </span>
                     ))}
@@ -236,14 +236,14 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                 {/* Visual Gantt Bar Panel */}
                 <div className="md:w-3/5 flex flex-col justify-center space-y-2 pt-2 md:pt-0">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="text-slate-400">Total charge planifiée: <strong className="text-zinc-700 dark:text-zinc-300 font-bold">{totalHoursEst}H</strong></span>
+                    <span className="text-slate-400">Total charge planifiée: <strong className="text-zinc-700  font-bold">{totalHoursEst}H</strong></span>
                     <span data-testid={`tech-charge-${tech.id}`} className={`font-mono font-bold ${isOverloaded ? "text-rose-500" : "text-neutral-500"}`}>
                       {chargePercent}% {isOverloaded && "(Surcharge)"}
                     </span>
                   </div>
 
                   {/* Load progress slider representation */}
-                  <div className="w-full bg-slate-100 dark:bg-neutral-950 rounded-full h-3 overflow-hidden border border-slate-200 dark:border-neutral-800">
+                  <div className="w-full bg-slate-100  rounded-full h-3 overflow-hidden border border-slate-200 ">
                     <div 
                       className={`h-full rounded-full transition-all duration-300 ${
                         isOverloaded 
@@ -265,7 +265,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                         <button 
                           key={dossier.id}
                           onClick={() => onSelectDossier(dossier.id)}
-                          className="bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/25 dark:hover:bg-blue-950/60 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-900 text-[10px] font-bold p-1 px-2.5 rounded flex items-center gap-1.5 transition text-left cursor-pointer"
+                          className="bg-blue-50 hover:bg-blue-100   text-blue-700  border border-blue-200  text-[10px] font-bold p-1 px-2.5 rounded flex items-center gap-1.5 transition text-left cursor-pointer"
                         >
                           <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                           {dossier.id}

@@ -185,12 +185,12 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
 
       {/* Primary tasks */}
       <div className="space-y-4">
-        <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200 uppercase tracking-wider">
+        <h3 className="font-bold text-sm text-slate-800  uppercase tracking-wider">
           Mes travaux assignés aujourd'hui ({techTasks.length})
         </h3>
 
         {techTasks.length === 0 ? (
-          <div className="bg-white dark:bg-neutral-900 p-8 border rounded-xl text-center text-xs text-slate-400 space-y-2">
+          <div className="bg-white  p-8 border rounded-xl text-center text-xs text-slate-400 space-y-2">
             <CheckCircle className="w-8 h-8 text-green-500 mx-auto" />
             <span>Aucune tâche active assignée. Vous êtes entièrement disponible commercialement.</span>
           </div>
@@ -198,12 +198,12 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
           <div className="space-y-4 text-xs font-semibold">
             {techTasks.map(task => {
               return (
-                <div key={task.id} className="bg-white dark:bg-neutral-900 border rounded-2xl shadow-sm overflow-hidden">
+                <div key={task.id} className="bg-white  border rounded-2xl shadow-sm overflow-hidden">
                   
                   {/* Top quick state info */}
-                  <div className="p-4 bg-slate-50 dark:bg-neutral-950 border-b flex justify-between items-center font-display">
+                  <div className="p-4 bg-slate-50  border-b flex justify-between items-center font-display">
                     <div>
-                      <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-sm block">{task.id}</span>
+                      <span className="font-mono font-bold text-blue-600  text-sm block">{task.id}</span>
                       <span className="text-[10px] text-zinc-400 block font-normal uppercase">{task.typeDossier}</span>
                     </div>
 
@@ -217,25 +217,25 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <Car className="w-4 h-4 text-slate-400" />
-                        <span className="font-extrabold text-slate-800 dark:text-neutral-200">{task.vehiculeMarque} {task.vehiculeModele}</span>
+                        <span className="font-extrabold text-slate-800 ">{task.vehiculeMarque} {task.vehiculeModele}</span>
                         <LicencePlate plate={task.vehiculeImmatriculation} />
                       </div>
 
                       <div className="flex items-center gap-2">
                         <User className="w-4 h-4 text-slate-400" />
-                        <span className="text-slate-600 dark:text-slate-400">Client: {task.clientNom}</span>
+                        <span className="text-slate-600 ">Client: {task.clientNom}</span>
                       </div>
 
                       {/* Client symptoms */}
-                      <div className="p-2.5 bg-neutral-50 dark:bg-neutral-950 border rounded-lg text-[11px] leading-tight text-neutral-500 font-medium">
+                      <div className="p-2.5 bg-neutral-50  border rounded-lg text-[11px] leading-tight text-neutral-500 font-medium">
                         <span className="font-bold text-neutral-700 block mb-0.5">Plainte Client :</span>
                         {task.plainteClient}
                       </div>
                     </div>
 
                     {/* Interactive controls */}
-                    <div className="p-3 bg-blue-50/10 dark:bg-blue-950/25 border border-blue-100/40 rounded-lg space-y-2.5">
-                      <span className="text-[10px] text-blue-800 dark:text-blue-400 uppercase tracking-widest block font-bold font-display">Piloter mes tâches :</span>
+                    <div className="p-3 bg-blue-50/10  border border-blue-100/40 rounded-lg space-y-2.5">
+                      <span className="text-[10px] text-blue-800  uppercase tracking-widest block font-bold font-display">Piloter mes tâches :</span>
                       <div className="space-y-2">
                         {task.ordresReparation.map(line => {
                           const status = normalizeRepairOrderStatus(line.status);
@@ -255,15 +255,15 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                           const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
 
                           return (
-                            <div key={line.id} className="p-2 bg-white dark:bg-neutral-900 border border-blue-100 dark:border-blue-900 rounded space-y-2">
+                            <div key={line.id} className="p-2 bg-white  border border-blue-100  rounded space-y-2">
                               <div className="flex items-start justify-between gap-2">
                                 <div>
-                                  <span className="font-extrabold text-slate-800 dark:text-neutral-200 block">{line.designation}</span>
+                                  <span className="font-extrabold text-slate-800  block">{line.designation}</span>
                                   <span className="text-[10px] text-zinc-400 font-mono">{line.tempsPasse}H / {line.tempsEstime}H</span>
                                 </div>
                                 <span 
                                   data-testid={`task-status-${line.id}`}
-                                  className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-slate-100 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300">
+                                  className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-slate-100  text-slate-600 ">
                                   {getRepairOrderStatusLabel(status)}
                                 </span>
                               </div>
@@ -271,7 +271,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                 <p className="text-[10px] text-rose-600 font-bold">{startBlockedMessage}</p>
                               )}
                               {status === "done" ? (
-                                <div className="py-1 text-green-700 dark:text-green-400 font-black text-[10px] uppercase flex items-center gap-1">
+                                <div className="py-1 text-green-700  font-black text-[10px] uppercase flex items-center gap-1">
                                   <CheckCircle className="w-3.5 h-3.5" />
                                   Statut terminé
                                 </div>
@@ -328,13 +328,13 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                       <div className="grid grid-cols-1 gap-2">
                         <input 
                           type="text"
-                          className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border rounded text-[11px] flex-1 font-semibold dark:text-neutral-100 placeholder-zinc-400"
+                          className="p-1 px-2.5 bg-slate-50  border rounded text-[11px] flex-1 font-semibold  placeholder-zinc-400"
                           placeholder="EX: Remplacement plaquette usée, filtre cassé..."
                           value={tempPhotoTitle}
                           onChange={(e) => setTempPhotoTitle(e.target.value)}
                         />
                         <select
-                          className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border rounded text-[11px] font-bold dark:text-neutral-100"
+                          className="p-1 px-2.5 bg-slate-50  border rounded text-[11px] font-bold "
                           value={tempPhotoCategory}
                           onChange={(e) => setTempPhotoCategory(e.target.value as PhotoCategory)}
                         >
@@ -356,7 +356,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                               }}
                             />
                           </label>
-                          <label className="px-3 py-1.5 bg-white dark:bg-neutral-900 border text-slate-700 dark:text-neutral-200 font-bold rounded text-[11px] hover:bg-zinc-50 dark:hover:bg-neutral-800 cursor-pointer text-center">
+                          <label className="px-3 py-1.5 bg-white  border text-slate-700  font-bold rounded text-[11px] hover:bg-zinc-50  cursor-pointer text-center">
                             Galerie
                             <input
                               type="file"
@@ -379,7 +379,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                       <div className="flex gap-2">
                         <input 
                           type="text"
-                          className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border rounded text-[11px] flex-1 font-semibold dark:text-neutral-100 placeholder-zinc-400"
+                          className="p-1 px-2.5 bg-slate-50  border rounded text-[11px] flex-1 font-semibold  placeholder-zinc-400"
                           placeholder="EX: Vis oxydée débloquée, complément à prévoir..."
                           value={tempNote}
                           onChange={(e) => setTempNote(e.target.value)}

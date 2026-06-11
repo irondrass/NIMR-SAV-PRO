@@ -109,10 +109,10 @@ export default function ChefAtelierView({
     <div className="space-y-6">
       
       {/* Banner info */}
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm">
+      <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 className="text-sm font-black text-slate-900 dark:text-neutral-100 uppercase tracking-widest flex items-center gap-2 font-display">
+            <h2 className="text-sm font-black text-slate-900  uppercase tracking-widest flex items-center gap-2 font-display">
               <Wrench className="w-5 h-5 text-blue-600" />
               CONTRÔLEUR DE PRODUCTION CHEF D'ATELIER
             </h2>
@@ -122,7 +122,7 @@ export default function ChefAtelierView({
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4 text-slate-400" />
             <select
-              className="p-1 px-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded text-xs font-bold text-slate-800 dark:text-neutral-300"
+              className="p-1 px-2.5 bg-slate-50  border border-slate-200  rounded text-xs font-bold text-slate-800 "
               value={selectedZoneFilter}
               onChange={(e) => setSelectedZoneFilter(e.target.value)}
             >
@@ -137,43 +137,43 @@ export default function ChefAtelierView({
 
       {/* Grid of quick summary metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs font-semibold">
-        <div className="bg-white dark:bg-neutral-900 p-4 border rounded-xl flex items-center gap-3">
-          <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-600 rounded">
+        <div className="bg-white  p-4 border rounded-xl flex items-center gap-3">
+          <div className="p-2.5 bg-amber-50  text-amber-600 rounded">
             <UserPlus className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-bold dark:text-neutral-100">{unassignedFolders.length}</div>
+            <div className="text-xl font-bold ">{unassignedFolders.length}</div>
             <div className="text-neutral-400 font-bold uppercase text-[9px] tracking-wider">Dossiers Non Affectés</div>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-neutral-900 p-4 border rounded-xl flex items-center gap-3">
-          <div className="p-2.5 bg-red-50 dark:bg-red-950 text-red-600 rounded">
+        <div className="bg-white  p-4 border rounded-xl flex items-center gap-3">
+          <div className="p-2.5 bg-red-50  text-red-600 rounded">
             <AlertTriangle className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-bold dark:text-neutral-100">{blockedFolders.length}</div>
+            <div className="text-xl font-bold ">{blockedFolders.length}</div>
             <div className="text-neutral-400 font-bold uppercase text-[9px] tracking-wider">Actuellement Bloqués</div>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-neutral-900 p-4 border rounded-xl flex items-center gap-3">
-          <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 rounded">
+        <div className="bg-white  p-4 border rounded-xl flex items-center gap-3">
+          <div className="p-2.5 bg-emerald-50  text-emerald-600 rounded">
             <CheckSquare className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-bold dark:text-neutral-100">{readyForQCFolders.length}</div>
+            <div className="text-xl font-bold ">{readyForQCFolders.length}</div>
             <div className="text-neutral-400 font-bold uppercase text-[9px] tracking-wider">Prêts pour Essai de Qualité</div>
           </div>
         </div>
 
         {/* Available techs */}
-        <div className="bg-white dark:bg-neutral-900 p-4 border rounded-xl flex items-center gap-3">
-          <div className="p-2.5 bg-blue-50 dark:bg-blue-950 text-blue-600 rounded">
+        <div className="bg-white  p-4 border rounded-xl flex items-center gap-3">
+          <div className="p-2.5 bg-blue-50  text-blue-600 rounded">
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-bold dark:text-neutral-100">
+            <div className="text-xl font-bold ">
               {techniciens.filter(t => t.disponibilite === "disponible").length} / {techniciens.length}
             </div>
             <div className="text-neutral-400 font-bold uppercase text-[9px] tracking-wider">Compagnons Disponibles</div>
@@ -185,9 +185,9 @@ export default function ChefAtelierView({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Unassigned Work Queue (5 cols) */}
-        <div className="lg:col-span-5 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm space-y-4">
+        <div className="lg:col-span-5 bg-white  border border-slate-200  rounded-xl p-5 shadow-sm space-y-4">
           <div className="border-b pb-1.5 flex justify-between items-center">
-            <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">FILE D’ATTENTE NON AFFECTÉE (DISPATCH)</h3>
+            <h3 className="font-bold text-sm text-slate-800 ">FILE D’ATTENTE NON AFFECTÉE (DISPATCH)</h3>
             <span className="bg-purple-100 text-purple-700 text-[10px] font-black px-2 py-0.5 rounded-full">
               {unassignedFolders.length} dossiers
             </span>
@@ -198,7 +198,7 @@ export default function ChefAtelierView({
           ) : (
             <div className="space-y-3">
               {unassignedFolders.map(doss => (
-                <div key={doss.id} className="p-3 bg-slate-50 dark:bg-neutral-950 border rounded-lg text-xs space-y-2.5">
+                <div key={doss.id} className="p-3 bg-slate-50  border rounded-lg text-xs space-y-2.5">
                   <div className="flex justify-between font-bold">
                     <span className="text-blue-600 font-bold cursor-pointer hover:underline font-mono" onClick={() => onSelectDossier(doss.id)}>
                       {doss.id}
@@ -207,15 +207,15 @@ export default function ChefAtelierView({
                   </div>
 
                   <div>
-                    <span className="font-bold text-slate-800 dark:text-neutral-300 block">{doss.clientNom}</span>
+                    <span className="font-bold text-slate-800  block">{doss.clientNom}</span>
                     <span className="text-slate-500 font-semibold text-[11px] block">{doss.vehiculeMarque} {doss.vehiculeModele}</span>
                   </div>
 
                   {/* Assign dropdown */}
-                  <div className="pt-2 border-t border-slate-200 dark:border-neutral-800 flex items-center gap-2">
+                  <div className="pt-2 border-t border-slate-200  flex items-center gap-2">
                     <span className="text-[10px] text-zinc-400 block font-bold">Attribuer à :</span>
                     <select
-                      className="p-1 px-1.5 bg-white dark:bg-neutral-900 border rounded font-bold text-[10px] dark:text-neutral-100 text-slate-700 flex-1 focus:outline-none"
+                      className="p-1 px-1.5 bg-white  border rounded font-bold text-[10px]  text-slate-700 flex-1 focus:outline-none"
                       onChange={(e) => {
                         if (e.target.value) {
                           handleQuickAssign(doss.id, e.target.value);
@@ -238,9 +238,9 @@ export default function ChefAtelierView({
         </div>
 
         {/* Active Production Board (7 cols) */}
-        <div className="lg:col-span-7 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm space-y-4">
+        <div className="lg:col-span-7 bg-white  border border-slate-200  rounded-xl p-5 shadow-sm space-y-4">
           <div className="border-b pb-1.5">
-            <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">TRAVAUX EN ATELIER ACTIFS</h3>
+            <h3 className="font-bold text-sm text-slate-800 ">TRAVAUX EN ATELIER ACTIFS</h3>
             <p className="text-slate-400 text-xs">Aperçu et actions rapides : mise en repos, relance, ou fin de travaux de réparation</p>
           </div>
 
@@ -249,9 +249,9 @@ export default function ChefAtelierView({
               const tech = techniciens.find(t => t.id === doss.technicienId);
               
               return (
-                <div key={doss.id} className="p-3.5 bg-zinc-50 dark:bg-neutral-950 border border-zinc-200 rounded-lg text-xs space-y-2">
+                <div key={doss.id} className="p-3.5 bg-zinc-50  border border-zinc-200 rounded-lg text-xs space-y-2">
                   <div className="flex justify-between items-center">
-                    <span className="font-mono font-bold text-slate-900 dark:text-blue-400 cursor-pointer hover:underline" onClick={() => onSelectDossier(doss.id)}>
+                    <span className="font-mono font-bold text-slate-900  cursor-pointer hover:underline" onClick={() => onSelectDossier(doss.id)}>
                       {doss.id}
                     </span>
                     <div className="flex gap-1.5">
@@ -263,19 +263,19 @@ export default function ChefAtelierView({
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-zinc-400 block text-[10px]">CLIENT & INFOS :</span>
-                      <span className="font-bold block text-zinc-700 dark:text-zinc-300">{doss.clientNom}</span>
+                      <span className="font-bold block text-zinc-700 ">{doss.clientNom}</span>
                       <span className="text-[11px] block text-zinc-500 font-semibold">{doss.vehiculeMarque} {doss.vehiculeModele}</span>
                     </div>
 
                     <div>
                       <span className="text-zinc-400 block text-[10px]">ASSIGNATION COMPAGNON :</span>
-                      <span className="font-bold block text-zinc-700 dark:text-zinc-300">{tech?.nom || "Non assigné"}</span>
-                      <span className="text-[10px] bg-blue-50 dark:bg-blue-950 px-1 py-[1px] rounded text-blue-700 dark:text-blue-400 font-bold uppercase">{doss.zoneAtelier}</span>
+                      <span className="font-bold block text-zinc-700 ">{tech?.nom || "Non assigné"}</span>
+                      <span className="text-[10px] bg-blue-50  px-1 py-[1px] rounded text-blue-700  font-bold uppercase">{doss.zoneAtelier}</span>
                     </div>
                   </div>
 
                   {/* Actions for active items */}
-                  <div className="pt-2.5 border-t border-zinc-200 dark:border-neutral-800 flex justify-between items-center gap-2">
+                  <div className="pt-2.5 border-t border-zinc-200  flex justify-between items-center gap-2">
                     {/* Time indicator */}
                     <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-semibold">
                       <Clock className="w-3.5 h-3.5" />

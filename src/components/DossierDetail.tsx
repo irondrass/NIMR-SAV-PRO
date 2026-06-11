@@ -332,7 +332,7 @@ export default function DossierDetail({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 font-display">
         <button 
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-neutral-200 transition"
+          className="inline-flex items-center gap-2 text-xs font-bold text-slate-600  hover:text-blue-600  transition"
         >
           <ArrowLeft className="w-4 h-4" />
           Retour à la liste des dossiers
@@ -344,7 +344,7 @@ export default function DossierDetail({
             <span className="text-xs font-bold text-neutral-400 self-center">Forcer le statut (Démo) :</span>
             <select
               data-testid="force-status-select"
-              className="p-1 px-2.5 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold text-xs text-slate-800 dark:text-neutral-300"
+              className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
               value={dossier.statut}
               onChange={(e) => updateDossierState({ statut: e.target.value as DossierStatus })}
             >
@@ -355,7 +355,7 @@ export default function DossierDetail({
 
             <select
               data-testid="force-priority-select"
-              className="p-1 px-2.5 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold text-xs text-slate-800 dark:text-neutral-300"
+              className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
               value={dossier.priorite}
               onChange={(e) => updateDossierState({ priorite: e.target.value as DossierPriority })}
             >
@@ -409,7 +409,7 @@ export default function DossierDetail({
       </div>
 
       {/* Tab Switcher */}
-      <div className="border-b border-slate-200 dark:border-neutral-800 flex overflow-x-auto bg-slate-50 dark:bg-neutral-950 p-1.5 rounded-lg">
+      <div className="border-b border-slate-200  flex overflow-x-auto bg-slate-50  p-1.5 rounded-lg">
         {[
           { key: "resume", label: "Résumé Action", icon: FileText },
           { key: "client", label: "Client & Véhicule", icon: User },
@@ -428,8 +428,8 @@ export default function DossierDetail({
               data-testid={`tab-${tab.key}`}
               className={`p-2.5 px-4 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition duration-150 ${
                 isSel 
-                  ? "bg-slate-900 text-white dark:bg-neutral-800" 
-                  : "text-slate-500 dark:text-neutral-400 hover:text-slate-950 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-neutral-800"
+                  ? "bg-slate-900 text-white " 
+                  : "text-slate-500  hover:text-slate-950  hover:bg-slate-100 "
               }`}
             >
               <TabIcon className="w-4 h-4" />
@@ -440,7 +440,7 @@ export default function DossierDetail({
       </div>
 
       {/* Tab Contents */}
-      <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm">
+      <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm">
         
         {/* Tab 1: Résumé */}
         {activeTab === "resume" && (
@@ -449,14 +449,14 @@ export default function DossierDetail({
               
               {/* Left summary values */}
               <div className="space-y-4">
-                <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200 border-b pb-1.5">Mises en demeure & Suivi</h3>
+                <h3 className="font-bold text-sm text-slate-800  border-b pb-1.5">Mises en demeure & Suivi</h3>
                 
-                <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/60 rounded-xl space-y-2.5">
-                  <div className="flex gap-2 text-xs font-bold text-amber-800 dark:text-amber-400">
-                    <CheckCircle className="w-4 h-4 mt-0.5 text-amber-700 dark:text-amber-500 flex-shrink-0" />
+                <div className="p-4 bg-amber-50  border border-amber-100  rounded-xl space-y-2.5">
+                  <div className="flex gap-2 text-xs font-bold text-amber-800 ">
+                    <CheckCircle className="w-4 h-4 mt-0.5 text-amber-700  flex-shrink-0" />
                     <div>
                       <span className="uppercase block font-black leading-none">Prochaine action recommandée :</span>
-                      <span className="text-[13px] font-medium block mt-1 text-slate-900 dark:text-neutral-200">
+                      <span className="text-[13px] font-medium block mt-1 text-slate-900 ">
                         {dossier.prochaineActionRecommended}
                       </span>
                     </div>
@@ -466,31 +466,31 @@ export default function DossierDetail({
                 <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
                   <div>
                     <span className="text-zinc-400 block font-normal">Responsable en cours :</span>
-                    <span className="text-zinc-700 dark:text-neutral-300 font-bold block">{dossier.technicienId ? techniciensList.find(t=>t.id===dossier.technicienId)?.nom || "Technicien Affecté" : "Non assigné"}</span>
+                    <span className="text-zinc-700  font-bold block">{dossier.technicienId ? techniciensList.find(t=>t.id===dossier.technicienId)?.nom || "Technicien Affecté" : "Non assigné"}</span>
                   </div>
 
                   <div>
                     <span className="text-zinc-400 block font-normal">Zone de l'Atelier :</span>
-                    <span className="text-zinc-700 dark:text-neutral-300 font-bold block">{dossier.zoneAtelier || "Réception"}</span>
+                    <span className="text-zinc-700  font-bold block">{dossier.zoneAtelier || "Réception"}</span>
                   </div>
 
                   <div>
                     <span className="text-zinc-400 block font-normal">Date d'Entrée :</span>
-                    <span className="text-zinc-700 dark:text-neutral-300 font-bold block">
+                    <span className="text-zinc-700  font-bold block">
                       {new Date(dossier.dateReception).toLocaleDateString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
 
                   <div>
                     <span className="text-zinc-400 block font-normal">Échéance de restitution :</span>
-                    <span className="text-zinc-700 dark:text-neutral-300 font-bold block">
+                    <span className="text-zinc-700  font-bold block">
                       {new Date(dossier.dateSouhaiteeLivraison).toLocaleDateString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
                 </div>
 
                 {dossier.bloqueRaison && (
-                  <div className="p-3 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 rounded-lg flex gap-2.5 text-xs text-red-700 dark:text-red-400">
+                  <div className="p-3 bg-red-50  border border-red-200  rounded-lg flex gap-2.5 text-xs text-red-700 ">
                     <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                     <div>
                       <span className="font-bold">Facteur Bloquant Atelier :</span>
@@ -502,18 +502,18 @@ export default function DossierDetail({
 
               {/* Right: Quick action box */}
               {canManageDossier && (
-                <div className="p-4 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-xl space-y-4">
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-neutral-300 uppercase tracking-wider">Planifications & Contrôles Rapides</h4>
+                <div className="p-4 bg-slate-50  border border-slate-200  rounded-xl space-y-4">
+                  <h4 className="font-bold text-xs text-slate-800  uppercase tracking-wider">Planifications & Contrôles Rapides</h4>
                   <p className="text-xs text-slate-500">
                     Attribuer rapidement le dossier à un technicien disponible ou diriger le dossier vers la zone appropriée.
                   </p>
 
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 dark:text-neutral-400 mb-1">Attribuer à un technicien :</label>
+                      <label className="block text-xs font-bold text-slate-600  mb-1">Attribuer à un technicien :</label>
                       <select
                         data-testid="assign-technicien-select"
-                        className="w-full p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold text-xs dark:text-neutral-100"
+                        className="w-full p-2 bg-white  border border-slate-200  rounded font-semibold text-xs "
                         value={dossier.technicienId || ""}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -532,9 +532,9 @@ export default function DossierDetail({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 dark:text-neutral-400 mb-1">Zone de l'Atelier affectée :</label>
+                      <label className="block text-xs font-bold text-slate-600  mb-1">Zone de l'Atelier affectée :</label>
                       <select
-                        className="w-full p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold text-xs dark:text-neutral-100"
+                        className="w-full p-2 bg-white  border border-slate-200  rounded font-semibold text-xs "
                         value={dossier.zoneAtelier || ""}
                         onChange={(e) => updateDossierState({ zoneAtelier: e.target.value as AtelierZone })}
                       >
@@ -560,12 +560,12 @@ export default function DossierDetail({
         {activeTab === "client" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200 border-b pb-1">Fiche Coordonnées Client</h3>
+              <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Fiche Coordonnées Client</h3>
               
               <div className="grid grid-cols-2 gap-y-3.5 gap-x-4 text-xs font-semibold">
                 <div>
                   <span className="text-zinc-400 font-normal block">Client Titulaire :</span>
-                  <span className="text-zinc-950 dark:text-zinc-100 font-bold block">{dossier.clientNom}</span>
+                  <span className="text-zinc-950  font-bold block">{dossier.clientNom}</span>
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Téléphone Portable :</span>
@@ -573,21 +573,21 @@ export default function DossierDetail({
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Nom Déposant :</span>
-                  <span className="text-zinc-700 dark:text-zinc-300 block">{dossier.deposantNom}</span>
+                  <span className="text-zinc-700  block">{dossier.deposantNom}</span>
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Téléphone Déposant :</span>
-                  <span className="text-zinc-700 dark:text-zinc-300 block font-mono">{dossier.deposantTelephone}</span>
+                  <span className="text-zinc-700  block font-mono">{dossier.deposantTelephone}</span>
                 </div>
               </div>
 
               {/* Objets check list display */}
-              <div className="p-3.5 bg-neutral-50 dark:bg-neutral-950 rounded-xl border border-neutral-100 dark:border-neutral-800 text-xs">
-                <span className="font-bold text-zinc-600 dark:text-zinc-300 block mb-1.5 uppercase">Objets recensés à bord :</span>
+              <div className="p-3.5 bg-neutral-50  rounded-xl border border-neutral-100  text-xs">
+                <span className="font-bold text-zinc-600  block mb-1.5 uppercase">Objets recensés à bord :</span>
                 {dossier.objetsLaisses.length === 0 ? (
                   <p className="text-[11px] text-zinc-400 italic">Aucun objet listé.</p>
                 ) : (
-                  <ul className="list-disc list-inside space-y-1 text-slate-600 dark:text-slate-400 font-medium">
+                  <ul className="list-disc list-inside space-y-1 text-slate-600  font-medium">
                     {dossier.objetsLaisses.map((obj, idx) => (
                       <li key={idx}>{obj}</li>
                     ))}
@@ -598,16 +598,16 @@ export default function DossierDetail({
 
             {/* Vehicle spec block */}
             <div className="space-y-4">
-              <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200 border-b pb-1">Identifiants Véhicule</h3>
+              <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Identifiants Véhicule</h3>
               
               <div className="grid grid-cols-2 gap-y-3.5 gap-x-4 text-xs font-medium">
                 <div>
                   <span className="text-zinc-400 font-normal block">Marque / Gamme :</span>
-                  <span className="text-zinc-950 dark:text-neutral-100 font-bold block">{dossier.vehiculeMarque}</span>
+                  <span className="text-zinc-950  font-bold block">{dossier.vehiculeMarque}</span>
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Modèle Commercial :</span>
-                  <span className="text-zinc-950 dark:text-neutral-100 font-bold block">{dossier.vehiculeModele}</span>
+                  <span className="text-zinc-950  font-bold block">{dossier.vehiculeModele}</span>
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Immatriculation NIMR :</span>
@@ -615,24 +615,24 @@ export default function DossierDetail({
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Numéro de Châssis (VIN) :</span>
-                  <span className="text-slate-800 dark:text-zinc-300 font-mono text-[11px] font-bold block">{dossier.vehiculeVIN}</span>
+                  <span className="text-slate-800  font-mono text-[11px] font-bold block">{dossier.vehiculeVIN}</span>
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Teinte Extérieure :</span>
-                  <span className="text-slate-800 dark:text-zinc-300 font-bold block">{dossier.vehiculeCouleur || "N/A"}</span>
+                  <span className="text-slate-800  font-bold block">{dossier.vehiculeCouleur || "N/A"}</span>
                 </div>
                 <div>
                   <span className="text-zinc-400 font-normal block">Kilométrage relevé :</span>
-                  <span className="text-slate-800 dark:text-zinc-300 font-bold block">{dossier.vehiculeKilometrage.toLocaleString()} km</span>
+                  <span className="text-slate-800  font-bold block">{dossier.vehiculeKilometrage.toLocaleString()} km</span>
                 </div>
               </div>
 
               {/* Fuel and paint panel */}
-              <div className="p-3.5 bg-neutral-50 dark:bg-neutral-950 rounded-xl border border-neutral-100 dark:border-neutral-800 space-y-2.5 text-xs">
-                <span className="font-bold text-zinc-600 dark:text-zinc-400 block uppercase">Niveau d’Éthanol / Carburant</span>
+              <div className="p-3.5 bg-neutral-50  rounded-xl border border-neutral-100  space-y-2.5 text-xs">
+                <span className="font-bold text-zinc-600  block uppercase">Niveau d’Éthanol / Carburant</span>
                 <FuelIndicator level={dossier.niveauCarburant} />
                 
-                <div className="border-t border-neutral-200 dark:border-neutral-800 pt-2 grid grid-cols-2 gap-1.5 text-[11px] font-semibold text-zinc-500">
+                <div className="border-t border-neutral-200  pt-2 grid grid-cols-2 gap-1.5 text-[11px] font-semibold text-zinc-500">
                   <div className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full inline-block ${dossier.etatCarrosserie.rayures ? "bg-amber-500" : "bg-green-500"}`}></span>
                     Rayures: {dossier.etatCarrosserie.rayures ? "OUI" : "NON"}
@@ -661,16 +661,16 @@ export default function DossierDetail({
           <div className="space-y-4">
             <div className="flex justify-between items-center border-b pb-2">
               <div>
-                <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200 font-display uppercase tracking-tight">Ordres de Travaux & Remplacement Pièces</h3>
+                <h3 className="font-bold text-sm text-slate-800  font-display uppercase tracking-tight">Ordres de Travaux & Remplacement Pièces</h3>
                 <p className="text-slate-400 text-xs">Suivi des travaux de main-d'œuvre spécifiques à l'atelier</p>
               </div>
-              <span className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 text-xs font-bold px-3 py-1 rounded font-mono">
+              <span className="bg-blue-50  text-blue-700  text-xs font-bold px-3 py-1 rounded font-mono">
                 Total estimé : {dossier.ordresReparation.reduce((acc, current) => acc + current.tempsEstime, 0)} Heures
               </span>
             </div>
 
             {taskError && (
-              <div data-testid="task-error-message" className="p-3.5 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 text-red-700 dark:text-red-400 rounded-lg text-xs font-bold">
+              <div data-testid="task-error-message" className="p-3.5 bg-red-50  border border-red-200  text-red-700  rounded-lg text-xs font-bold">
                 {taskError}
               </div>
             )}
@@ -708,16 +708,16 @@ export default function DossierDetail({
                   <div 
                     key={line.id}
                     data-testid={`task-card-${line.id}`}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs gap-4"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-neutral-50  border border-neutral-200  rounded-lg text-xs gap-4"
                   >
                     <div className="space-y-1">
-                      <span className="font-bold text-slate-800 dark:text-neutral-200 font-display uppercase text-[11px]">{line.designation}</span>
+                      <span className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
                       <div className="flex items-center gap-4 text-slate-400 text-[11px] font-semibold">
-                        <span>Estimation: <span className="text-stone-700 dark:text-stone-300 font-bold font-mono">{line.tempsEstime}H</span></span>
+                        <span>Estimation: <span className="text-stone-700  font-bold font-mono">{line.tempsEstime}H</span></span>
                         <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
                       </div>
                       {line.reopenedReason && (
-                        <p className="text-[10px] text-violet-600 dark:text-violet-400 font-bold">
+                        <p className="text-[10px] text-violet-600  font-bold">
                           Motif réouverture : {line.reopenedReason}
                         </p>
                       )}
@@ -731,7 +731,7 @@ export default function DossierDetail({
                         {getRepairOrderStatusLabel(status)}
                       </span>
                       {startBlockedMessage && status !== "in_progress" && status !== "done" && (
-                        <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold text-right">
+                        <span className="text-[10px] text-rose-600  font-bold text-right">
                           {startBlockedMessage}
                         </span>
                       )}
@@ -807,14 +807,14 @@ export default function DossierDetail({
 
             {/* Form to append new repair order lines (Workshop Chief and Director only) */}
             {[UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole) && (
-              <div className="p-4 bg-slate-50 dark:bg-neutral-950 border border-dashed border-slate-200 dark:border-neutral-800 rounded-lg space-y-3 mt-4">
-                <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 uppercase block font-display">Ajouter une ligne de travaux (Main d'œuvre / Diagnostic)</span>
+              <div className="p-4 bg-slate-50  border border-dashed border-slate-200  rounded-lg space-y-3 mt-4">
+                <span className="text-xs font-bold text-slate-700  uppercase block font-display">Ajouter une ligne de travaux (Main d'œuvre / Diagnostic)</span>
                 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                   <input 
                     type="text" 
                     data-testid="new-task-desc"
-                    className="md:col-span-2 p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold dark:text-neutral-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                    className="md:col-span-2 p-2 bg-white  border border-slate-200  rounded font-semibold  placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
                     placeholder="EX: Remplacement plaquettes de frein avant NIMR"
                     value={newROLineText}
                     onChange={(e) => setNewROLineText(e.target.value)}
@@ -823,7 +823,7 @@ export default function DossierDetail({
                     type="number" 
                     step="0.1"
                     data-testid="new-task-time"
-                    className="p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold dark:text-neutral-100 focus:outline-none" 
+                    className="p-2 bg-white  border border-slate-200  rounded font-bold  focus:outline-none" 
                     placeholder="Temps estimé (H)"
                     value={newROLineTime}
                     onChange={(e) => setNewROLineTime(Number(e.target.value))}
@@ -831,7 +831,7 @@ export default function DossierDetail({
                   <button 
                     onClick={handleAddROLine}
                     data-testid="new-task-submit"
-                    className="py-2 bg-slate-900 hover:bg-slate-950 text-white dark:bg-neutral-800 dark:hover:bg-neutral-800 font-bold rounded cursor-pointer transition flex items-center justify-center gap-1"
+                    className="py-2 bg-slate-900 hover:bg-slate-950 text-white   font-bold rounded cursor-pointer transition flex items-center justify-center gap-1"
                   >
                     <Plus className="w-4 h-4" />
                     Ajouter
@@ -846,24 +846,24 @@ export default function DossierDetail({
         {activeTab === "photos" && (
           <div className="space-y-4">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">Preuves Photos SAV (Avant / Après)</h3>
+              <h3 className="font-bold text-sm text-slate-800 ">Preuves Photos SAV (Avant / Après)</h3>
               <p className="text-slate-400 text-xs">Historique visuel permettant de sécuriser le client et la concession</p>
             </div>
 
-            <div className="p-4 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg space-y-3">
-              <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 uppercase block">Ajouter une photo au dossier</span>
+            <div className="p-4 bg-slate-50  border border-slate-200  rounded-lg space-y-3">
+              <span className="text-xs font-bold text-slate-700  uppercase block">Ajouter une photo au dossier</span>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                 <input
                   type="text"
                   data-testid="photo-title-input"
-                  className="md:col-span-2 p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-semibold dark:text-neutral-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  className="md:col-span-2 p-2 bg-white  border border-slate-200  rounded font-semibold  placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   placeholder="Titre photo (ex: défaut aile droite)"
                   value={dossierPhotoTitle}
                   onChange={(e) => setDossierPhotoTitle(e.target.value)}
                 />
                 <select
                   data-testid="photo-category-select"
-                  className="p-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-bold dark:text-neutral-100 focus:outline-none"
+                  className="p-2 bg-white  border border-slate-200  rounded font-bold  focus:outline-none"
                   value={dossierPhotoCategory}
                   onChange={(e) => setDossierPhotoCategory(e.target.value as PhotoCategory)}
                 >
@@ -872,7 +872,7 @@ export default function DossierDetail({
                   ))}
                 </select>
                 <div className="grid grid-cols-2 gap-2">
-                  <label className="py-2 bg-slate-900 hover:bg-slate-950 text-white dark:bg-neutral-800 dark:hover:bg-neutral-700 font-bold rounded cursor-pointer transition flex items-center justify-center gap-1">
+                  <label className="py-2 bg-slate-900 hover:bg-slate-950 text-white   font-bold rounded cursor-pointer transition flex items-center justify-center gap-1">
                     <Camera className="w-4 h-4" />
                     Prendre
                     <input
@@ -887,7 +887,7 @@ export default function DossierDetail({
                       }}
                     />
                   </label>
-                  <label className="py-2 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 text-slate-700 dark:text-neutral-200 font-bold rounded cursor-pointer transition flex items-center justify-center gap-1">
+                  <label className="py-2 bg-white  border border-slate-200  text-slate-700  font-bold rounded cursor-pointer transition flex items-center justify-center gap-1">
                     <Plus className="w-4 h-4" />
                     Importer
                     <input
@@ -911,7 +911,7 @@ export default function DossierDetail({
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {dossier.photosAvant.map((ph) => (
-                  <div key={ph.id} data-testid={`photo-card-${ph.id}`} className="border border-slate-200 dark:border-neutral-800 rounded-lg overflow-hidden bg-white dark:bg-neutral-950 shadow-sm relative group">
+                  <div key={ph.id} data-testid={`photo-card-${ph.id}`} className="border border-slate-200  rounded-lg overflow-hidden bg-white  shadow-sm relative group">
                     <img src={ph.url} alt={ph.title} className="w-full h-32 object-cover" referrerPolicy="no-referrer" />
                     <span className="absolute left-2 top-2 bg-white/90 text-zinc-700 text-[9px] px-1.5 py-0.5 rounded font-bold">
                       {ph.category}
@@ -927,7 +927,7 @@ export default function DossierDetail({
                       </button>
                     )}
                     <div className="p-2.5 space-y-1 text-[10px]">
-                      <span className="font-bold text-slate-800 dark:text-neutral-300 block truncate">{ph.title}</span>
+                      <span className="font-bold text-slate-800  block truncate">{ph.title}</span>
                       <div className="flex justify-between text-zinc-400 font-semibold">
                         <span>{new Date(ph.date).toLocaleDateString("fr-FR")}</span>
                         <span>{ph.takenBy}</span>
@@ -947,12 +947,12 @@ export default function DossierDetail({
             {/* Complements of work */}
             <div className="space-y-4">
               <div className="border-b pb-1">
-                <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">Module de Compléments de Travaux</h3>
+                <h3 className="font-bold text-sm text-slate-800 ">Module de Compléments de Travaux</h3>
                 <p className="text-slate-400 text-xs text-left">Réparations complémentaires identifiées lors du démontage en atelier et nécessitant l'avis du client ou de l'assurance</p>
               </div>
 
               {dossier.complements.length === 0 ? (
-                <div className="p-4 bg-slate-50 dark:bg-neutral-950/40 rounded-xl text-center border text-xs text-slate-400">
+                <div className="p-4 bg-slate-50  rounded-xl text-center border text-xs text-slate-400">
                   Aucune réparation complémentaire signalée pour l'instant.
                 </div>
               ) : (
@@ -964,26 +964,26 @@ export default function DossierDetail({
                     if (comp.statut === "refuse") cBadge = "bg-red-100 text-red-700 border border-red-200";
 
                     return (
-                      <div key={comp.id} className="p-4 bg-purple-50/10 dark:bg-neutral-950/40 border border-purple-100 dark:border-neutral-800 rounded-xl text-xs space-y-3">
+                      <div key={comp.id} className="p-4 bg-purple-50/10  border border-purple-100  rounded-xl text-xs space-y-3">
                         <div className="flex justify-between items-start gap-4">
                           <div className="space-y-1">
-                            <span className="font-bold text-slate-900 dark:text-neutral-200 text-[13px]">{comp.titre}</span>
-                            <p className="text-slate-600 dark:text-slate-400 leading-relaxed">{comp.description}</p>
+                            <span className="font-bold text-slate-900  text-[13px]">{comp.titre}</span>
+                            <p className="text-slate-600  leading-relaxed">{comp.description}</p>
                           </div>
                           <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${cBadge}`}>
                             {comp.statut}
                           </span>
                         </div>
 
-                        <div className="flex flex-wrap gap-4 text-xs font-semibold text-zinc-500 border-t border-purple-50 dark:border-neutral-800 pt-2.5">
-                          <span>Main d'œuvre estimée : <strong className="text-zinc-700 dark:text-zinc-400">{comp.tempsEstime} Heures</strong></span>
-                          <span>Impact planning : <strong className="text-red-600 dark:text-red-400">{comp.impactPlanning}</strong></span>
-                          <span>Accord requis : <strong className="capitalize text-zinc-700 dark:text-zinc-400">{comp.accordRequis}</strong></span>
+                        <div className="flex flex-wrap gap-4 text-xs font-semibold text-zinc-500 border-t border-purple-50  pt-2.5">
+                          <span>Main d'œuvre estimée : <strong className="text-zinc-700 ">{comp.tempsEstime} Heures</strong></span>
+                          <span>Impact planning : <strong className="text-red-600 ">{comp.impactPlanning}</strong></span>
+                          <span>Accord requis : <strong className="capitalize text-zinc-700 ">{comp.accordRequis}</strong></span>
                         </div>
 
                         {/* Interactive Acceptance Toggle */}
                         {canHandleApprovals && comp.statut === "attente" && (
-                          <div className="flex justify-end gap-2 pt-1 border-t border-purple-50 dark:border-neutral-800">
+                          <div className="flex justify-end gap-2 pt-1 border-t border-purple-50 ">
                             <button 
                               onClick={() => handleStatusComplement(comp.id, "accepte")}
                               className="px-3 py-1 bg-green-600 text-white font-bold rounded hover:bg-green-700 flex items-center gap-1 transition"
@@ -1010,12 +1010,12 @@ export default function DossierDetail({
             {/* Official Accords table */}
             <div className="space-y-4 pt-4 border-t border-zinc-200">
               <div className="border-b pb-1">
-                <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">Suivi Des Accords d'Assurance / Garantie</h3>
+                <h3 className="font-bold text-sm text-slate-800 ">Suivi Des Accords d'Assurance / Garantie</h3>
                 <p className="text-slate-400 text-xs">Validation de prises en charge avant raccordement final des pièces de remplacement</p>
               </div>
 
               {dossier.accords.length === 0 ? (
-                <div className="p-4 bg-slate-50 dark:bg-neutral-950/40 rounded-xl text-center text-xs text-slate-400">
+                <div className="p-4 bg-slate-50  rounded-xl text-center text-xs text-slate-400">
                   Aucun accord d'assurance ou garantie constructeur requis sur ce dossier.
                 </div>
               ) : (
@@ -1026,12 +1026,12 @@ export default function DossierDetail({
                     if (acc.statut === "refuse") color = "bg-red-100 text-red-800";
 
                     return (
-                      <div key={acc.id} className="p-3.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div key={acc.id} className="p-3.5 bg-neutral-50  border border-neutral-200  rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900 dark:text-neutral-100">{acc.type}</span>
+                            <span className="font-bold text-slate-900 ">{acc.type}</span>
                             <span className="text-slate-400">•</span>
-                            <span className="text-slate-600 dark:text-neutral-400 italic">Destinataire: {acc.destinataire}</span>
+                            <span className="text-slate-600  italic">Destinataire: {acc.destinataire}</span>
                           </div>
                           <p className="text-slate-500 text-[11px] font-medium leading-tight">{acc.commentaire}</p>
                           <div className="text-[10px] text-neutral-400 font-semibold">
@@ -1076,28 +1076,28 @@ export default function DossierDetail({
         {activeTab === "quality-control" && (
           <div className="space-y-6">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">Protocole de Contrôle de Qualité Obligatoire</h3>
+              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Contrôle de Qualité Obligatoire</h3>
               <p className="text-slate-400 text-xs">Checklist de sécurité opérationnelle à valider obligatoirement par l'essayeur contrôleur technique</p>
             </div>
 
             {qcError && (
-              <div data-testid="qc-error-message" className="p-3.5 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 text-red-700 dark:text-red-400 rounded-lg text-xs font-bold">
+              <div data-testid="qc-error-message" className="p-3.5 bg-red-50  border border-red-200  text-red-700  rounded-lg text-xs font-bold">
                 {qcError}
               </div>
             )}
 
             {/* If QC is already validated display details */}
             {dossier.checklistQC.validationGlobale === "valide" ? (
-              <div data-testid="qc-status-message" className="p-5 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-950 rounded-xl text-xs space-y-3">
-                <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-bold">
+              <div data-testid="qc-status-message" className="p-5 bg-green-50  border border-green-200  rounded-xl text-xs space-y-3">
+                <div className="flex items-center gap-2 text-green-700  font-bold">
                   <CheckCircle className="w-5 h-5" />
                   CONTRÔLE QUALITÉ VALIDÉ - BON POUR LIVRAISON VÉHICULE
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-600 dark:text-slate-400">
-                  <div>Validé par: <strong className="text-slate-800 dark:text-white">{dossier.checklistQC.validePar || "Chef d'atelier"}</strong></div>
-                  <div>Le: <strong className="text-slate-800 dark:text-white">{new Date(dossier.checklistQC.dateValidation!).toLocaleString()}</strong></div>
+                <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-600 ">
+                  <div>Validé par: <strong className="text-slate-800 ">{dossier.checklistQC.validePar || "Chef d'atelier"}</strong></div>
+                  <div>Le: <strong className="text-slate-800 ">{new Date(dossier.checklistQC.dateValidation!).toLocaleString()}</strong></div>
                 </div>
-                <p className="text-slate-500 dark:text-slate-400 font-medium italic">Tous les voyants d'alerte moteur éteints, essais statiques et routiers entièrement concluants.</p>
+                <p className="text-slate-500  font-medium italic">Tous les voyants d'alerte moteur éteints, essais statiques et routiers entièrement concluants.</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -1116,9 +1116,9 @@ export default function DossierDetail({
                   ].map((item) => (
                     <label 
                       key={item.key} 
-                      className="p-3 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 rounded-lg flex items-center justify-between cursor-pointer select-none"
+                      className="p-3 bg-neutral-50  border border-neutral-200 rounded-lg flex items-center justify-between cursor-pointer select-none"
                     >
-                      <span className="text-slate-700 dark:text-neutral-400 font-semibold">{item.label}</span>
+                      <span className="text-slate-700  font-semibold">{item.label}</span>
                       <input 
                         type="checkbox"
                         checked={dossier.checklistQC[item.key as keyof typeof dossier.checklistQC] as boolean}
@@ -1133,8 +1133,8 @@ export default function DossierDetail({
 
                 {/* Confirm QC Section (QC staff, Chief Workshop and Director only) */}
                 {canValidateQuality && (
-                  <div className="p-4 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-xl space-y-4">
-                    <span className="text-xs font-bold text-slate-800 dark:text-neutral-300 uppercase block">Décision Finale de Validation de Qualité :</span>
+                  <div className="p-4 bg-slate-50  border border-slate-200  rounded-xl space-y-4">
+                    <span className="text-xs font-bold text-slate-800  uppercase block">Décision Finale de Validation de Qualité :</span>
                     
                     <div className="flex gap-2">
                       <button 
@@ -1169,19 +1169,19 @@ export default function DossierDetail({
         {activeTab === "deliveries" && (
           <div className="space-y-6">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 dark:text-neutral-200">Protocole de Clôture et Restitution d'Véhicules</h3>
+              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Clôture et Restitution d'Véhicules</h3>
               <p className="text-slate-400 text-xs">Validation de conformité d'exploitation avec signature manuelle du client final</p>
             </div>
 
             {deliveryError && (
-              <div data-testid="delivery-error-message" className="p-3.5 bg-red-50 dark:bg-rose-950/20 border border-red-200 dark:border-red-950 text-red-700 dark:text-red-400 rounded-lg text-xs font-bold">
+              <div data-testid="delivery-error-message" className="p-3.5 bg-red-50  border border-red-200  text-red-700  rounded-lg text-xs font-bold">
                 {deliveryError}
               </div>
             )}
 
             {/* Check requirements */}
-            <div className="p-4 bg-slate-50 dark:bg-neutral-950 rounded-xl border border-slate-200 dark:border-neutral-800 text-xs space-y-3.5">
-              <span className="font-bold text-neutral-800 dark:text-neutral-300 block uppercase">Pré-requis opérationnels :</span>
+            <div className="p-4 bg-slate-50  rounded-xl border border-slate-200  text-xs space-y-3.5">
+              <span className="font-bold text-neutral-800  block uppercase">Pré-requis opérationnels :</span>
               
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
@@ -1190,9 +1190,9 @@ export default function DossierDetail({
                   }`}>
                     {dossier.checklistQC.validationGlobale === "valide" ? "✓" : "!"}
                   </span>
-                  <span className="font-semibold text-slate-700 dark:text-neutral-400">
+                  <span className="font-semibold text-slate-700 ">
                     Contrôle qualité validé par l'essayeur : 
-                    <strong className="text-slate-900 dark:text-white ml-1">
+                    <strong className="text-slate-900  ml-1">
                       {dossier.checklistQC.validationGlobale === "valide" ? "OUI" : "NON (En cours de validation)"}
                     </strong>
                   </span>
@@ -1204,9 +1204,9 @@ export default function DossierDetail({
                   }`}>
                     ✓
                   </span>
-                  <span className="font-semibold text-slate-700 dark:text-neutral-400">
+                  <span className="font-semibold text-slate-700 ">
                     Tous les ordres de réparation d'origine validés : 
-                    <strong className="text-slate-900 dark:text-white ml-1">
+                    <strong className="text-slate-900  ml-1">
                       {dossier.ordresReparation.every(isRepairOrderDone) ? "OUI (100% terminés)" : "NON (Certaines tâches suspendues ou en cours)"}
                     </strong>
                   </span>
@@ -1217,13 +1217,13 @@ export default function DossierDetail({
             {/* Complete Handover section */}
             {dossier.statut === DossierStatus.PRET_A_LIVRER && canDeliverVehicle ? (
               <div className="space-y-4">
-                <div className="p-4 bg-blue-50/20 dark:bg-blue-950/20 border border-blue-200/40 rounded-lg space-y-3 text-xs">
-                  <span className="font-bold text-blue-800 dark:text-blue-400 block uppercase font-display">Signature client lors de la remise des clés :</span>
+                <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
+                  <span className="font-bold text-blue-800  block uppercase font-display">Signature client lors de la remise des clés :</span>
                   
                   {/* Visual Signature Mock */}
                   <div 
                     data-testid="delivery-signature"
-                    className="bg-white dark:bg-neutral-900 border border-dashed border-zinc-300 dark:border-neutral-800 h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
+                    className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
                     onClick={() => alert("Signature sécurisée capturée sur tablette NIMR.")}
                   >
                     [ Cliquer ici pour simuler la signature tactile du client ]
@@ -1244,9 +1244,9 @@ export default function DossierDetail({
               </div>
             ) : dossier.statut === DossierStatus.LIVRE ? (
               <div className="space-y-4">
-                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs space-y-1 text-emerald-800 dark:text-emerald-400">
+                <div className="p-4 bg-emerald-50  border border-emerald-200  rounded-lg text-xs space-y-1 text-emerald-800 ">
                   <span className="font-bold block">✓ Véhicule remis en main propre au client. Clôture en transit.</span>
-                  <p className="font-medium text-slate-600 dark:text-slate-400">Restitution confirmée et signée. Le dossier doit être transmis à l'ERP NIMR pour facturation définitive.</p>
+                  <p className="font-medium text-slate-600 ">Restitution confirmée et signée. Le dossier doit être transmis à l'ERP NIMR pour facturation définitive.</p>
                 </div>
 
                 {canDeliverVehicle && (
