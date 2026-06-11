@@ -30,6 +30,34 @@ interface GuidedReceptionProps {
   onNavigateToTab: (tab: string) => void;
 }
 
+const PRESET_CLIENTS = [
+  { nom: "Client Démo Flotte 001", tel: "+216 55 111 001" },
+  { nom: "Client Démo Particulier 002", tel: "+216 55 111 002" },
+  { nom: "Société Démo Transport 003", tel: "+216 55 111 003" }
+];
+
+const PRESET_MODELS = [
+  { marque: "DFSK", modele: "Glory 500", testId: "preset-model-glory-500" },
+  { marque: "DFSK", modele: "Glory 580", testId: "preset-model-glory-580" },
+  { marque: "DFSK", modele: "E5", testId: "preset-model-e5" },
+  { marque: "DFSK", modele: "BOX", testId: "preset-model-box" },
+  { marque: "Dongfeng", modele: "Shine", testId: "preset-model-shine" },
+  { marque: "Dongfeng", modele: "Shine Max", testId: "preset-model-shine-max" },
+  { marque: "Forthing", modele: "T5 EVO", testId: "preset-model-t5-evo" },
+  { marque: "Forthing", modele: "Friday", testId: "preset-model-friday" }
+];
+
+const PRESET_COMPLAINTS = [
+  { text: "Entretien périodique / Vidange", testId: "preset-complaint-entretien" },
+  { text: "Bruit train avant", testId: "preset-complaint-train-avant" },
+  { text: "Climatisation inefficace", testId: "preset-complaint-climatisation" },
+  { text: "Voyant moteur allumé", testId: "preset-complaint-voyant-moteur" },
+  { text: "Problème de charge", testId: "preset-complaint-charge" },
+  { text: "Bruit freinage", testId: "preset-complaint-freinage" },
+  { text: "Contrôle avant livraison", testId: "preset-complaint-pdi" },
+  { text: "Perte de puissance", testId: "preset-complaint-puissance" }
+];
+
 export default function GuidedReception({ existingDossierIds, onAddDossier, onNavigateToTab }: GuidedReceptionProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [receptionError, setReceptionError] = useState<string | null>(null);
@@ -39,6 +67,35 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
   const [clientTelephone, setClientTelephone] = useState("");
   const [deposantNom, setDeposantNom] = useState("");
   const [deposantTelephone, setDeposantTelephone] = useState("");
+  const [deposantSame, setDeposantSame] = useState(true);
+
+  const updateClientNom = (val: string) => {
+    setClientNom(val);
+    if (deposantSame) {
+      setDeposantNom(val);
+    }
+  };
+
+  const updateClientTelephone = (val: string) => {
+    setClientTelephone(val);
+    if (deposantSame) {
+      setDeposantTelephone(val);
+    }
+  };
+
+  const updateDeposantNom = (val: string) => {
+    setDeposantNom(val);
+    if (val !== clientNom) {
+      setDeposantSame(false);
+    }
+  };
+
+  const updateDeposantTelephone = (val: string) => {
+    setDeposantTelephone(val);
+    if (val !== clientTelephone) {
+      setDeposantSame(false);
+    }
+  };
   
   const [vehiculeMarque, setVehiculeMarque] = useState("Dongfeng"); // Dongfeng, DFSK, Forthing
   const [vehiculeModele, setVehiculeModele] = useState("");
@@ -202,7 +259,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:text-neutral-100" 
                   placeholder="EX: Client Démo 001 ou Société Démo"
                   value={clientNom}
-                  onChange={(e) => setClientNom(e.target.value)}
+                  onChange={(e) => updateClientNom(e.target.value)}
                 />
               </div>
 
@@ -214,8 +271,29 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:text-neutral-100" 
                   placeholder="+216 -- --- ---"
                   value={clientTelephone}
-                  onChange={(e) => setClientTelephone(e.target.value)}
+                  onChange={(e) => updateClientTelephone(e.target.value)}
                 />
+              </div>
+            </div>
+
+            {/* Presets Clients Fictifs */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Saisie rapide client (Presets) :</span>
+              <div className="flex flex-wrap gap-2">
+                {PRESET_CLIENTS.map((client, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    data-testid={`preset-client-${idx}`}
+                    onClick={() => {
+                      updateClientNom(client.nom);
+                      updateClientTelephone(client.tel);
+                    }}
+                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-bold rounded-lg transition active:scale-95 cursor-pointer"
+                  >
+                    {client.nom}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -224,9 +302,11 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <input 
                   type="checkbox" 
                   id="deposantSame" 
+                  data-testid="reception-deposant-same"
                   className="rounded text-blue-600 focus:ring-blue-500"
-                  defaultChecked
+                  checked={deposantSame}
                   onChange={(e) => {
+                    setDeposantSame(e.target.checked);
                     if (e.target.checked) {
                       setDeposantNom(clientNom);
                       setDeposantTelephone(clientTelephone);
@@ -244,7 +324,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                     className="w-full p-2.5 bg-white dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs dark:text-neutral-200" 
                     placeholder="Nom du conducteur livreur"
                     value={deposantNom}
-                    onChange={(e) => setDeposantNom(e.target.value)}
+                    onChange={(e) => updateDeposantNom(e.target.value)}
                   />
                 </div>
 
@@ -255,7 +335,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                     className="w-full p-2.5 bg-white dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-mono dark:text-neutral-200" 
                     placeholder="Téléphone du livreur"
                     value={deposantTelephone}
-                    onChange={(e) => setDeposantTelephone(e.target.value)}
+                    onChange={(e) => updateDeposantTelephone(e.target.value)}
                   />
                 </div>
               </div>
@@ -271,6 +351,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Marque Officielle *</label>
                 <select 
+                  data-testid="reception-vehicle-brand"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs font-bold text-slate-700 dark:text-neutral-300 focus:outline-none"
                   value={vehiculeMarque}
                   onChange={(e) => setVehiculeMarque(e.target.value)}
@@ -306,6 +387,27 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
               </div>
             </div>
 
+            {/* Presets Modèles NIMR */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Saisie rapide modèle NIMR :</span>
+              <div className="flex flex-wrap gap-2">
+                {PRESET_MODELS.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    data-testid={item.testId}
+                    onClick={() => {
+                      setVehiculeMarque(item.marque);
+                      setVehiculeModele(item.modele);
+                    }}
+                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-bold rounded-lg transition active:scale-95 cursor-pointer"
+                  >
+                    {item.marque} {item.modele}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Code VIN (Châssis) *</label>
@@ -334,11 +436,26 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <label className="block text-xs font-bold text-slate-600 dark:text-neutral-300 uppercase mb-1">Teinte Carrosserie (Couleur)</label>
                 <input 
                   type="text" 
+                  data-testid="reception-vehicle-color"
                   className="w-full p-2.5 bg-slate-50 dark:bg-neutral-950 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs focus:outline-none dark:text-neutral-100" 
                   placeholder="Gris Magnétique, Rouge Rubis"
                   value={vehiculeCouleur}
                   onChange={(e) => setVehiculeCouleur(e.target.value)}
                 />
+                {/* Presets Couleurs */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {["Blanc", "Noir", "Gris", "Bleu", "Rouge"].map((col, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      data-testid={`preset-color-${col.toLowerCase()}`}
+                      onClick={() => setVehiculeCouleur(col)}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700 text-[10px] font-bold rounded-md transition active:scale-95 cursor-pointer"
+                    >
+                      {col}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -386,6 +503,28 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                   value={plainteClient}
                   onChange={(e) => setPlainteClient(e.target.value)}
                 />
+                {/* Presets Plaintes */}
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {PRESET_COMPLAINTS.map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      data-testid={item.testId}
+                      onClick={() => {
+                        const current = plainteClient.trim();
+                        if (!current) {
+                          setPlainteClient(item.text);
+                        } else {
+                          const delimiter = current.endsWith(",") || current.endsWith(".") ? " " : ", ";
+                          setPlainteClient(current + delimiter + item.text);
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-bold rounded-lg transition active:scale-95 cursor-pointer"
+                    >
+                      {item.text}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -505,7 +644,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 <div className="pt-2">
                   <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-neutral-300 mb-1">
                     <span>Niveau de Carburant / Batterie :</span>
-                    <span className="text-blue-600 font-extrabold">{niveauCarburant}%</span>
+                    <span data-testid="reception-fuel-value" className="text-blue-600 font-extrabold">{niveauCarburant === 5 ? "Réserve (5%)" : `${niveauCarburant}%`}</span>
                   </div>
                   <input 
                     type="range" 
@@ -517,10 +656,34 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                     value={niveauCarburant} 
                     onChange={(e) => setNiveauCarburant(Number(e.target.value))} 
                   />
-                  <div className="flex justify-between text-[10px] text-zinc-400 font-bold px-1">
+                  <div className="flex justify-between text-[10px] text-zinc-400 font-bold px-1 mb-2">
                     <span>VIDE</span>
                     <span>1/2</span>
                     <span>PLEIN</span>
+                  </div>
+                  {/* Presets Carburant */}
+                  <div className="flex gap-1.5 mt-2 justify-between">
+                    {[
+                      { label: "Réserve", val: 5, testId: "preset-fuel-reserve" },
+                      { label: "25%", val: 25, testId: "preset-fuel-25" },
+                      { label: "50%", val: 50, testId: "preset-fuel-50" },
+                      { label: "75%", val: 75, testId: "preset-fuel-75" },
+                      { label: "100%", val: 100, testId: "preset-fuel-100" }
+                    ].map((item) => (
+                      <button
+                        key={item.val}
+                        type="button"
+                        data-testid={item.testId}
+                        onClick={() => setNiveauCarburant(item.val)}
+                        className={`flex-1 py-1.5 text-[9px] font-black rounded-lg transition cursor-pointer active:scale-95 ${
+                          niveauCarburant === item.val
+                            ? "bg-blue-600 text-white shadow-xs"
+                            : "bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
