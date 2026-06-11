@@ -3,472 +3,592 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from "react";
-import { DossierSAV, DossierStatus, DossierPriority, UserRole } from "../types";
-import { 
-  TrendingUp, 
-  AlertTriangle, 
-  Clock, 
-  CheckCircle2, 
-  ShieldCheck, 
-  Activity, 
-  Wrench, 
-  Truck, 
-  ListTodo, 
-  UserCheck, 
-  Calendar,
-  AlertCircle,
-  FileCheck,
-  Zap,
-  Users
+import React, { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Gauge,
+  ListFilter,
+  ShieldCheck,
+  Timer,
+  Truck,
+  UserCheck,
+  Wrench,
 } from "lucide-react";
-import { StatusBadge, PriorityBadge, LicencePlate, MiniProgress } from "./UIParts";
+import {
+  buildDirectorDashboardKpis,
+  DashboardChartPoint,
+  DashboardMetric,
+  DashboardPeriod,
+  DashboardTone,
+} from "../dashboard-kpis";
+import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource } from "../types";
+import { LicencePlate, PriorityBadge } from "./UIParts";
 
 interface DirectorDashboardProps {
   dossiers: DossierSAV[];
+  techniciens: TechnicienResource[];
   onSelectDossier: (id: string) => void;
-  onNavigateToTab: (tab: string) => void;
-  metricsSuggestions: string[];
 }
 
-export default function DirectorDashboard({ 
-  dossiers, 
-  onSelectDossier, 
-  onNavigateToTab,
-  metricsSuggestions
-}: DirectorDashboardProps) {
-  
-  // Count statistics
-  const countByStatus = (status: DossierStatus) => dossiers.filter(d => d.statut === status).length;
-  
-  const totalActifs = dossiers.filter(d => d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE).length;
-  const attendusAuj = dossiers.filter(d => d.statut === DossierStatus.EN_ATTENTE_RECEPTION).length;
-  const recusAuj = dossiers.filter(d => [DossierStatus.VEHICULE_RECU, DossierStatus.TRAVAUX_PLANIFIES].includes(d.statut)).length;
-  const enTravaux = countByStatus(DossierStatus.EN_TRAVAUX);
-  const bloques = countByStatus(DossierStatus.BLOQUE);
-  const pretsLivrer = countByStatus(DossierStatus.PRET_A_LIVRER);
-  
-  // Accords en attente count
-  const accordsClientAttente = dossiers.filter(d => 
-    d.complements.some(c => c.statut === "attente" && c.accordRequis === "client")
-  ).length;
-  
-  const accordsAssuranceAttente = dossiers.filter(d => 
-    d.accords.some(a => a.type === "Assurance" && a.statut === "en_attente")
-  ).length;
+const periodLabels: Record<DashboardPeriod, string> = {
+  today: "Aujourd'hui",
+  week: "Cette semaine",
+  month: "Ce mois",
+  all: "Tous",
+};
 
-  const accordsGarantieAttente = dossiers.filter(d => 
-    d.accords.some(a => a.type === "Garantie Constructeur" && a.statut === "en_attente")
-  ).length;
+const toneClasses: Record<DashboardTone, { border: string; bg: string; text: string; icon: string }> = {
+  slate: { border: "border-slate-200", bg: "bg-slate-50", text: "text-slate-900", icon: "text-slate-600" },
+  blue: { border: "border-blue-200", bg: "bg-blue-50", text: "text-blue-900", icon: "text-blue-600" },
+  cyan: { border: "border-cyan-200", bg: "bg-cyan-50", text: "text-cyan-900", icon: "text-cyan-600" },
+  emerald: { border: "border-emerald-200", bg: "bg-emerald-50", text: "text-emerald-900", icon: "text-emerald-600" },
+  amber: { border: "border-amber-200", bg: "bg-amber-50", text: "text-amber-900", icon: "text-amber-600" },
+  rose: { border: "border-rose-200", bg: "bg-rose-50", text: "text-rose-900", icon: "text-rose-600" },
+  violet: { border: "border-violet-200", bg: "bg-violet-50", text: "text-violet-900", icon: "text-violet-600" },
+};
 
-  // Delay is computed against the actual current time, not the original demo timestamp.
-  const dossiersEnRetard = dossiers.filter(d => {
-    if ([DossierStatus.LIVRE, DossierStatus.CLOTURE].includes(d.statut)) return false;
-    const limit = new Date(d.dateSouhaiteeLivraison).getTime();
-    const now = Date.now();
-    return now > limit;
-  });
+export default function DirectorDashboard({ dossiers, techniciens, onSelectDossier }: DirectorDashboardProps) {
+  const [period, setPeriod] = useState<DashboardPeriod>("all");
+  const [status, setStatus] = useState<DossierStatus | "all">("all");
+  const [technicianId, setTechnicianId] = useState<string | "all">("all");
+  const [priority, setPriority] = useState<DossierPriority | "all">("all");
+
+  const kpis = useMemo(() => buildDirectorDashboardKpis({
+    dossiers,
+    techniciens,
+    filters: { period, status, technicianId, priority },
+  }), [dossiers, period, priority, status, technicianId, techniciens]);
+
+  const chartColor = "#2563eb";
+  const secondaryChartColor = "#10b981";
 
   return (
-    <div className="space-y-6">
-      {/* Welcome Top Banner - Geometric Balance styled */}
-      <div className="bg-gradient-to-r from-slate-900 to-slate-950 text-white rounded-lg p-6 shadow-sm border border-slate-800 relative overflow-hidden">
-        <div className="absolute right-0 bottom-0 top-0 w-1/3 opacity-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-500 via-blue-700 to-transparent pointer-events-none"></div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="bg-blue-600/20 text-blue-400 text-xs uppercase px-2.5 py-0.5 rounded-md font-bold tracking-wider border border-blue-500/30 font-mono">
-                Directeur SAV NIMR
+    <div data-testid="director-dashboard" className="space-y-6">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-700">
+                Directeur SAV
               </span>
-              <span className="text-xs text-slate-400 font-medium">| Portail connecté ERP</span>
+              <span className="text-xs font-semibold text-slate-500">NIMR SAV PRO v1.1.0</span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight font-display">Tableau de Bord Stratégique 360°</h1>
-            <p className="text-slate-300 text-sm mt-1 max-w-xl">
-              Suivi en temps réel de la performance opérationnelle de l'atelier, des accords assurances, clients et du taux de restitution d'atelier.
+            <h1 className="font-display text-2xl font-black text-slate-950">Dashboard KPI opérationnel</h1>
+            <p className="max-w-3xl text-sm font-medium text-slate-600">
+              Pilotage atelier, qualité, délais et alertes critiques du circuit SAV.
             </p>
           </div>
-          
-          {/* Quick Stats Summary Badge on Right */}
-          <div className="flex gap-4 p-3 bg-white/5 rounded-md border border-white/10 backdrop-blur-xs">
-            <div className="text-center px-3 border-r border-white/10">
-              <div className="text-2xl font-black text-amber-400 font-display">{dossiersEnRetard.length}</div>
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">En retard</div>
-            </div>
-            <div className="text-center px-3 border-r border-white/10">
-              <div className="text-2xl font-black text-rose-400 font-display">{bloques}</div>
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Bloqués</div>
-            </div>
-            <div className="text-center px-2">
-              <div className="text-2xl font-black text-green-400 font-display">{pretsLivrer}</div>
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">À livrer</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* KPI Cards Row 1 - Operational Flux */}
-      <h2 className="text-xs font-bold text-slate-900  uppercase tracking-wider flex items-center gap-2 font-display">
-        <Activity className="w-5 h-5 text-blue-600" />
-        Flux Opérationnel Atelier NIMR
-      </h2>
-      
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
-        {/* Total active card */}
-        <button 
-          onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
-        >
-          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Dossiers Actifs</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-blue-600  group-hover:scale-105 transition-transform duration-150 origin-left font-display">{totalActifs}</span>
-            <span className="bg-blue-50  text-blue-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
-              Atelier
-            </span>
-          </div>
-        </button>
-
-        {/* Attendus card */}
-        <button
-          onClick={() => onNavigateToTab("reception-rapide")}
-          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
-        >
-          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Attendus Auj.</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-amber-600  font-display">{attendusAuj}</span>
-            <span className="bg-amber-50  text-amber-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
-              RDV
-            </span>
-          </div>
-        </button>
-
-        {/* Reçus card */}
-        <button 
-          onClick={() => onNavigateToTab("chef-atelier")}
-          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
-        >
-          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Véhicules reçus</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-teal-600  font-display">{recusAuj}</span>
-            <span className="bg-teal-50  text-teal-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono font-medium">
-              Reçus
-            </span>
-          </div>
-        </button>
-
-        {/* En travaux card */}
-        <button 
-          onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
-        >
-          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">En travaux</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-sky-600  font-display">{enTravaux}</span>
-            <span className="bg-sky-50  text-sky-600  text-[10px] font-bold px-1.5 py-0.5 rounded animate-pulse font-mono">
-              Prod
-            </span>
-          </div>
-        </button>
-
-        {/* Bloqués card */}
-        <button 
-          onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-zinc-50  border-2 border-red-200  rounded-lg p-4 text-left shadow-sm hover:border-red-400 transition group"
-        >
-          <div className="text-[11px] font-bold text-red-600  uppercase tracking-wider flex items-center gap-1 font-mono">
-            <AlertCircle className="w-3.5 h-3.5 text-red-600" />
-            Bloqués / Stop
-          </div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-red-600  font-display">{bloques}</span>
-            <span className="bg-red-100  text-red-700  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
-              Alerte
-            </span>
-          </div>
-        </button>
-
-        {/* Prêts card */}
-        <button 
-          onClick={() => onNavigateToTab("atelier-kanban")}
-          className="bg-white  border border-slate-200  rounded-lg p-4 text-left shadow-sm hover:border-blue-500 transition group"
-        >
-          <div className="text-[11px] font-bold text-slate-500  uppercase tracking-wider">Prêts à livrer</div>
-          <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-green-600  font-display">{pretsLivrer}</span>
-            <span className="bg-green-50  text-green-600  text-[10px] font-bold px-1.5 py-0.5 rounded font-mono">
-              OK
-            </span>
-          </div>
-        </button>
-      </div>
-
-      {/* Accord States Alerts */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Accord client */}
-        <div className="bg-white  border border-slate-200  rounded-xl p-4 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-purple-50  text-purple-600  rounded-xl">
-            <Users className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold ">{accordsClientAttente}</div>
-            <div className="text-xs font-semibold text-neutral-500  uppercase">Accords Clients Requis</div>
-            <p className="text-[10px] text-neutral-400  mt-0.5">Compléments de travaux signalés</p>
-          </div>
-        </div>
-
-        {/* Accord Assurance */}
-        <div className="bg-white  border border-slate-200  rounded-xl p-4 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-sky-50  text-sky-600  rounded-xl">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold ">{accordsAssuranceAttente}</div>
-            <div className="text-xs font-semibold text-neutral-500  uppercase">Accords GAT/Assurances</div>
-            <p className="text-[10px] text-neutral-400  mt-0.5">Chiffres de carrosserie en validation d'expert</p>
-          </div>
-        </div>
-
-        {/* Accord Garantie */}
-        <div className="bg-white  border border-slate-200  rounded-xl p-4 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-pink-50  text-pink-600  rounded-xl">
-            <Zap className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold ">{accordsGarantieAttente}</div>
-            <div className="text-xs font-semibold text-neutral-500  uppercase">Garanties Constructeurs</div>
-            <p className="text-[10px] text-neutral-400  mt-0.5">Soumissions Dongfeng/DFSK/Forthing</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Middle Section: Dashboard action plan & Charts side-by-side */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Side recommendations (4 cols) */}
-        <div className="lg:col-span-5 bg-gradient-to-b from-blue-50/10 to-white   border border-blue-100/50  rounded-lg p-5 shadow-sm space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-blue-600 text-white rounded">
-              <ListTodo className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-slate-950  text-sm font-display">PLAN D'ACTION CONSEILLÉ</h3>
-              <p className="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Génération d'assistance locale NIMR</p>
-            </div>
-          </div>
-          
-          <div className="space-y-3">
-            {metricsSuggestions.map((item, index) => (
-              <div 
-                key={index} 
-                className="flex items-start gap-2.5 p-3 rounded-md bg-white  border border-slate-100  hover:border-blue-200  transition shadow-sm text-xs"
+          <div className="flex flex-wrap gap-2" aria-label="Filtres période">
+            {(Object.keys(periodLabels) as DashboardPeriod[]).map(item => (
+              <button
+                key={item}
+                type="button"
+                data-testid={`dashboard-period-${item}`}
+                aria-pressed={period === item}
+                onClick={() => setPeriod(item)}
+                className={`rounded-md border px-3 py-2 text-xs font-extrabold transition ${
+                  period === item
+                    ? "border-slate-950 bg-slate-950 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:text-blue-700"
+                }`}
               >
-                <span className="flex-shrink-0 w-5 h-5 bg-blue-50  text-blue-600  rounded-full flex items-center justify-center font-bold text-[10px] font-mono">
-                  {index + 1}
-                </span>
-                <span className="text-slate-700  font-medium leading-relaxed">{item}</span>
-              </div>
+                {periodLabels[item]}
+              </button>
             ))}
           </div>
+        </div>
 
-          <div className="pt-2 border-t border-blue-100 ">
-            <button 
-              onClick={() => onNavigateToTab("atelier-kanban")} 
-              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs transition duration-200 shadow-sm cursor-pointer"
-            >
-              Consulter le Kanban de l'Atelier
-            </button>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <FilterSelect
+            testId="dashboard-filter-status"
+            label="Statut"
+            value={status}
+            onChange={value => setStatus(value as DossierStatus | "all")}
+            options={Object.values(DossierStatus).map(value => ({ value, label: getDashboardStatusLabel(value) }))}
+          />
+          <FilterSelect
+            testId="dashboard-filter-technician"
+            label="Technicien"
+            value={technicianId}
+            onChange={value => setTechnicianId(value)}
+            options={techniciens.map(technician => ({ value: technician.id, label: technician.nom }))}
+          />
+          <FilterSelect
+            testId="dashboard-filter-priority"
+            label="Priorité"
+            value={priority}
+            onChange={value => setPriority(value as DossierPriority | "all")}
+            options={Object.values(DossierPriority).map(value => ({ value, label: value }))}
+          />
+        </div>
+      </section>
+
+      <section data-testid="dashboard-activity-view" className="space-y-3">
+        <SectionTitle icon={<Gauge className="h-5 w-5" />} title="Vue activité" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-7">
+          {kpis.activity.cards.map(metric => (
+            <div key={metric.testId}>
+              <MetricCard metric={metric} />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section data-testid="dashboard-workshop-view" className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="space-y-3 xl:col-span-5">
+          <SectionTitle icon={<Wrench className="h-5 w-5" />} title="Vue atelier" />
+          <div className="grid grid-cols-2 gap-3">
+            <InfoTile
+              testId="kpi-workshop-occupancy"
+              label="Occupation atelier"
+              value={kpis.workshop.occupancyLabel}
+              detail={kpis.workshop.planningSaturated ? "Planning saturé" : "Capacité lisible"}
+            />
+            <InfoTile
+              testId="kpi-estimated-vs-spent"
+              label="Estimé vs passé"
+              value={`${kpis.workshop.estimatedHours} h / ${kpis.workshop.spentHours} h`}
+              detail="Ordres de réparation"
+            />
+            <InfoTile
+              testId="kpi-late-tasks"
+              label="Tâches en retard"
+              value={kpis.workshop.lateTasks.length}
+              detail="Créneau dépassé"
+            />
+            <InfoTile
+              testId="kpi-blocked-tasks"
+              label="Tâches bloquées"
+              value={kpis.workshop.blockedTasks.length}
+              detail="Blocage atelier actif"
+            />
           </div>
         </div>
 
-        {/* Interactive mock performance graphs (7 cols) */}
-        <div className="lg:col-span-7 bg-white  border border-slate-200  rounded-lg p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-slate-900  text-sm font-display">Rentabilité & Délais Opérationnels</h3>
-              <p className="text-slate-400 text-xs text-left">Heures vendues vs. Heures passées (Semaine en cours)</p>
-            </div>
-            <span className="text-[10px] bg-emerald-50  text-emerald-600  font-bold px-2 py-0.5 rounded border border-emerald-100 ">
-              Efficacité : 94%
-            </span>
+        <div className="space-y-3 xl:col-span-7">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <LoadList title="Charge techniciens" testId="dashboard-technician-load" items={kpis.workshop.technicianLoad.slice(0, 5)} />
+            <LoadList title="Charge ponts / postes" testId="dashboard-bay-load" items={kpis.workshop.bayLoad.slice(0, 5)} />
           </div>
+        </div>
+      </section>
 
-          {/* Graphical representation in clean vector SVG */}
-          <div className="h-44 flex items-end justify-between px-2 pt-2 pb-1 bg-slate-50  rounded-lg relative">
-            
-            {/* SVG Background grids */}
-            <div className="absolute inset-0 flex flex-col justify-between p-4 pointer-events-none opacity-20">
-              <div className="border-b border-zinc-400 w-full h-0"></div>
-              <div className="border-b border-zinc-400 w-full h-0"></div>
-              <div className="border-b border-zinc-400 w-full h-0"></div>
-            </div>
-
-            {/* Monday */}
-            <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
-              <div className="flex gap-1 items-end h-[60%]">
-                <div className="w-3 bg-zinc-400  h-10 rounded-t" title="Passé: 10h"></div>
-                <div className="w-3 bg-blue-600 h-12 rounded-t" title="Vendu: 12h"></div>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Lun</span>
-              {/* Tooltip */}
-              <div className="absolute bottom-12 hidden group-hover:block bg-zinc-950 text-white text-[9px] p-2 rounded whitespace-nowrap shadow-xl">
-                Vendu: 12h / Réel: 10h
+      <section data-testid="dashboard-delay-view" className="space-y-3">
+        <SectionTitle icon={<Timer className="h-5 w-5" />} title="Vue délais" />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          {kpis.delays.map(delay => (
+            <div key={delay.label} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{delay.label}</div>
+              <div className="mt-2 text-xl font-black text-slate-950">{delay.value}</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">
+                {delay.measurableCount}/{delay.totalCount} mesurables
               </div>
             </div>
+          ))}
+        </div>
+      </section>
 
-            {/* Tuesday */}
-            <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
-              <div className="flex gap-1 items-end h-[70%]">
-                <div className="w-3 bg-zinc-400  h-16 rounded-t" title="Passé: 16h"></div>
-                <div className="w-3 bg-blue-600 h-14 rounded-t" title="Vendu: 14h"></div>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Mar</span>
-              <div className="absolute bottom-12 hidden group-hover:block bg-zinc-950 text-white text-[9px] p-2 rounded whitespace-nowrap shadow-xl">
-                Vendu: 14h / Réel: 16h
-              </div>
-            </div>
-
-            {/* Wednesday */}
-            <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
-              <div className="flex gap-1 items-end h-[85%]">
-                <div className="w-3 bg-zinc-400  h-16 rounded-t"></div>
-                <div className="w-3 bg-blue-600 h-20 rounded-t"></div>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Mer</span>
-              <div className="absolute bottom-12 hidden group-hover:block bg-zinc-950 text-white text-[9px] p-2 rounded whitespace-nowrap shadow-xl">
-                Vendu: 22h / Réel: 18h
-              </div>
-            </div>
-
-            {/* Thursday */}
-            <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
-              <div className="flex gap-1 items-end h-[95%]">
-                <div className="w-3 bg-zinc-400  h-20 rounded-t"></div>
-                <div className="w-3 bg-blue-600 h-24 rounded-t"></div>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Jeu</span>
-              <div className="absolute bottom-12 hidden group-hover:block bg-zinc-950 text-white text-[9px] p-2 rounded whitespace-nowrap shadow-xl">
-                Vendu: 24h / Réel: 20h
-              </div>
-            </div>
-
-            {/* Friday */}
-            <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
-              <div className="flex gap-1 items-end h-[50%]">
-                <div className="w-3 bg-zinc-400  h-12 rounded-t"></div>
-                <div className="w-3 bg-blue-600 h-12 rounded-t"></div>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Ven</span>
-              <div className="absolute bottom-12 hidden group-hover:block bg-zinc-950 text-white text-[9px] p-2 rounded whitespace-nowrap shadow-xl">
-                Vendu: 12h / Réel: 12h
-              </div>
-            </div>
-
-            {/* Saturday */}
-            <div className="flex flex-col items-center flex-1 h-full justify-end z-10 group relative">
-              <div className="flex gap-1 items-end h-[35%]">
-                <div className="w-3 bg-zinc-400  h-6 rounded-t"></div>
-                <div className="w-3 bg-blue-600 h-8 rounded-t"></div>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-bold font-mono mt-2">Sam</span>
-              <div className="absolute bottom-12 hidden group-hover:block bg-zinc-950 text-white text-[9px] p-2 rounded whitespace-nowrap shadow-xl">
-                Vendu: 8h / Réel: 6h
-              </div>
-            </div>
-            
+      <section data-testid="dashboard-quality-view" className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="space-y-3 lg:col-span-1">
+          <SectionTitle icon={<ShieldCheck className="h-5 w-5" />} title="Vue qualité" />
+          <div className="grid grid-cols-2 gap-3">
+            <InfoTile testId="kpi-qc-accepted" label="QC accepté" value={kpis.quality.qcAccepted} detail="Dossiers validés" />
+            <InfoTile testId="kpi-qc-refused" label="QC refusé" value={kpis.quality.qcRefused} detail="Retour retravail" />
+            <InfoTile testId="kpi-first-time-right" label="First Time Right" value={kpis.quality.firstTimeRightLabel} detail={`${kpis.quality.firstTimeRightCount} sans refus QC`} />
+            <InfoTile testId="kpi-returned-rework" label="Retours retravail" value={kpis.quality.returnedToWorkshop} detail="Motif QC refusé" />
           </div>
-          
-          <div className="flex items-center justify-center gap-6 text-[11px] font-semibold">
-            <span className="flex items-center gap-1.5 text-zinc-500 ">
-              <span className="w-3 h-3 bg-zinc-400 rounded-xs inline-block"></span>
-              Temps Ateliers Réel (Heures Passées)
-            </span>
-            <span className="flex items-center gap-1.5 text-blue-600 ">
-              <span className="w-3 h-3 bg-blue-600 rounded-xs inline-block"></span>
-              Temps Facturable Vendu (ERP)
-            </span>
-          </div>
-
         </div>
 
-      </div>
-
-      {/* Recue Table - Selected Live Operational Dossiers */}
-      <div className="bg-white  border border-slate-200  rounded-lg p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-          <div>
-            <h3 className="font-extrabold text-slate-900  text-sm font-display uppercase">SUIVI ET TRAÇABILITÉ DES DOSSIERS DE SAV ACTIFS</h3>
-            <p className="text-slate-400 text-xs">Aperçu rapide des statuts opérationnels sans facturation</p>
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-display text-sm font-black uppercase text-slate-950">Motifs de refus QC</h3>
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           </div>
-          
-          <button 
-            onClick={() => onNavigateToTab("dossiers-liste")}
-            className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 underline underline-offset-4 font-display cursor-pointer"
-          >
-            Voir tous les dossiers de l'ERP
-          </button>
+          {kpis.quality.refusalReasons.length > 0 ? (
+            <div className="space-y-2">
+              {kpis.quality.refusalReasons.map(item => (
+                <div key={item.reason} className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+                  <span className="text-sm font-bold text-slate-700">{item.reason}</span>
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-black text-rose-700">{item.count}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-500">
+              Aucun refus QC dans le filtre actif.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section data-testid="dashboard-alerts-view" className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="space-y-3 xl:col-span-5">
+          <SectionTitle icon={<AlertTriangle className="h-5 w-5" />} title="Alertes Directeur" />
+          <div className="space-y-2">
+            {kpis.alerts.length > 0 ? kpis.alerts.slice(0, 8).map(alert => (
+              <div
+                key={alert.id}
+                data-testid="dashboard-critical-alert"
+                className={`rounded-lg border p-3 shadow-sm ${
+                  alert.severity === "critical"
+                    ? "border-rose-200 bg-rose-50"
+                    : alert.severity === "warning"
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-slate-200 bg-white"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-950">{alert.title}</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-600">{alert.detail}</div>
+                  </div>
+                  {alert.dossierId ? (
+                    <button
+                      type="button"
+                      data-testid={`dashboard-dossier-link-${alert.dossierId}`}
+                      onClick={() => onSelectDossier(alert.dossierId!)}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-blue-700 hover:border-blue-300"
+                    >
+                      Ouvrir
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500 shadow-sm">
+                Aucune alerte critique dans le filtre actif.
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Beautiful responsive table */}
-        <div className="overflow-x-auto min-w-full">
-          <table className="w-full text-left border-collapse text-xs">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:col-span-7">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-display text-sm font-black uppercase text-slate-950">Dossiers critiques</h3>
+            <ListFilter className="h-4 w-4 text-slate-500" />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-500">
+                  <th className="py-2 pr-3">Dossier</th>
+                  <th className="py-2 pr-3">Client & véhicule</th>
+                  <th className="py-2 pr-3">Priorité</th>
+                  <th className="py-2 pr-3">Statut</th>
+                  <th className="py-2 pr-3">Cause</th>
+                  <th className="py-2 text-right">Lien</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {kpis.criticalDossiers.length > 0 ? kpis.criticalDossiers.map(dossier => (
+                  <tr key={dossier.id}>
+                    <td className="py-3 pr-3 font-mono font-black text-slate-900">{dossier.id}</td>
+                    <td className="py-3 pr-3">
+                      <div className="font-bold text-slate-900">{dossier.client}</div>
+                      <div className="text-slate-500">{dossier.vehicle}</div>
+                    </td>
+                    <td className="py-3 pr-3"><PriorityBadge priority={dossier.priority} /></td>
+                    <td className="py-3 pr-3"><DashboardStatusPill status={dossier.status} /></td>
+                    <td className="py-3 pr-3 font-semibold text-slate-600">{dossier.reason}</td>
+                    <td className="py-3 text-right">
+                      <button
+                        type="button"
+                        data-testid={`dashboard-critical-dossier-link-${dossier.id}`}
+                        onClick={() => onSelectDossier(dossier.id)}
+                        className="rounded-md bg-slate-950 px-3 py-1.5 text-xs font-black text-white hover:bg-blue-700"
+                      >
+                        Ouvrir
+                      </button>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={6} className="py-5 text-center font-bold text-slate-500">Aucun dossier critique.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section data-testid="dashboard-charts-view" className="space-y-3">
+        <SectionTitle icon={<BarChart3 className="h-5 w-5" />} title="Micro-graphiques" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          <ChartPanel title="Entrées / sorties">
+            <MicroBarChart
+              testId="dashboard-svg-entries-exits"
+              data={kpis.charts.entriesExits}
+              color={chartColor}
+              secondaryColor={secondaryChartColor}
+            />
+          </ChartPanel>
+          <ChartPanel title="Dossiers bloqués">
+            <MicroBarChart testId="dashboard-svg-blocked" data={kpis.charts.blocked} color="#e11d48" />
+          </ChartPanel>
+          <ChartPanel title="Charge atelier">
+            <MicroBarChart testId="dashboard-svg-workshop-load" data={kpis.charts.workshopLoad} color="#0e7490" secondaryColor="#cbd5e1" />
+          </ChartPanel>
+          <ChartPanel title="QC accepté/refusé">
+            <MicroBarChart testId="dashboard-svg-qc" data={kpis.charts.quality} color="#059669" secondaryColor="#e11d48" />
+          </ChartPanel>
+          <ChartPanel title="Tendance hebdo">
+            <MicroLineChart testId="dashboard-svg-weekly-trend" data={kpis.charts.weeklyTrend} color="#7c3aed" />
+          </ChartPanel>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-sm font-black uppercase text-slate-950">Dossiers du filtre actif</h3>
+          <Truck className="h-4 w-4 text-slate-500" />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-xs">
             <thead>
-              <tr className="border-b border-slate-200  text-slate-400 font-semibold uppercase tracking-wider bg-slate-50/50  font-display">
-                <th className="py-2.5 px-3">Dossier</th>
-                <th className="py-2.5 px-3">Client & Véhicule</th>
-                <th className="py-2.5 px-3">Type / Raison</th>
-                <th className="py-2.5 px-3">Priorité</th>
-                <th className="py-2.5 px-3">Statut SAV</th>
-                <th className="py-2.5 px-3 text-right font-semibold">Fiche</th>
+              <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-500">
+                <th className="py-2 pr-3">Dossier</th>
+                <th className="py-2 pr-3">Client</th>
+                <th className="py-2 pr-3">Véhicule</th>
+                <th className="py-2 pr-3">Immat.</th>
+                <th className="py-2 pr-3">Priorité</th>
+                <th className="py-2 pr-3">Statut</th>
+                <th className="py-2 text-right">Lien</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 ">
-              {dossiers.map(dossier => (
-                <tr 
-                  key={dossier.id}
-                  className="hover:bg-slate-50/40  cursor-pointer transition"
-                  onClick={() => onSelectDossier(dossier.id)}
-                >
-                  <td className="py-3 px-3 font-mono font-bold text-neutral-800 ">
-                    {dossier.id}
-                  </td>
-                  <td className="py-3 px-3 space-y-1">
-                    <div className="font-bold text-slate-800  leading-none font-display">
-                      {dossier.clientNom}
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-400 text-[11px]">
-                      <span>{dossier.vehiculeMarque} {dossier.vehiculeModele}</span>
-                      <span>•</span>
-                      <LicencePlate plate={dossier.vehiculeImmatriculation} />
-                    </div>
-                  </td>
-                  <td className="py-3 px-3">
-                    <div className="font-semibold text-neutral-700  font-mono text-[11px]">{dossier.typeDossier}</div>
-                    <div className="text-neutral-500  text-[10px] line-clamp-1 max-w-[200px]" title={dossier.plainteClient}>
-                      {dossier.plainteClient}
-                    </div>
-                  </td>
-                  <td className="py-3 px-3">
-                    <PriorityBadge priority={dossier.priorite} />
-                  </td>
-                  <td className="py-3 px-3">
-                    <StatusBadge status={dossier.statut} />
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    <button 
-                      className="px-3 py-1.5 bg-neutral-100   hover:bg-neutral-200 text-neutral-700 rounded-md font-semibold text-[11px] transition cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectDossier(dossier.id);
-                      }}
+            <tbody className="divide-y divide-slate-100">
+              {kpis.filteredDossiers.slice(0, 12).map(dossier => (
+                <tr key={dossier.id} className="hover:bg-slate-50">
+                  <td className="py-3 pr-3 font-mono font-black text-slate-900">{dossier.id}</td>
+                  <td className="py-3 pr-3 font-bold text-slate-800">{dossier.clientNom}</td>
+                  <td className="py-3 pr-3 font-semibold text-slate-600">{dossier.vehiculeMarque} {dossier.vehiculeModele}</td>
+                  <td className="py-3 pr-3"><LicencePlate plate={dossier.vehiculeImmatriculation} /></td>
+                  <td className="py-3 pr-3"><PriorityBadge priority={dossier.priorite} /></td>
+                  <td className="py-3 pr-3"><DashboardStatusPill status={dossier.statut} /></td>
+                  <td className="py-3 text-right">
+                    <button
+                      type="button"
+                      data-testid={`dashboard-table-dossier-link-${dossier.id}`}
+                      onClick={() => onSelectDossier(dossier.id)}
+                      className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-blue-700 hover:border-blue-300"
                     >
                       Ouvrir
                     </button>
                   </td>
                 </tr>
               ))}
+              {kpis.filteredDossiers.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-5 text-center font-bold text-slate-500">Aucun dossier dans le filtre actif.</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
+      </section>
+
+    </div>
+  );
+}
+
+function FilterSelect({
+  testId,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  testId: string;
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</span>
+      <select
+        data-testid={testId}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+      >
+        <option value="all">Tous</option>
+        {options.map(option => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2 text-slate-950">
+      <span className="text-blue-600">{icon}</span>
+      <h2 className="font-display text-xs font-black uppercase tracking-wide">{title}</h2>
+    </div>
+  );
+}
+
+function DashboardStatusPill({ status }: { status: DossierStatus }) {
+  const isBlocked = status === DossierStatus.BLOQUE;
+  const isReady = status === DossierStatus.PRET_A_LIVRER || status === DossierStatus.PRET_FACTURATION;
+  const isRunning = status === DossierStatus.EN_TRAVAUX || status === DossierStatus.TRAVAUX_PLANIFIES;
+  const classes = isBlocked
+    ? "border-rose-200 bg-rose-50 text-rose-700"
+    : isReady
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : isRunning
+        ? "border-blue-200 bg-blue-50 text-blue-700"
+        : "border-slate-200 bg-slate-50 text-slate-700";
+  return (
+    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black ${classes}`}>
+      {getDashboardStatusLabel(status)}
+    </span>
+  );
+}
+
+function getDashboardStatusLabel(status: DossierStatus): string {
+  if (status === DossierStatus.PRET_FACTURATION) return "Prêt facturation ERP";
+  return status;
+}
+
+function MetricCard({ metric }: { metric: DashboardMetric }) {
+  const tone = toneClasses[metric.tone];
+  return (
+    <div data-testid={metric.testId} className={`min-h-[132px] rounded-lg border ${tone.border} ${tone.bg} p-4 shadow-sm`}>
+      <div className="flex h-full flex-col justify-between">
+        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{metric.label}</div>
+        <div>
+          <div className={`font-display text-3xl font-black ${tone.text}`}>{metric.value}</div>
+          <div className="mt-1 text-xs font-semibold text-slate-600">{metric.detail}</div>
+        </div>
       </div>
     </div>
+  );
+}
+
+function InfoTile({ testId, label, value, detail }: { testId: string; label: string; value: number | string; detail: string }) {
+  return (
+    <div data-testid={testId} className="min-h-[112px] rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-2 font-display text-2xl font-black text-slate-950">{value}</div>
+      <div className="mt-1 text-xs font-semibold text-slate-500">{detail}</div>
+    </div>
+  );
+}
+
+function LoadList({ title, testId, items }: { title: string; testId: string; items: Array<{ id: string; label: string; hours: number; capacityHours: number | null; percent: number | null; alert: boolean }> }) {
+  return (
+    <div data-testid={testId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="font-display text-sm font-black uppercase text-slate-950">{title}</h3>
+        <UserCheck className="h-4 w-4 text-slate-500" />
+      </div>
+      <div className="space-y-3">
+        {items.length > 0 ? items.map(item => {
+          const percent = item.percent ?? 0;
+          return (
+            <div key={item.id}>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span className="truncate text-xs font-black text-slate-700">{item.label}</span>
+                <span className={`text-xs font-black ${item.alert ? "text-rose-600" : "text-slate-600"}`}>
+                  {item.percent === null ? `${item.hours} h` : `${item.percent}%`}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100">
+                <div
+                  className={`h-2 rounded-full ${item.alert ? "bg-rose-500" : "bg-blue-600"}`}
+                  style={{ width: `${Math.min(100, Math.max(2, percent))}%` }}
+                />
+              </div>
+              <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                {item.capacityHours === null ? `${item.hours} h planifiées` : `${item.hours} h / ${item.capacityHours} h`}
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-500">
+            Non mesurable
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChartPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <h3 className="mb-3 text-xs font-black uppercase tracking-wide text-slate-600">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function MicroBarChart({
+  data,
+  testId,
+  color,
+  secondaryColor,
+}: {
+  data: DashboardChartPoint[];
+  testId: string;
+  color: string;
+  secondaryColor?: string;
+}) {
+  const maxValue = Math.max(1, ...data.flatMap(point => [point.value, point.secondaryValue ?? 0]));
+  const width = 220;
+  const height = 108;
+  const barSpace = width / Math.max(1, data.length);
+  const barWidth = Math.max(8, Math.min(18, barSpace * (secondaryColor ? 0.28 : 0.42)));
+
+  return (
+    <svg data-testid={testId} role="img" aria-label={testId} viewBox={`0 0 ${width} ${height}`} className="h-28 w-full overflow-visible">
+      <line x1="0" y1="92" x2={width} y2="92" stroke="#e2e8f0" strokeWidth="1" />
+      {data.map((point, index) => {
+        const x = index * barSpace + barSpace / 2;
+        const primaryHeight = Math.max(2, (point.value / maxValue) * 72);
+        const secondaryHeight = Math.max(2, ((point.secondaryValue ?? 0) / maxValue) * 72);
+        return (
+          <g key={`${point.label}-${index}`}>
+            <rect x={x - barWidth - (secondaryColor ? 2 : -barWidth / 2)} y={92 - primaryHeight} width={barWidth} height={primaryHeight} rx="3" fill={color} />
+            {secondaryColor ? (
+              <rect x={x + 2} y={92 - secondaryHeight} width={barWidth} height={secondaryHeight} rx="3" fill={secondaryColor} />
+            ) : null}
+            <text x={x} y="106" textAnchor="middle" fontSize="10" fontWeight="700" fill="#64748b">{point.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function MicroLineChart({ data, testId, color }: { data: DashboardChartPoint[]; testId: string; color: string }) {
+  const width = 220;
+  const height = 108;
+  const maxValue = Math.max(1, ...data.map(point => point.value));
+  const points = data.map((point, index) => {
+    const x = data.length <= 1 ? width / 2 : index * (width / (data.length - 1));
+    const y = 92 - (point.value / maxValue) * 72;
+    return { x, y, label: point.label };
+  });
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ");
+
+  return (
+    <svg data-testid={testId} role="img" aria-label={testId} viewBox={`0 0 ${width} ${height}`} className="h-28 w-full overflow-visible">
+      <line x1="0" y1="92" x2={width} y2="92" stroke="#e2e8f0" strokeWidth="1" />
+      <path d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      {points.map(point => (
+        <g key={`${point.label}-${point.x}`}>
+          <circle cx={point.x} cy={point.y} r="4" fill="white" stroke={color} strokeWidth="2" />
+          <text x={point.x} y="106" textAnchor="middle" fontSize="10" fontWeight="700" fill="#64748b">{point.label}</text>
+        </g>
+      ))}
+    </svg>
   );
 }

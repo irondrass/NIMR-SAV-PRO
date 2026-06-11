@@ -18,8 +18,7 @@ import {
   INITIAL_DOSSIERS, 
   MOCK_TECHNICIENS, 
   INITIAL_RECLAMATIONS, 
-  INITIAL_ACTIVITE_LOGS,
-  OPERATIONAL_METRICS_SUGGESTION
+  INITIAL_ACTIVITE_LOGS
 } from "./data";
 import {
   createBackupPayload,
@@ -496,13 +495,10 @@ export default function App() {
               {activeTab === "dashboard" && (
                 <DirectorDashboard 
                   dossiers={dossiers} 
+                  techniciens={techList}
                   onSelectDossier={(id) => {
                     setSelectedDossierId(id);
                   }}
-                  onNavigateToTab={(tab) => {
-                    goToTab(tab);
-                  }}
-                  metricsSuggestions={OPERATIONAL_METRICS_SUGGESTION}
                 />
               )}
 

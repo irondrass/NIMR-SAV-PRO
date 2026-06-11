@@ -34,6 +34,7 @@ import {
   validatePlanningAssignment,
 } from "../src/sav-core";
 import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-identity";
+import { buildDirectorDashboardKpis } from "../src/dashboard-kpis";
 import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TECHNICIENS } from "../src/data";
 import { canAccessTab, canChangeRole, getDefaultTabForRole, normalizeTabForRole, ROLE_TABS } from "../src/roles";
 import { LOCAL_STORAGE_PREFIX, STORAGE_KEYS } from "../src/storage-keys";
@@ -706,6 +707,239 @@ function testAdvancedPlanningHelpers() {
   assert.ok(invalidLunchBlock.codes.includes("planning-collision-lunch"));
 }
 
+function createDashboardKpiFixtures(): DossierSAV[] {
+  const readyLine: RepairOrderLine = {
+    id: "kpi_ready_line",
+    designation: "Diagnostic et réparation",
+    tempsEstime: 2,
+    tempsPasse: 2,
+    status: "done",
+    plannedTechnicianId: "tech_01",
+    plannedBayId: "bay_01",
+    planningDate: "2026-06-11",
+    planningStart: "2026-06-11T08:00:00.000Z",
+    planningEnd: "2026-06-11T10:00:00.000Z",
+    planningSegments: [
+      { start: "2026-06-11T08:00:00.000Z", end: "2026-06-11T10:00:00.000Z" },
+    ],
+    history: [
+      "2026-06-11T10:00:00.000Z - Tâche terminée.",
+      "2026-06-11T08:00:00.000Z - Tâche démarrée.",
+    ],
+  };
+
+  const ready = {
+    ...createReadyForDeliveryFixture(),
+    id: "NIMR-KPI-READY",
+    clientNom: "Client KPI prêt",
+    dateReception: "2026-06-11T07:00:00.000Z",
+    statut: DossierStatus.PRET_A_LIVRER,
+    ordresReparation: [readyLine],
+    checklistQC: {
+      ...createReadyForDeliveryFixture().checklistQC,
+      validationGlobale: "valide" as const,
+      dateValidation: "2026-06-11T10:30:00.000Z",
+    },
+  };
+
+  const delivered = {
+    ...ready,
+    id: "NIMR-KPI-DELIVERED",
+    clientNom: "Client KPI livré",
+    statut: DossierStatus.LIVRE,
+    livraison: {
+      ...ready.livraison,
+      dateLivraisonReelle: "2026-06-11T11:00:00.000Z",
+      clotureInterne: true,
+    },
+  };
+
+  const readyForErp = {
+    ...delivered,
+    id: "NIMR-KPI-ERP",
+    clientNom: "Client KPI clôture",
+    dateReception: "2026-06-10T08:00:00.000Z",
+    statut: DossierStatus.PRET_FACTURATION,
+  };
+
+  const open = {
+    ...createReceptionFixture([]),
+    id: "NIMR-KPI-OPEN",
+    clientNom: "Client KPI ouvert",
+    dateReception: "2026-06-11T08:15:00.000Z",
+    statut: DossierStatus.VEHICULE_RECU,
+    ordresReparation: [createLine("kpi_open_line", "pending")],
+  };
+
+  const inProgress = {
+    ...createReceptionFixture([]),
+    id: "NIMR-KPI-RUNNING",
+    clientNom: "Client KPI travaux",
+    dateReception: "2026-06-11T08:30:00.000Z",
+    statut: DossierStatus.EN_TRAVAUX,
+    technicienId: "tech_01",
+    ordresReparation: [
+      {
+        ...createLine("kpi_running_line", "in_progress"),
+        tempsEstime: 4,
+        tempsPasse: 1,
+        plannedTechnicianId: "tech_01",
+        plannedBayId: "bay_01",
+        planningDate: "2026-06-11",
+        planningStart: "2026-06-11T08:00:00.000Z",
+        planningEnd: "2026-06-11T13:00:00.000Z",
+        planningSegments: [
+          { start: "2026-06-11T08:00:00.000Z", end: "2026-06-11T12:00:00.000Z" },
+          { start: "2026-06-11T12:00:00.000Z", end: "2026-06-11T13:00:00.000Z" },
+        ],
+        history: ["2026-06-11T08:00:00.000Z - Tâche démarrée."],
+      },
+    ],
+  };
+
+  const blocked = {
+    ...createReceptionFixture([]),
+    id: "NIMR-KPI-BLOCKED",
+    clientNom: "Client KPI bloqué",
+    dateReception: "2026-06-11T08:45:00.000Z",
+    statut: DossierStatus.BLOQUE,
+    bloqueRaison: "Attente pièce validée atelier",
+    ordresReparation: [
+      {
+        ...createLine("kpi_blocked_line", "blocked"),
+        plannedTechnicianId: "tech_02",
+        plannedBayId: "bay_02",
+        planningDate: "2026-06-11",
+        planningStart: "2026-06-11T08:00:00.000Z",
+        planningEnd: "2026-06-11T09:00:00.000Z",
+      },
+    ],
+  };
+
+  const qcRejected = {
+    ...createReceptionFixture([]),
+    id: "NIMR-KPI-QC-REFUSED",
+    clientNom: "Client KPI QC refusé",
+    dateReception: "2026-06-09T09:00:00.000Z",
+    statut: DossierStatus.BLOQUE,
+    bloqueRaison: "Refus qualité: voyant ABS",
+    ordresReparation: [{ ...readyLine, id: "kpi_refused_line" }],
+    checklistQC: {
+      ...createReadyForDeliveryFixture().checklistQC,
+      validationGlobale: "refuse" as const,
+      commentaireRefus: "Voyant ABS",
+      dateValidation: "2026-06-09T12:00:00.000Z",
+    },
+    historiqueLogs: ["2026-06-09T12:00:00.000Z - Refus qualité: voyant ABS"],
+  };
+
+  const overdue = {
+    ...createReceptionFixture([]),
+    id: "NIMR-KPI-LATE",
+    clientNom: "Client KPI retard",
+    dateReception: "2026-06-10T09:00:00.000Z",
+    statut: DossierStatus.TRAVAUX_PLANIFIES,
+    technicienId: "tech_02",
+    ordresReparation: [
+      {
+        ...createLine("kpi_late_line", "pending"),
+        tempsEstime: 3,
+        plannedTechnicianId: "tech_02",
+        plannedBayId: "bay_02",
+        planningDate: "2026-06-10",
+        planningStart: "2026-06-10T08:00:00.000Z",
+        planningEnd: "2026-06-10T11:00:00.000Z",
+      },
+    ],
+  };
+
+  return [open, inProgress, blocked, ready, delivered, readyForErp, qcRejected, overdue];
+}
+
+function testDirectorDashboardKpis() {
+  const now = new Date("2026-06-11T10:00:00.000Z");
+  const dossiers = createDashboardKpiFixtures();
+  const kpis = buildDirectorDashboardKpis({
+    dossiers,
+    techniciens: MOCK_TECHNICIENS,
+    filters: { period: "all", now },
+  });
+
+  assert.equal(kpis.activity.openDossiers, 6);
+  assert.equal(kpis.activity.inProgressDossiers, 1);
+  assert.equal(kpis.activity.blockedDossiers, 2);
+  assert.equal(kpis.activity.readyToDeliverDossiers, 1);
+  assert.equal(kpis.activity.deliveredDossiers, 1);
+  assert.equal(kpis.activity.readyForErpDossiers, 1);
+  assert.equal(kpis.activity.pendingErpClosureDossiers, 1);
+
+  assert.equal(kpis.quality.qcAccepted, 3);
+  assert.equal(kpis.quality.qcRefused, 1);
+  assert.equal(kpis.quality.firstTimeRightCount, 3);
+  assert.equal(kpis.quality.firstTimeRightRate, 75);
+  assert.equal(kpis.quality.refusalReasons[0].reason, "Voyant ABS");
+
+  assert.ok(kpis.workshop.technicianLoad.some(load => load.id === "tech_01" && load.hours > 0));
+  assert.ok(kpis.workshop.bayLoad.some(load => load.id === "bay_01" && load.hours > 0));
+  assert.ok(kpis.workshop.lateTasks.some(task => task.dossierId === "NIMR-KPI-LATE"));
+  assert.ok(kpis.alerts.some(alert => alert.title === "Dossier bloqué critique"));
+  assert.ok(kpis.alerts.some(alert => alert.title === "Dossier en retard planning"));
+
+  const today = buildDirectorDashboardKpis({
+    dossiers,
+    techniciens: MOCK_TECHNICIENS,
+    filters: { period: "today", now },
+  });
+  const week = buildDirectorDashboardKpis({
+    dossiers,
+    techniciens: MOCK_TECHNICIENS,
+    filters: { period: "week", now },
+  });
+  const month = buildDirectorDashboardKpis({
+    dossiers,
+    techniciens: MOCK_TECHNICIENS,
+    filters: { period: "month", now },
+  });
+  assert.equal(today.filteredDossiers.length, 5);
+  assert.equal(week.filteredDossiers.length, dossiers.length);
+  assert.equal(month.filteredDossiers.length, dossiers.length);
+
+  const techFilter = buildDirectorDashboardKpis({
+    dossiers,
+    techniciens: MOCK_TECHNICIENS,
+    filters: { period: "all", technicianId: "tech_02", now },
+  });
+  assert.ok(techFilter.filteredDossiers.every(dossier =>
+    dossier.technicienId === "tech_02" || dossier.ordresReparation.some(line => line.plannedTechnicianId === "tech_02")
+  ));
+
+  assert.ok(kpis.delays.some(delay => delay.label === "Réception → début travaux" && delay.averageMs !== null));
+  const missingDelay = buildDirectorDashboardKpis({
+    dossiers: [createReceptionFixture([])],
+    techniciens: MOCK_TECHNICIENS,
+    filters: { period: "all", now },
+  });
+  assert.equal(missingDelay.delays.find(delay => delay.label === "Cycle complet dossier")?.value, "Non mesurable");
+
+  const serialized = JSON.stringify(kpis);
+  const forbidden = [
+    /chiffre d’affaires/i,
+    /\bCA\b/,
+    /paiement/i,
+    /caisse/i,
+    /stock pièces/i,
+    /marge/i,
+    /facture payée/i,
+    /facturable/i,
+    /rentabilité/i,
+  ];
+  for (const pattern of forbidden) {
+    assert.equal(pattern.test(serialized), false, `Forbidden dashboard term found: ${pattern}`);
+  }
+  assert.match(serialized, /Prêt facturation ERP/);
+  assert.match(serialized, /En attente clôture ERP/);
+}
+
 testReceptionCreation();
 testTechnicianAssignment();
 testQualityControl();
@@ -728,5 +962,6 @@ testRoleTabsAndPermissions();
 testStorageKeysUseNewPrefixOnly();
 testApplicationIdentityVersion();
 testAdvancedPlanningHelpers();
+testDirectorDashboardKpis();
 
 console.log("sav-core tests passed");

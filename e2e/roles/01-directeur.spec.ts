@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { changeUserRole, humanWait, humanClick } from "../helpers/human-actions";
-import { createMockDossier } from "../helpers/test-data-creator";
+import { createMockDossier, createMockTech } from "../helpers/test-data-creator";
 import { STORAGE_KEYS } from "../../src/storage-keys";
 import { DossierStatus, DossierPriority } from "../../src/types";
 
@@ -138,5 +138,181 @@ test.describe("Rôle : Directeur SAV", () => {
  
     // Expect task to change back to reopened status
     await expect(page.locator('[data-testid="task-status-ro_dir_1"]')).toHaveText(/Réouvert/i);
+  });
+
+  test("Dashboard KPI Directeur Lot 5 visible, filtrable et sans périmètre interdit", async ({ page }) => {
+    const now = new Date();
+    const todayReception = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0, 0).toISOString();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0).toISOString();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11, 0, 0).toISOString();
+    const yesterdayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 11, 0, 0).toISOString();
+    const tomorrowDelivery = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 16, 0, 0).toISOString();
+    const techs = [
+      createMockTech({ id: "tech_01", nom: "Technicien KPI 01", capaciteJournaliere: 8 }),
+      createMockTech({ id: "tech_02", nom: "Technicien KPI 02", capaciteJournaliere: 8 }),
+    ];
+    const ready = createMockDossier({
+      id: "NIMR-DIR-KPI-READY",
+      clientNom: "Client KPI Prêt",
+      dateReception: todayReception,
+      statut: DossierStatus.PRET_A_LIVRER,
+      priorite: DossierPriority.URGENTE,
+      ordresReparation: [
+        {
+          id: "ro_kpi_ready",
+          designation: "Réparation validée",
+          tempsEstime: 2,
+          tempsPasse: 2,
+          status: "done",
+          plannedTechnicianId: "tech_01",
+          plannedBayId: "bay_01",
+          planningDate: todayReception.slice(0, 10),
+          planningStart: todayStart,
+          planningEnd: todayEnd,
+          planningSegments: [{ start: todayStart, end: todayEnd }],
+          history: [
+            `${todayEnd} - Tâche terminée.`,
+            `${todayStart} - Tâche démarrée.`,
+          ],
+        },
+      ],
+      checklistQC: {
+        essaiEffectue: true,
+        defautRepare: true,
+        aucunVoyantAllume: true,
+        niveauxVerifies: true,
+        serrageSecurite: true,
+        propreteVehicule: true,
+        documentsPrets: true,
+        photosApresOk: true,
+        validationGlobale: "valide",
+        dateValidation: todayEnd,
+        validePar: "Contrôle Qualité",
+      },
+      livraison: {
+        controleQualiteOk: true,
+        clientInforme: true,
+        dateLivraisonPrevue: tomorrowDelivery,
+        remarquesLivraison: "",
+        confirmationReceptionClient: false,
+        clotureInterne: false,
+      },
+    });
+    const blocked = createMockDossier({
+      id: "NIMR-DIR-KPI-BLOCK",
+      clientNom: "Client KPI Bloqué",
+      dateReception: todayReception,
+      statut: DossierStatus.BLOQUE,
+      priorite: DossierPriority.VEHICULE_IMMOBILISE,
+      technicienId: "tech_02",
+      bloqueRaison: "Attente décision atelier",
+      ordresReparation: [
+        {
+          id: "ro_kpi_block",
+          designation: "Recherche panne",
+          tempsEstime: 3,
+          tempsPasse: 1,
+          status: "blocked",
+          plannedTechnicianId: "tech_02",
+          plannedBayId: "bay_02",
+          planningDate: todayReception.slice(0, 10),
+          planningStart: todayStart,
+          planningEnd: yesterdayEnd,
+        },
+      ],
+    });
+    const delivered = createMockDossier({
+      id: "NIMR-DIR-KPI-LIVRE",
+      clientNom: "Client KPI Livré",
+      dateReception: todayReception,
+      statut: DossierStatus.LIVRE,
+      ordresReparation: [
+        {
+          id: "ro_kpi_livre",
+          designation: "Essai final",
+          tempsEstime: 1,
+          tempsPasse: 1,
+          status: "done",
+          history: [`${todayEnd} - Tâche terminée.`, `${todayStart} - Tâche démarrée.`],
+        },
+      ],
+      checklistQC: {
+        essaiEffectue: true,
+        defautRepare: true,
+        aucunVoyantAllume: true,
+        niveauxVerifies: true,
+        serrageSecurite: true,
+        propreteVehicule: true,
+        documentsPrets: true,
+        photosApresOk: true,
+        validationGlobale: "valide",
+        dateValidation: todayEnd,
+      },
+      livraison: {
+        controleQualiteOk: true,
+        clientInforme: true,
+        dateLivraisonPrevue: tomorrowDelivery,
+        dateLivraisonReelle: todayEnd,
+        remarquesLivraison: "",
+        confirmationReceptionClient: true,
+        clotureInterne: true,
+      },
+    });
+    const readyErp = createMockDossier({
+      ...delivered,
+      id: "NIMR-DIR-KPI-ERP",
+      clientNom: "Client KPI ERP",
+      statut: DossierStatus.PRET_FACTURATION,
+    });
+
+    await page.evaluate(({ dossierKey, techKey, dossiers, techs }) => {
+      localStorage.clear();
+      localStorage.setItem(dossierKey, JSON.stringify(dossiers));
+      localStorage.setItem(techKey, JSON.stringify(techs));
+    }, {
+      dossierKey: STORAGE_KEYS.dossiers,
+      techKey: STORAGE_KEYS.techs,
+      dossiers: [ready, blocked, delivered, readyErp],
+      techs,
+    });
+    await page.reload();
+    await changeUserRole(page, "role-option-directeur");
+
+    const dashboard = page.locator('[data-testid="director-dashboard"]');
+    await expect(dashboard).toBeVisible();
+    await expect(dashboard.locator('[data-testid="kpi-open-dossiers"]')).toBeVisible();
+    await expect(dashboard.locator('[data-testid="kpi-blocked-dossiers"]')).toBeVisible();
+    await expect(dashboard.locator('[data-testid="kpi-ready-delivery"]')).toBeVisible();
+    await expect(dashboard.locator('[data-testid="kpi-ready-erp"]')).toBeVisible();
+    await expect(dashboard.locator('[data-testid="kpi-pending-erp"]')).toBeVisible();
+
+    for (const period of ["today", "week", "month", "all"]) {
+      await humanClick(page, dashboard.locator(`[data-testid="dashboard-period-${period}"]`));
+      await expect(dashboard.locator(`[data-testid="dashboard-period-${period}"]`)).toHaveAttribute("aria-pressed", "true");
+    }
+
+    await expect(dashboard.locator('[data-testid="dashboard-critical-alert"]').first()).toBeVisible();
+    await expect(dashboard.locator('[data-testid^="dashboard-svg-"]')).toHaveCount(5);
+    await expect(dashboard).toContainText("Prêt facturation ERP");
+    await expect(dashboard).toContainText("En attente clôture ERP");
+
+    const dashboardText = await dashboard.textContent();
+    for (const pattern of [
+      /chiffre d’affaires/i,
+      /\bCA\b/,
+      /paiement/i,
+      /caisse/i,
+      /stock pièces/i,
+      /marge/i,
+      /facture payée/i,
+      /facturable/i,
+      /rentabilité/i,
+    ]) {
+      expect(pattern.test(dashboardText ?? ""), `Terme interdit visible dans le dashboard: ${pattern}`).toBe(false);
+    }
+
+    await humanClick(page, dashboard.locator('[data-testid="dashboard-dossier-link-NIMR-DIR-KPI-BLOCK"]').first());
+    await expect(page.locator("text=NIMR-DIR-KPI-BLOCK")).toBeVisible();
+    await expect(page.locator("text=Retour à la liste des dossiers")).toBeVisible();
   });
 });
