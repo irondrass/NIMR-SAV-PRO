@@ -20,6 +20,14 @@ import {
   submitQualityControl,
   suggestWorkshopSlot,
   validateBackupPayload,
+  isWorkingDay,
+  getWorkingWindowsForDate,
+  alignToWorkingTime,
+  addWorkingMinutes,
+  buildPlanningSegments,
+  detectTechnicianCollision,
+  detectBayCollision,
+  calculateTechnicianDailyLoad,
 } from "../src/sav-core";
 import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-identity";
 import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TECHNICIENS } from "../src/data";
@@ -291,6 +299,9 @@ function testWorkshopSlotSuggestionLunchBreak() {
   assert.equal(start.getMinutes(), 30);
   assert.equal(end.getHours(), 13);
   assert.equal(end.getMinutes(), 30);
+  assert.equal(suggestion.segments.length, 2);
+  assert.equal(new Date(suggestion.segments[0].end).getHours(), 12);
+  assert.equal(new Date(suggestion.segments[1].start).getHours(), 13);
 }
 
 function testWorkshopSlotSuggestionNextWorkingDayWhenSaturated() {
@@ -371,6 +382,134 @@ function testApplicationIdentityVersion() {
   assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.1.0");
 }
 
+function testAdvancedPlanningHelpers() {
+  // 1. isWorkingDay
+  const monday = new Date(2026, 5, 15, 10, 0, 0); // Monday
+  const saturday = new Date(2026, 5, 20, 10, 0, 0); // Saturday
+  const sunday = new Date(2026, 5, 21, 10, 0, 0); // Sunday
+  assert.equal(isWorkingDay(monday), true);
+  assert.equal(isWorkingDay(saturday), true);
+  assert.equal(isWorkingDay(sunday), false);
+
+  // 2. Lunch break scission (Tâche 11:00 + 3h => segments 11:00-12:00 et 13:00-15:00)
+  const taskStart = new Date(2026, 5, 15, 11, 0, 0);
+  const taskEnd = addWorkingMinutes(taskStart, 3 * 60); // 3 hours
+  assert.equal(taskEnd.getHours(), 15);
+  assert.equal(taskEnd.getMinutes(), 0);
+
+  const segments = buildPlanningSegments(taskStart, taskEnd);
+  assert.equal(segments.length, 2);
+  
+  const seg0Start = new Date(segments[0].start);
+  const seg0End = new Date(segments[0].end);
+  assert.equal(seg0Start.getHours(), 11);
+  assert.equal(seg0Start.getMinutes(), 0);
+  assert.equal(seg0End.getHours(), 12);
+  assert.equal(seg0End.getMinutes(), 0);
+
+  const seg1Start = new Date(segments[1].start);
+  const seg1End = new Date(segments[1].end);
+  assert.equal(seg1Start.getHours(), 13);
+  assert.equal(seg1Start.getMinutes(), 0);
+  assert.equal(seg1End.getHours(), 15);
+  assert.equal(seg1End.getMinutes(), 0);
+
+  // 3. Saturday morning accepted, afternoon shifted
+  const satStart = new Date(2026, 5, 20, 9, 0, 0); // Saturday 09:00
+  const satEnd1 = addWorkingMinutes(satStart, 2 * 60); // 2 hours
+  assert.equal(satEnd1.getHours(), 11);
+  assert.equal(satEnd1.getMinutes(), 0);
+
+  const satEnd2 = addWorkingMinutes(satStart, 4 * 60); // 4 hours -> Sat 9:00 to 12:00 (3h) and Mon 8:00 to 9:00 (1h)
+  assert.equal(satEnd2.getDay(), 1); // Monday
+  assert.equal(satEnd2.getHours(), 9);
+  assert.equal(satEnd2.getMinutes(), 0);
+
+  // 4. Sunday closed (shifted to Monday 08:00)
+  const sunStart = new Date(2026, 5, 21, 10, 0, 0); // Sunday
+  const sunAligned = alignToWorkingTime(sunStart);
+  assert.equal(sunAligned.getDay(), 1); // Monday
+  assert.equal(sunAligned.getHours(), 8);
+  assert.equal(sunAligned.getMinutes(), 0);
+
+  // 5. Collision and daily load tests
+  const planStart = new Date(2026, 5, 15, 9, 0, 0);
+  const planEnd = new Date(2026, 5, 15, 11, 0, 0);
+  const mockDossiers: DossierSAV[] = [
+    {
+      ...createReceptionFixture([]),
+      id: "NIMR-PLAN-001",
+      statut: DossierStatus.TRAVAUX_PLANIFIES,
+      ordresReparation: [
+        {
+          id: "ro_1",
+          designation: "Tâche 1",
+          tempsEstime: 2,
+          tempsPasse: 0,
+          status: "pending",
+          plannedTechnicianId: "tech_01",
+          plannedBayId: "bay_01",
+          planningDate: "2026-06-15",
+          planningStart: planStart.toISOString(),
+          planningEnd: planEnd.toISOString(),
+          planningSegments: buildPlanningSegments(planStart, planEnd)
+        }
+      ]
+    }
+  ];
+
+  // Collision tech_01 on Monday 10:00-12:00
+  const hasTechCollision = detectTechnicianCollision(
+    mockDossiers, 
+    "tech_01", 
+    new Date(2026, 5, 15, 10, 0, 0), 
+    new Date(2026, 5, 15, 12, 0, 0)
+  );
+  assert.equal(hasTechCollision, true);
+
+  // No collision on Monday 11:00-12:00
+  const noTechCollision = detectTechnicianCollision(
+    mockDossiers, 
+    "tech_01", 
+    new Date(2026, 5, 15, 11, 0, 0), 
+    new Date(2026, 5, 15, 12, 0, 0)
+  );
+  assert.equal(noTechCollision, false);
+
+  // Collision bay_01
+  const hasBayCollision = detectBayCollision(
+    mockDossiers, 
+    "bay_01", 
+    new Date(2026, 5, 15, 10, 0, 0), 
+    new Date(2026, 5, 15, 12, 0, 0)
+  );
+  assert.equal(hasBayCollision, true);
+
+  // Daily load
+  const load = calculateTechnicianDailyLoad("tech_01", "2026-06-15", mockDossiers);
+  assert.equal(load, 2);
+
+  const splitLoadStart = new Date(2026, 5, 15, 11, 0, 0);
+  const splitLoadEnd = addWorkingMinutes(splitLoadStart, 3 * 60);
+  const splitLoadDossier: DossierSAV = {
+    ...createReceptionFixture([]),
+    id: "NIMR-PLAN-SPLIT",
+    statut: DossierStatus.TRAVAUX_PLANIFIES,
+    ordresReparation: [
+      {
+        ...createLine("line_split_load", "pending"),
+        tempsEstime: 3,
+        plannedTechnicianId: "tech_02",
+        planningDate: "2026-06-15",
+        planningStart: splitLoadStart.toISOString(),
+        planningEnd: splitLoadEnd.toISOString(),
+        planningSegments: buildPlanningSegments(splitLoadStart, splitLoadEnd),
+      }
+    ]
+  };
+  assert.equal(calculateTechnicianDailyLoad("tech_02", "2026-06-15", [splitLoadDossier]), 3);
+}
+
 testReceptionCreation();
 testTechnicianAssignment();
 testQualityControl();
@@ -389,5 +528,6 @@ testWorkshopSlotSuggestionNextWorkingDayWhenSaturated();
 testRoleTabsAndPermissions();
 testStorageKeysUseNewPrefixOnly();
 testApplicationIdentityVersion();
+testAdvancedPlanningHelpers();
 
 console.log("sav-core tests passed");

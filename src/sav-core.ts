@@ -107,6 +107,7 @@ export interface WorkshopSlotSuggestion {
   bayName: string;
   startTime: string;
   endTime: string;
+  segments: Array<{ start: string; end: string }>;
   reason: string;
   technicianLoad: number;
   bayAvailability: string;
@@ -453,50 +454,99 @@ export function reopenRepairOrder(
 }
 
 export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): WorkshopSlotSuggestion {
-  const normalizedDossiers = input.dossiers.map(normalizeDossierForRuntime);
   const durationHours = Math.max(0.5, Number.isFinite(input.estimatedHours) ? input.estimatedHours : 1);
   const durationMinutes = Math.ceil(durationHours * 60);
   const desiredDate = input.desiredDate instanceof Date ? input.desiredDate : new Date(input.desiredDate);
   const usableTechnicians = input.technicians.filter(technician => !["absent", "formation"].includes(technician.disponibilite));
   const technicians = usableTechnicians.length > 0 ? usableTechnicians : input.technicians;
 
-  for (let dayOffset = 0; dayOffset < 15; dayOffset += 1) {
+  // Search for the next 30 days
+  for (let dayOffset = 0; dayOffset < 30; dayOffset += 1) {
     const candidateDate = addCalendarDays(desiredDate, dayOffset);
     if (!isWorkingDay(candidateDate)) continue;
 
-    const startBoundary = dayOffset === 0 ? alignToWorkingTime(candidateDate) : setTimeOnDate(candidateDate, WORKDAY_START_HOUR, 0);
-    const candidates = technicians
-      .map(technician => {
-        const load = dayOffset === 0 ? getTechnicianLoad(technician, normalizedDossiers) : getScheduledLoadForTechnician(technician.id, normalizedDossiers);
-        return { technician, load };
-      })
-      .filter(candidate => candidate.load + durationHours <= candidate.technician.capaciteJournaliere);
+    const dateStr = candidateDate.toISOString().split("T")[0];
 
-    if (candidates.length === 0) continue;
+    // Determine candidate times: Saturday ends at 12, Mon-Fri at 17
+    let timeCursor = dayOffset === 0 
+      ? maxDate(alignToWorkingTime(desiredDate), setTimeOnDate(candidateDate, 8, 0)) 
+      : setTimeOnDate(candidateDate, 8, 0);
 
-    candidates.sort((left, right) => left.load - right.load || technicians.indexOf(left.technician) - technicians.indexOf(right.technician));
-    for (const candidate of candidates) {
-      const loadStart = addWorkingMinutes(setTimeOnDate(candidateDate, WORKDAY_START_HOUR, 0), Math.round(candidate.load * 60));
-      const startTime = maxDate(loadStart, startBoundary);
-      const endTime = addWorkingMinutes(startTime, durationMinutes);
-      if (!isSameLocalDate(startTime, endTime) || endTime.getHours() > WORKDAY_END_HOUR) continue;
+    const endOfDayLimit = candidateDate.getDay() === 6 
+      ? setTimeOnDate(candidateDate, 12, 0) 
+      : setTimeOnDate(candidateDate, 17, 0);
 
-      const bay = chooseWorkshopBay(input.workshopBays, candidate.technician.zoneAffectee);
-      return {
-        technicianId: candidate.technician.id,
-        technicianName: candidate.technician.nom,
-        bayId: bay.id,
-        bayName: bay.name,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-        reason: `Technicien compatible avec ${formatHours(candidate.load)}h déjà planifiées et capacité restante suffisante.`,
-        technicianLoad: candidate.load,
-        bayAvailability: bay.zone ? `Pont compatible zone ${bay.zone}` : "Premier pont libre compatible",
-      };
+    while (timeCursor.getTime() < endOfDayLimit.getTime()) {
+      // Calculate end time by adding working minutes
+      const endTime = addWorkingMinutes(timeCursor, durationMinutes);
+      
+      // If the end time is on a different local day or exceeds the day's limit, this start time is invalid
+      if (!isSameLocalDate(timeCursor, endTime) || endTime.getTime() > endOfDayLimit.getTime()) {
+        timeCursor = new Date(timeCursor.getTime() + 30 * 60 * 1000);
+        continue;
+      }
+
+      // Sort technicians by their daily load on dateStr (or fallback to chargeActuelle)
+      const sortedTechs = [...technicians].sort((left, right) => {
+        let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers);
+        let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers);
+        if (dayOffset === 0) {
+          loadLeft = Math.max(loadLeft, left.chargeActuelle || 0);
+          loadRight = Math.max(loadRight, right.chargeActuelle || 0);
+        }
+        return loadLeft - loadRight;
+      });
+
+      // Check each technician and bay
+      for (const tech of sortedTechs) {
+        // 1. Collision check for technician
+        if (detectTechnicianCollision(input.dossiers, tech.id, timeCursor, endTime)) {
+          continue;
+        }
+
+        // 2. Capacity check for technician
+        const maxCap = candidateDate.getDay() === 6 ? 4 : 8;
+        let dailyLoad = calculateTechnicianDailyLoad(tech.id, dateStr, input.dossiers);
+        if (dayOffset === 0) {
+          dailyLoad = Math.max(dailyLoad, tech.chargeActuelle || 0);
+        }
+        if (dailyLoad + durationHours > maxCap) {
+          continue;
+        }
+
+        // 3. Find compatible bay and check collision
+        const compatibleBays = input.workshopBays.filter(
+          bay => !bay.zone || bay.zone === tech.zoneAffectee
+        );
+        const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays;
+
+        for (const bay of baysToTry) {
+          if (!detectBayCollision(input.dossiers, bay.id, timeCursor, endTime)) {
+            const segments = buildPlanningSegments(timeCursor, endTime);
+            // Found a valid slot!
+            return {
+              technicianId: tech.id,
+              technicianName: tech.nom,
+              bayId: bay.id,
+              bayName: bay.name,
+              startTime: timeCursor.toISOString(),
+              endTime: endTime.toISOString(),
+              segments,
+              reason: `Technicien compatible avec ${formatHours(dailyLoad)}h déjà planifiées et capacité restante suffisante.`,
+              technicianLoad: dailyLoad,
+              bayAvailability: bay.zone ? `Pont compatible zone ${bay.zone}` : "Premier pont libre compatible"
+            };
+          }
+        }
+      }
+
+      // Increment start time by 30 minutes
+      timeCursor = new Date(timeCursor.getTime() + 30 * 60 * 1000);
     }
   }
 
-  const fallbackDate = setTimeOnDate(nextWorkingDay(desiredDate), WORKDAY_START_HOUR, 0);
+  // Fallback next working day at 08:00
+  const fallbackDate = setTimeOnDate(nextWorkingDay(desiredDate), 8, 0);
   const fallbackTechnician = technicians[0];
   const fallbackBay = chooseWorkshopBay(input.workshopBays, fallbackTechnician?.zoneAffectee);
   return {
@@ -506,9 +556,10 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
     bayName: fallbackBay.name,
     startTime: fallbackDate.toISOString(),
     endTime: addWorkingMinutes(fallbackDate, durationMinutes).toISOString(),
+    segments: buildPlanningSegments(fallbackDate, addWorkingMinutes(fallbackDate, durationMinutes)),
     reason: "Aucun créneau compatible immédiat: proposition au prochain jour ouvrable.",
     technicianLoad: 0,
-    bayAvailability: fallbackBay.zone ? `Pont compatible zone ${fallbackBay.zone}` : "Premier pont libre compatible",
+    bayAvailability: fallbackBay.zone ? `Pont compatible zone ${fallbackBay.zone}` : "Premier pont libre compatible"
   };
 }
 
@@ -844,44 +895,224 @@ function chooseWorkshopBay(workshopBays: WorkshopBay[], technicianZone?: Atelier
   return workshopBays.find(bay => !bay.zone || bay.zone === technicianZone) ?? workshopBays[0];
 }
 
-function alignToWorkingTime(date: Date): Date {
-  if (!isWorkingDay(date)) return setTimeOnDate(nextWorkingDay(date), WORKDAY_START_HOUR, 0);
+export function isWorkingDay(date: Date): boolean {
+  const day = date.getDay();
+  return day !== 0; // Sunday (0) is closed, Saturday (6) is open
+}
+
+export function getWorkingWindowsForDate(date: Date): Array<{ start: Date; end: Date }> {
+  if (!isWorkingDay(date)) return [];
+  const day = date.getDay();
+  const startOfDay = new Date(date);
+  startOfDay.setHours(8, 0, 0, 0);
+
+  if (day === 6) { // Saturday
+    const endOfSat = new Date(date);
+    endOfSat.setHours(12, 0, 0, 0);
+    return [{ start: startOfDay, end: endOfSat }];
+  } else { // Monday to Friday
+    const endOfMorning = new Date(date);
+    endOfMorning.setHours(12, 0, 0, 0);
+    const startOfAfternoon = new Date(date);
+    startOfAfternoon.setHours(13, 0, 0, 0);
+    const endOfAfternoon = new Date(date);
+    endOfAfternoon.setHours(17, 0, 0, 0);
+    return [
+      { start: startOfDay, end: endOfMorning },
+      { start: startOfAfternoon, end: endOfAfternoon }
+    ];
+  }
+}
+
+export function alignToWorkingTime(date: Date): Date {
+  if (!isWorkingDay(date)) {
+    return alignToWorkingTime(setTimeOnDate(nextWorkingDay(date), 8, 0));
+  }
 
   const aligned = new Date(date);
+  const day = aligned.getDay();
   const minutes = aligned.getHours() * 60 + aligned.getMinutes();
-  const dayStart = WORKDAY_START_HOUR * 60;
-  const lunchStart = LUNCH_START_HOUR * 60;
-  const lunchEnd = LUNCH_END_HOUR * 60;
-  const dayEnd = WORKDAY_END_HOUR * 60;
 
-  if (minutes < dayStart) return setTimeOnDate(aligned, WORKDAY_START_HOUR, 0);
-  if (minutes >= lunchStart && minutes < lunchEnd) return setTimeOnDate(aligned, LUNCH_END_HOUR, 0);
-  if (minutes >= dayEnd) return setTimeOnDate(nextWorkingDay(aligned), WORKDAY_START_HOUR, 0);
+  if (day === 6) { // Saturday
+    if (minutes < 8 * 60) return setTimeOnDate(aligned, 8, 0);
+    if (minutes >= 12 * 60) return alignToWorkingTime(setTimeOnDate(nextWorkingDay(aligned), 8, 0));
+  } else { // Monday to Friday
+    if (minutes < 8 * 60) return setTimeOnDate(aligned, 8, 0);
+    if (minutes >= 12 * 60 && minutes < 13 * 60) return setTimeOnDate(aligned, 13, 0);
+    if (minutes >= 17 * 60) return alignToWorkingTime(setTimeOnDate(nextWorkingDay(aligned), 8, 0));
+  }
+
   return aligned;
 }
 
-function addWorkingMinutes(start: Date, minutes: number): Date {
+export function addWorkingMinutes(start: Date, minutes: number): Date {
   let current = alignToWorkingTime(start);
   let remaining = minutes;
 
   while (remaining > 0) {
     current = alignToWorkingTime(current);
-    const segmentEnd = current.getHours() < LUNCH_START_HOUR
-      ? setTimeOnDate(current, LUNCH_START_HOUR, 0)
-      : setTimeOnDate(current, WORKDAY_END_HOUR, 0);
-    const availableMinutes = Math.max(0, Math.round((segmentEnd.getTime() - current.getTime()) / 60000));
+    const day = current.getDay();
 
+    let segmentEnd: Date;
+    if (day === 6) { // Saturday
+      segmentEnd = setTimeOnDate(current, 12, 0);
+    } else { // Mon-Fri
+      if (current.getHours() < 12) {
+        segmentEnd = setTimeOnDate(current, 12, 0);
+      } else {
+        segmentEnd = setTimeOnDate(current, 17, 0);
+      }
+    }
+
+    const availableMinutes = Math.max(0, Math.round((segmentEnd.getTime() - current.getTime()) / 60000));
     if (remaining <= availableMinutes) {
       return new Date(current.getTime() + remaining * 60000);
     }
 
     remaining -= availableMinutes;
-    current = current.getHours() < LUNCH_START_HOUR
-      ? setTimeOnDate(current, LUNCH_END_HOUR, 0)
-      : setTimeOnDate(nextWorkingDay(current), WORKDAY_START_HOUR, 0);
+    if (day === 6) { // Saturday afternoon -> Monday 08:00
+      current = setTimeOnDate(nextWorkingDay(current), 8, 0);
+    } else {
+      if (current.getHours() < 12) {
+        current = setTimeOnDate(current, 13, 0);
+      } else {
+        current = setTimeOnDate(nextWorkingDay(current), 8, 0);
+      }
+    }
   }
 
   return current;
+}
+
+export function buildPlanningSegments(start: Date, end: Date): Array<{ start: string; end: string }> {
+  const segments: Array<{ start: string; end: string }> = [];
+  let temp = new Date(start);
+  const targetEnd = new Date(end);
+
+  while (temp.getTime() < targetEnd.getTime()) {
+    const windows = getWorkingWindowsForDate(temp);
+    let activeWindowFound = false;
+
+    for (const win of windows) {
+      // If temp lies before this window, shift to start of this window
+      if (temp.getTime() < win.start.getTime()) {
+        temp = new Date(win.start);
+      }
+
+      // If temp lies within this window
+      if (temp.getTime() >= win.start.getTime() && temp.getTime() < win.end.getTime()) {
+        const segEnd = new Date(Math.min(win.end.getTime(), targetEnd.getTime()));
+        segments.push({
+          start: temp.toISOString(),
+          end: segEnd.toISOString()
+        });
+        temp = new Date(segEnd);
+        activeWindowFound = true;
+        break;
+      }
+    }
+
+    if (!activeWindowFound) {
+      // If temp is outside all windows for this day, move to next working day at 08:00
+      temp = setTimeOnDate(nextWorkingDay(temp), 8, 0);
+    }
+  }
+
+  return segments;
+}
+
+export function detectTechnicianCollision(
+  dossiers: DossierSAV[],
+  techId: string,
+  start: Date,
+  end: Date,
+  ignoreTaskId?: string
+): boolean {
+  if (!techId) return false;
+  const requestedSegments = buildPlanningSegments(start, end);
+
+  for (const dossier of dossiers) {
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    for (const line of dossier.ordresReparation) {
+      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (line.plannedTechnicianId === techId && line.planningStart && line.planningEnd) {
+        if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+export function detectBayCollision(
+  dossiers: DossierSAV[],
+  bayId: string,
+  start: Date,
+  end: Date,
+  ignoreTaskId?: string
+): boolean {
+  if (!bayId) return false;
+  const requestedSegments = buildPlanningSegments(start, end);
+
+  for (const dossier of dossiers) {
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    for (const line of dossier.ordresReparation) {
+      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (line.plannedBayId === bayId && line.planningStart && line.planningEnd) {
+        if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+export function calculateTechnicianDailyLoad(techId: string, dateStr: string, dossiers: DossierSAV[]): number {
+  let total = 0;
+  for (const dossier of dossiers) {
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    for (const line of dossier.ordresReparation) {
+      if (line.plannedTechnicianId === techId && line.planningDate === dateStr) {
+        total += calculateSegmentHoursForDate(getLinePlanningSegments(line), dateStr);
+      }
+    }
+  }
+  return total;
+}
+
+function getLinePlanningSegments(line: RepairOrderLine): Array<{ start: string; end: string }> {
+  if (line.planningSegments && line.planningSegments.length > 0) return line.planningSegments;
+  if (line.planningStart && line.planningEnd) {
+    return buildPlanningSegments(new Date(line.planningStart), new Date(line.planningEnd));
+  }
+  return [];
+}
+
+function segmentsOverlap(
+  leftSegments: Array<{ start: string; end: string }>,
+  rightSegments: Array<{ start: string; end: string }>
+): boolean {
+  return leftSegments.some(left => {
+    const leftStart = new Date(left.start).getTime();
+    const leftEnd = new Date(left.end).getTime();
+    return rightSegments.some(right => {
+      const rightStart = new Date(right.start).getTime();
+      const rightEnd = new Date(right.end).getTime();
+      return leftStart < rightEnd && rightStart < leftEnd;
+    });
+  });
+}
+
+function calculateSegmentHoursForDate(segments: Array<{ start: string; end: string }>, dateStr: string): number {
+  return segments.reduce((total, segment) => {
+    const start = new Date(segment.start);
+    const end = new Date(segment.end);
+    const segmentDate = start.toISOString().split("T")[0];
+    if (segmentDate !== dateStr) return total;
+    return total + Math.max(0, (end.getTime() - start.getTime()) / 3600000);
+  }, 0);
 }
 
 function setTimeOnDate(date: Date, hours: number, minutes: number): Date {
@@ -902,11 +1133,6 @@ function nextWorkingDay(date: Date): Date {
     next = addCalendarDays(next, 1);
   }
   return next;
-}
-
-function isWorkingDay(date: Date): boolean {
-  const day = date.getDay();
-  return day !== 0 && day !== 6;
 }
 
 function isSameLocalDate(left: Date, right: Date): boolean {

@@ -96,6 +96,14 @@ export interface RepairOrderLine {
   status: RepairOrderStatus;
   reopenedReason?: string;
   history?: string[];
+  
+  // Fields for Lot 4 planning
+  planningStart?: string;
+  planningEnd?: string;
+  planningSegments?: Array<{ start: string; end: string }>;
+  plannedTechnicianId?: string;
+  plannedBayId?: string;
+  planningDate?: string;
 }
 
 export interface ComplementTravail {
@@ -235,5 +243,7 @@ export interface DossierSAV {
   prochaineActionRecommended: string;
   dateDernierStatut: string;
   avancementGlobal: number; // progress indicator 0 - 100
+  datePlanningDebut?: string;
+  datePlanningFin?: string;
   historiqueLogs?: string[];
 }
