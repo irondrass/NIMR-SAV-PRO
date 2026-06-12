@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5C
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5D
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B et 5C) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C et 5D) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -125,20 +125,76 @@ Pour clore le cycle de stabilisation locale de la v1.1.0, nous avons structuré 
 
 ---
 
-## 8. Résultats de la Validation Globale
+## 8. Lot 5D : Planning Intelligent & Agent QA Fonctionnel
 
-Le pipeline complet de validation locale (`npm run test:qa`) a été exécuté et validé avec succès :
+### Planning Intelligent
+- Correction du moteur de suggestion planning.
+- Aucune suggestion dans le passé pour la journée courante.
+- Si l’heure actuelle est 09:53, le prochain créneau proposé doit être au minimum 10:00.
+- Arrondi automatique au prochain créneau de 15 minutes.
+- Scission correcte des tâches traversant la pause déjeuner.
+  - Exemple : 10:00 + 2h30 = 10:00-12:00 puis 13:00-13:30.
+- Refus strict des dates passées.
+- Bascule automatique au prochain jour ouvrable si l’heure actuelle dépasse la fermeture atelier.
+- Injection de l’heure système dans `suggestWorkshopSlot` et `validatePlanningAssignment` pour permettre des tests stables.
+- Correction du statut technicien :
+  - Disponible
+  - Occupé maintenant
+  - Planifié aujourd’hui
+  - Non disponible
+- Correction du statut pont/poste :
+  - Libre maintenant
+  - Occupé maintenant
+  - Planifié aujourd’hui
+- Ajout de la ligne verticale rouge “Maintenant” dans le Gantt uniquement sur la date du jour.
+- Grisement des blocs passés.
+- Validation stricte de la sauvegarde planning :
+  - collision technicien
+  - collision pont
+  - planning dans le passé
+  - dimanche
+  - samedi après-midi
+  - hors horaires
+  - pause midi non scindée
+  - dossier/tâche/technicien/pont inexistant
+- Désactivation du bouton sauvegarde si validation bloquante.
+- Capture propre des erreurs, sans crash React ni erreur console incontrôlée.
+
+### Agent QA Fonctionnel
+- Ajout du script `npm run qa:agent`.
+- Mise à jour automatique de `qa-report.md`.
+- 18 invariants métiers vérifiés.
+- Contrôles couverts :
+  - planning dans le passé interdit
+  - collisions bloquées
+  - dimanche/samedi après-midi interdits
+  - pause midi non comptée
+  - technicien planifié plus tard ≠ occupé maintenant
+  - livraison protégée par QC
+  - tâche terminée non redémarrable sans réouverture
+  - lecture seule sans modification
+  - aucun `prompt()`
+  - aucun `alert()`
+  - aucun `force-status-select` opérationnel
+  - aucune ancienne clé `nimr-sav` ou `nimr_sav`
+
+---
+
+## 9. Résultats de la Validation Globale
+
+Le pipeline complet de validation locale a été exécuté et validé avec succès :
 
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
 | **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit et session TTL) sont au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **174 tests sur 174 validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **177 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 18/18 contrôles validés** |
 
 ---
 
-## 9. Nouveaux Tests E2E Playwright
+## 10. Nouveaux Tests E2E Playwright
 
 La suite E2E a été enrichie avec 3 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
@@ -147,9 +203,9 @@ La suite E2E a été enrichie avec 3 nouveaux fichiers de tests complets :
 
 ---
 
-## 10. Décision avant Lot 6
+## 11. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5C sont validés.
-La base est prête pour démarrer le Lot 6 Historique + Rapports SAV.
+Les Lots 1 à 5D sont validés.
+La base est maintenant prête pour démarrer le Lot 6 Historique + Rapports SAV.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
