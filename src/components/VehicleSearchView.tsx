@@ -10,7 +10,7 @@ import {
   getVehicleAggregatedStatus,
   isOpenDossier
 } from "../vehicle-status";
-import { canDeliverDossier, normalizeRepairOrderStatus } from "../sav-core";
+import { canDeliverDossier, getDossierOperationalBucket, normalizeRepairOrderStatus, DossierOperationalBucket } from "../sav-core";
 import { Search, Inbox, ShieldAlert, Sparkles, AlertTriangle, Eye, FileText } from "lucide-react";
 import { LicencePlate, PriorityBadge, StatusBadge } from "./UIParts";
 
@@ -20,6 +20,20 @@ interface VehicleSearchViewProps {
 }
 
 type QuickFilter = "all" | "active" | "blocked" | "in-progress" | "ready" | "delivered" | "multiple";
+
+const dossierOperationalBadgeLabels: Record<DossierOperationalBucket, string> = {
+  active: "Actif",
+  ready_for_billing: "Prêt facturation ERP",
+  delivered: "Livré",
+  closed: "Clôturé",
+};
+
+const dossierOperationalBadgeClasses: Record<DossierOperationalBucket, string> = {
+  active: "bg-blue-50 text-blue-700 border-blue-100",
+  ready_for_billing: "bg-violet-50 text-violet-700 border-violet-100",
+  delivered: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  closed: "bg-slate-100 text-slate-700 border-slate-200",
+};
 
 export default function VehicleSearchView({ dossiers, onSelectDossier }: VehicleSearchViewProps) {
   const [query, setQuery] = useState("");
@@ -288,6 +302,7 @@ export default function VehicleSearchView({ dossiers, onSelectDossier }: Vehicle
                           <th className="py-2 px-3">Réception</th>
                           <th className="py-2 px-3">Priorité</th>
                           <th className="py-2 px-3">Statut Dossier</th>
+                          <th className="py-2 px-3">Activité</th>
                           <th className="py-2 px-3">Tâche principale</th>
                           <th className="py-2 px-3">Technicien</th>
                           <th className="py-2 px-3">QC</th>
@@ -308,6 +323,7 @@ export default function VehicleSearchView({ dossiers, onSelectDossier }: Vehicle
 
                           const mainTaskStatus = activeLine ? normalizeRepairOrderStatus(activeLine.status) : "pending";
                           const techName = activeLine?.plannedTechnicianId || d.technicienId || "Non affecté";
+                          const operationalBucket = getDossierOperationalBucket(d);
 
                           return (
                             <tr key={d.id} className="hover:bg-slate-50/50">
@@ -320,6 +336,14 @@ export default function VehicleSearchView({ dossiers, onSelectDossier }: Vehicle
                               </td>
                               <td data-testid="vehicle-linked-dossier-status" className="py-2.5 px-3">
                                 <StatusBadge status={d.statut} />
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span
+                                  data-testid="vehicle-linked-dossier-operational-badge"
+                                  className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-black uppercase ${dossierOperationalBadgeClasses[operationalBucket]}`}
+                                >
+                                  {dossierOperationalBadgeLabels[operationalBucket]}
+                                </span>
                               </td>
                               <td data-testid="vehicle-linked-dossier-main-task-status" className="py-2.5 px-3 uppercase text-[10px] font-mono text-slate-600">
                                 {mainTaskStatus}

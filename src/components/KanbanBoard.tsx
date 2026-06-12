@@ -5,6 +5,7 @@
 
 import React, { useMemo } from "react";
 import { DossierSAV, DossierStatus } from "../types";
+import { isOperationalActiveDossier } from "../sav-core";
 
 interface KanbanBoardProps {
   dossiers: DossierSAV[];
@@ -12,21 +13,25 @@ interface KanbanBoardProps {
 }
 
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({ dossiers, onSelectDossier }) => {
-  const receptionnes = useMemo(() => {
-    return dossiers.filter(d => [DossierStatus.VEHICULE_RECU, DossierStatus.TRAVAUX_PLANIFIES].includes(d.statut));
+  const productionDossiers = useMemo(() => {
+    return dossiers.filter(isOperationalActiveDossier);
   }, [dossiers]);
+
+  const receptionnes = useMemo(() => {
+    return productionDossiers.filter(d => [DossierStatus.VEHICULE_RECU, DossierStatus.TRAVAUX_PLANIFIES].includes(d.statut));
+  }, [productionDossiers]);
 
   const enTravaux = useMemo(() => {
-    return dossiers.filter(d => d.statut === DossierStatus.EN_TRAVAUX);
-  }, [dossiers]);
+    return productionDossiers.filter(d => d.statut === DossierStatus.EN_TRAVAUX);
+  }, [productionDossiers]);
 
   const bloques = useMemo(() => {
-    return dossiers.filter(d => d.statut === DossierStatus.BLOQUE);
-  }, [dossiers]);
+    return productionDossiers.filter(d => d.statut === DossierStatus.BLOQUE);
+  }, [productionDossiers]);
 
   const aLivrer = useMemo(() => {
-    return dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER);
-  }, [dossiers]);
+    return productionDossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER);
+  }, [productionDossiers]);
 
   return (
     <div className="space-y-4 text-xs font-semibold">

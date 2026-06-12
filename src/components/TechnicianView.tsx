@@ -5,14 +5,16 @@
 
 import React, { useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
-import { DossierSAV, DossierStatus, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole, CameraPhoto } from "../types";
+import { DossierSAV, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole, CameraPhoto } from "../types";
 import {
   addPhotoToDossier,
   blockRepairOrder,
   finishRepairOrder,
   getRepairOrderStatusLabel,
+  getVisibleTechnicianTasks,
   normalizeRepairOrderStatus,
   pauseRepairOrder,
+  shouldShowDossierForTechnician,
   startRepairOrder
 } from "../sav-core";
 import { fileToCameraPhoto } from "../photo-utils";
@@ -70,12 +72,8 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
 
   const activeTech = techniciens.find(t => t.id === selectedTechId);
 
-  // Filter tasks specific to this technician
-  const techTasks = dossiers.filter(d => 
-    d.technicienId === selectedTechId && 
-    d.statut !== DossierStatus.LIVRE && 
-    d.statut !== DossierStatus.CLOTURE
-  );
+  // Filter operational tasks specific to this technician.
+  const techTasks = dossiers.filter(d => shouldShowDossierForTechnician(d, selectedTechId));
 
   const setNoteForDossier = (dossierId: string, val: string) => {
     setTempNotes(prev => ({ ...prev, [dossierId]: val }));
@@ -276,8 +274,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         ) : (
           <div className="space-y-4 text-xs font-semibold">
             {techTasks.map(task => {
+              const visibleTechnicianTasks = getVisibleTechnicianTasks(task, selectedTechId);
               // Check if this dossier has any active (in_progress) task
-              const hasInProgressTask = task.ordresReparation.some(
+              const hasInProgressTask = visibleTechnicianTasks.some(
                 line => normalizeRepairOrderStatus(line.status) === "in_progress"
               );
 
@@ -339,15 +338,14 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                     <div className="p-3 bg-blue-50/10  border border-blue-100/40 rounded-lg space-y-2.5">
                       <span className="text-[10px] text-blue-800  uppercase tracking-widest block font-bold font-display">Piloter mes tâches :</span>
                       <div className="space-y-2">
-                        {task.ordresReparation.map(line => {
+                        {visibleTechnicianTasks.map(line => {
                           const status = normalizeRepairOrderStatus(line.status);
                           const activeLineInSameDossier = task.ordresReparation.find(current =>
                             current.id !== line.id && normalizeRepairOrderStatus(current.status) === "in_progress"
                           );
                           const activeDossierForTechnician = dossiers.find(current =>
                             current.id !== task.id &&
-                            current.technicienId === selectedTechId &&
-                            current.ordresReparation.some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
+                            getVisibleTechnicianTasks(current, selectedTechId).some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
                           );
                           const startBlockedMessage = status === "blocked"
                             ? "Lever le blocage avant de reprendre la tâche."

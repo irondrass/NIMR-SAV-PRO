@@ -309,6 +309,53 @@ export function isRepairOrderDone(line: RepairOrderLine): boolean {
   return normalizeRepairOrderStatus(line.status) === "done";
 }
 
+export type DossierOperationalBucket = "active" | "ready_for_billing" | "delivered" | "closed";
+
+const ARCHIVED_OR_ERP_READY_STATUSES = new Set<DossierStatus>([
+  DossierStatus.PRET_FACTURATION,
+  DossierStatus.LIVRE,
+  DossierStatus.CLOTURE,
+]);
+
+const TECHNICIAN_VISIBLE_TASK_STATUSES = new Set<RepairOrderStatus>([
+  "pending",
+  "in_progress",
+  "paused",
+  "blocked",
+  "reopened",
+]);
+
+export function isOperationalActiveDossier(dossier: DossierSAV): boolean {
+  return !ARCHIVED_OR_ERP_READY_STATUSES.has(dossier.statut);
+}
+
+export function isArchivedOrErpReadyDossier(dossier: DossierSAV): boolean {
+  return ARCHIVED_OR_ERP_READY_STATUSES.has(dossier.statut);
+}
+
+export function getVisibleTechnicianTasks(dossier: DossierSAV, technicianId: string): RepairOrderLine[] {
+  if (!technicianId || !isOperationalActiveDossier(dossier)) {
+    return [];
+  }
+
+  return dossier.ordresReparation.filter(line => {
+    const assignedToTechnician = line.plannedTechnicianId === technicianId ||
+      (!line.plannedTechnicianId && dossier.technicienId === technicianId);
+    return assignedToTechnician && TECHNICIAN_VISIBLE_TASK_STATUSES.has(normalizeRepairOrderStatus(line.status));
+  });
+}
+
+export function shouldShowDossierForTechnician(dossier: DossierSAV, technicianId: string): boolean {
+  return getVisibleTechnicianTasks(dossier, technicianId).length > 0;
+}
+
+export function getDossierOperationalBucket(dossier: DossierSAV): DossierOperationalBucket {
+  if (dossier.statut === DossierStatus.PRET_FACTURATION) return "ready_for_billing";
+  if (dossier.statut === DossierStatus.LIVRE) return "delivered";
+  if (dossier.statut === DossierStatus.CLOTURE) return "closed";
+  return "active";
+}
+
 export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
   return {
     ...dossier,

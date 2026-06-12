@@ -27,7 +27,11 @@ import {
   createBackupPayload,
   createReceptionDossier,
   finishRepairOrder,
+  getDossierOperationalBucket,
+  getVisibleTechnicianTasks,
+  isArchivedOrErpReadyDossier,
   isDossierSAV,
+  isOperationalActiveDossier,
   markReadyForBilling,
   parseStoredArray,
   releaseRepairOrderBlock,
@@ -35,6 +39,7 @@ import {
   reopenRepairOrder,
   startRepairOrder,
   submitQualityControl,
+  shouldShowDossierForTechnician,
   suggestWorkshopSlot,
   validateBackupPayload,
   isWorkingDay,
@@ -375,6 +380,43 @@ function testBlockedTaskRequiresUnblockBeforeRestart() {
     assert.match(released.line.history?.[0] ?? "", /Pièce reçue/);
     assert.equal(released.dossier.bloqueRaison, "");
   }
+}
+
+function testOperationalVisibilityHelpers() {
+  const activeDossier = createTaskDossier("NIMR-ACTIVE-VIEW", "tech_01", [
+    createLine("line_pending", "pending"),
+    createLine("line_running", "in_progress"),
+    createLine("line_paused", "paused"),
+    createLine("line_blocked", "blocked"),
+    createLine("line_reopened", "reopened"),
+    createLine("line_done", "done"),
+  ]);
+
+  assert.equal(isOperationalActiveDossier(activeDossier), true);
+  assert.equal(isArchivedOrErpReadyDossier(activeDossier), false);
+  assert.equal(getDossierOperationalBucket(activeDossier), "active");
+  assert.deepEqual(
+    getVisibleTechnicianTasks(activeDossier, "tech_01").map(line => line.id),
+    ["line_pending", "line_running", "line_paused", "line_blocked", "line_reopened"]
+  );
+  assert.equal(shouldShowDossierForTechnician(activeDossier, "tech_01"), true);
+
+  const doneOnlyDossier = createTaskDossier("NIMR-DONE-VIEW", "tech_01", [createLine("line_done_only", "done")]);
+  assert.equal(shouldShowDossierForTechnician(doneOnlyDossier, "tech_01"), false);
+
+  const readyForBilling = { ...activeDossier, statut: DossierStatus.PRET_FACTURATION };
+  const delivered = { ...activeDossier, statut: DossierStatus.LIVRE };
+  const closed = { ...activeDossier, statut: DossierStatus.CLOTURE };
+
+  assert.equal(isOperationalActiveDossier(readyForBilling), false);
+  assert.equal(isOperationalActiveDossier(delivered), false);
+  assert.equal(isOperationalActiveDossier(closed), false);
+  assert.equal(isArchivedOrErpReadyDossier(readyForBilling), true);
+  assert.equal(getDossierOperationalBucket(readyForBilling), "ready_for_billing");
+  assert.equal(getDossierOperationalBucket(delivered), "delivered");
+  assert.equal(getDossierOperationalBucket(closed), "closed");
+  assert.equal(shouldShowDossierForTechnician(readyForBilling, "tech_01"), false);
+  assert.equal(getVisibleTechnicianTasks(delivered, "tech_01").length, 0);
 }
 
 function testWorkshopSlotSuggestionFirstTechnicianAndBay() {
@@ -1288,6 +1330,7 @@ testReopenDoneTaskByWorkshopChief();
 testTechnicianCannotReopenDoneTask();
 testFinishRequiresInProgress();
 testBlockedTaskRequiresUnblockBeforeRestart();
+testOperationalVisibilityHelpers();
 testWorkshopSlotSuggestionFirstTechnicianAndBay();
 testWorkshopSlotSuggestionLunchBreak();
 testWorkshopSlotSuggestionNextWorkingDayWhenSaturated();

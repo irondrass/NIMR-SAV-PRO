@@ -6,7 +6,11 @@ import {
   validatePlanningAssignment,
   calculateTechnicianDailyLoad,
   canDeliverDossier,
+  getDossierOperationalBucket,
+  getVisibleTechnicianTasks,
+  isOperationalActiveDossier,
   startRepairOrder,
+  shouldShowDossierForTechnician,
 } from "../src/sav-core";
 import {
   canAccessTab,
@@ -525,6 +529,77 @@ registerCheck("Véhicules", "Ancien dossier livré ne masque pas dossier actif",
 });
 
 // -----------------------------------------------------------------
+// Lot 5F-1 Operational Cleanup Invariants
+// -----------------------------------------------------------------
+
+registerCheck("Lot 5F-1", "Technicien ne voit pas les tâches terminées", () => {
+  const dossier = getMockDossier({
+    id: "D_TECH_ACTIVE",
+    statut: DossierStatus.EN_TRAVAUX,
+    technicienId: "tech_01",
+    ordresReparation: [
+      { id: "task_pending", designation: "À faire", tempsEstime: 1, tempsPasse: 0, status: "pending" },
+      { id: "task_done", designation: "Terminée", tempsEstime: 1, tempsPasse: 1, status: "done" },
+    ],
+  });
+
+  const visibleTasks = getVisibleTechnicianTasks(dossier, "tech_01");
+  assert.deepEqual(visibleTasks.map(task => task.id), ["task_pending"]);
+});
+
+registerCheck("Lot 5F-1", "Technicien ne voit pas dossier prêt facturation ERP", () => {
+  const dossier = getMockDossier({
+    id: "D_TECH_ERP",
+    statut: DossierStatus.PRET_FACTURATION,
+    technicienId: "tech_01",
+    ordresReparation: [
+      { id: "task_pending", designation: "À faire", tempsEstime: 1, tempsPasse: 0, status: "pending" },
+    ],
+  });
+
+  assert.equal(shouldShowDossierForTechnician(dossier, "tech_01"), false);
+});
+
+registerCheck("Lot 5F-1", "Vue dossiers Actifs exclut prêt facturation ERP", () => {
+  const active = getMockDossier({ id: "D_ACTIVE", statut: DossierStatus.EN_TRAVAUX });
+  const readyErp = getMockDossier({ id: "D_ERP", statut: DossierStatus.PRET_FACTURATION });
+  const delivered = getMockDossier({ id: "D_DELIVERED", statut: DossierStatus.LIVRE });
+  const closed = getMockDossier({ id: "D_CLOSED", statut: DossierStatus.CLOTURE });
+
+  assert.equal(isOperationalActiveDossier(active), true);
+  assert.equal(isOperationalActiveDossier(readyErp), false);
+  assert.equal(isOperationalActiveDossier(delivered), false);
+  assert.equal(isOperationalActiveDossier(closed), false);
+});
+
+registerCheck("Lot 5F-1", "Kanban exclut prêt facturation ERP / livré / clôturé", () => {
+  const dossiers = [
+    getMockDossier({ id: "D_WORK", statut: DossierStatus.EN_TRAVAUX }),
+    getMockDossier({ id: "D_READY", statut: DossierStatus.PRET_A_LIVRER }),
+    getMockDossier({ id: "D_ERP", statut: DossierStatus.PRET_FACTURATION }),
+    getMockDossier({ id: "D_DELIVERED", statut: DossierStatus.LIVRE }),
+    getMockDossier({ id: "D_CLOSED", statut: DossierStatus.CLOTURE }),
+  ];
+
+  const productionIds = dossiers.filter(isOperationalActiveDossier).map(dossier => dossier.id);
+  assert.deepEqual(productionIds, ["D_WORK", "D_READY"]);
+});
+
+registerCheck("Lot 5F-1", "Recherche véhicule garde l'historique mais distingue actif / livré / prêt ERP", () => {
+  const dActive = getMockDossier({ id: "D_ACTIVE", vehiculeImmatriculation: "777 TU 001", statut: DossierStatus.EN_TRAVAUX });
+  const dDelivered = getMockDossier({ id: "D_DELIVERED", vehiculeImmatriculation: "777 TU 001", statut: DossierStatus.LIVRE });
+  const dErp = getMockDossier({ id: "D_ERP", vehiculeImmatriculation: "777 TU 001", statut: DossierStatus.PRET_FACTURATION });
+
+  const results = searchVehiclesAndDossiers([dActive, dDelivered, dErp], "777 TU 001");
+  assert.equal(results.length, 1);
+  assert.equal(results[0].dossiers.length, 3);
+  assert.deepEqual(
+    results[0].dossiers.map(getDossierOperationalBucket).sort(),
+    ["active", "delivered", "ready_for_billing"].sort()
+  );
+});
+
+// -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
 console.log("Démarrage de l'agent QA...");
@@ -547,7 +622,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 5E - Statut Planning & Recherche Véhicule)
+- **Version** : v1.1.0 (Lot 5F-1 - Nettoyage opérationnel Technicien & Dossiers actifs)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

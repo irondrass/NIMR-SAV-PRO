@@ -74,6 +74,8 @@ export default function DirectorDashboard({ dossiers, techniciens, onSelectDossi
     techniciens,
     filters: { period, status, technicianId, priority },
   }), [filteredDossiersForKpis, period, priority, status, technicianId, techniciens]);
+  const activeActivityCards = kpis.activity.cards.slice(0, 4);
+  const erpActivityCards = kpis.activity.cards.slice(4);
 
   const chartColor = "#2563eb";
   const secondaryChartColor = "#10b981";
@@ -153,12 +155,28 @@ export default function DirectorDashboard({ dossiers, techniciens, onSelectDossi
 
       <section data-testid="dashboard-activity-view" className="space-y-3">
         <SectionTitle icon={<Gauge className="h-5 w-5" />} title="Vue activité" />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-7">
-          {kpis.activity.cards.map(metric => (
-            <div key={metric.testId}>
-              <MetricCard metric={metric} />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div data-testid="dashboard-operational-active-kpis" className="space-y-2 xl:col-span-7">
+            <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Opérationnel actif</div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {activeActivityCards.map(metric => (
+                <div key={metric.testId}>
+                  <MetricCard metric={metric} />
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+
+          <div data-testid="dashboard-archived-erp-kpis" className="space-y-2 xl:col-span-5">
+            <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">Clôturé / ERP</div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {erpActivityCards.map(metric => (
+                <div key={metric.testId}>
+                  <MetricCard metric={metric} />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 

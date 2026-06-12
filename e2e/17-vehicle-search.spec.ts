@@ -76,7 +76,7 @@ test.describe("Lot 5E - Recherche véhicule, dossier et statuts tâche Gantt", (
 
     // Open Dossiers Tab
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
-    await expect(page.locator("text=Tous les Dossiers Actifs SAV")).toBeVisible();
+    await expect(page.locator("text=Actifs SAV")).toBeVisible();
 
     // Toggle to Vehicle Search Mode
     await humanClick(page, page.locator('[data-testid="dossier-mode-vehicles"]'));

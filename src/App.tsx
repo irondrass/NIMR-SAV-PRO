@@ -44,6 +44,7 @@ import {
   isDossierSAV,
   isReclamationClient,
   isTechnicienResource,
+  isOperationalActiveDossier,
   normalizeDossierForRuntime,
   parseStoredArray,
   validateBackupPayload
@@ -131,6 +132,8 @@ function loadStoredSession(): UserSession | null {
   }
 }
 
+type DossierOperationalFilter = "active" | "ready_for_billing" | "delivered" | "all";
+
 export default function App() {
   // Local internal authentication state
   const [authReady, setAuthReady] = useState(false);
@@ -166,6 +169,7 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<string>("Tous");
   const [priorityFilter, setPriorityFilter] = useState<string>("Toutes");
   const [dossierViewMode, setDossierViewMode] = useState<"standard" | "vehicles">("standard");
+  const [dossierOperationalFilter, setDossierOperationalFilter] = useState<DossierOperationalFilter>("active");
   const currentUser = currentSession ? users.find(user => user.id === currentSession.userId) ?? null : null;
   const activeRole = currentUser?.role ?? currentSession?.role ?? UserRole.LECTURE_SEULE;
 
@@ -341,11 +345,26 @@ export default function App() {
     return dossiers.filter(d => {
       const textToSearch = `${d.id} ${d.clientNom} ${d.vehiculeImmatriculation} ${d.vehiculeMarque} ${d.vehiculeModele} ${d.clientTelephone}`.toLowerCase();
       const matchesSearch = textToSearch.includes(globalSearchTerm.toLowerCase());
+      const matchesOperationalFilter =
+        dossierOperationalFilter === "active"
+          ? isOperationalActiveDossier(d)
+          : dossierOperationalFilter === "ready_for_billing"
+            ? d.statut === DossierStatus.PRET_FACTURATION
+            : dossierOperationalFilter === "delivered"
+              ? d.statut === DossierStatus.LIVRE
+              : true;
       const matchesStatus = statusFilter === "Tous" || d.statut === statusFilter;
       const matchesPriority = priorityFilter === "Toutes" || d.priorite === priorityFilter;
-      return matchesSearch && matchesStatus && matchesPriority;
+      return matchesSearch && matchesOperationalFilter && matchesStatus && matchesPriority;
     });
-  }, [dossiers, globalSearchTerm, statusFilter, priorityFilter]);
+  }, [dossiers, globalSearchTerm, dossierOperationalFilter, statusFilter, priorityFilter]);
+
+  const dossierOperationalFilterLabels: Record<DossierOperationalFilter, string> = {
+    active: "Actifs",
+    ready_for_billing: "Prêts facturation ERP",
+    delivered: "Livrés",
+    all: "Tous les dossiers",
+  };
 
   const blockedCount = useMemo(() => {
     return dossiers.filter(d => d.statut === DossierStatus.BLOQUE).length;
@@ -693,11 +712,27 @@ export default function App() {
                       {/* Filter header bar */}
                       <div className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap gap-2.5 items-center justify-between shadow-sm">
                         <div>
-                          <h3 className="text-sm font-extrabold tracking-tight uppercase font-display text-slate-900">Tous les Dossiers Actifs SAV ({filteredDossiers.length})</h3>
+                          <h3 className="text-sm font-extrabold tracking-tight uppercase font-display text-slate-900">{dossierOperationalFilterLabels[dossierOperationalFilter]} SAV ({filteredDossiers.length})</h3>
                           <p className="text-slate-400 text-xs text-left">Fiches d'intervention et réparations d'assurance, garantie et mécanique</p>
                         </div>
 
                         <div className="flex flex-wrap gap-2 text-xs">
+                          {(["active", "ready_for_billing", "delivered", "all"] as DossierOperationalFilter[]).map(filter => (
+                            <button
+                              key={filter}
+                              type="button"
+                              data-testid={`dossier-operational-filter-${filter}`}
+                              onClick={() => setDossierOperationalFilter(filter)}
+                              className={`px-3 py-1.5 rounded-md font-bold border transition ${
+                                dossierOperationalFilter === filter
+                                  ? "bg-slate-950 text-white border-slate-950"
+                                  : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                              }`}
+                            >
+                              {dossierOperationalFilterLabels[filter]}
+                            </button>
+                          ))}
+
                           <select
                             className="p-1.5 px-3 bg-slate-50 border border-slate-200 rounded-md font-semibold text-zinc-800 focus:outline-none focus:border-blue-500"
                             value={statusFilter}
