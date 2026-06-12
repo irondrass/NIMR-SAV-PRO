@@ -363,10 +363,11 @@ export default function DossierDetail({
   const deliveryGate = canDeliverDossier(dossier);
 
   return (
-    <div className="space-y-6">
+    <div data-testid="dossier-detail-view" className="space-y-6">
       {/* Top action row */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 font-display">
         <button 
+          data-testid="dossier-back-btn"
           onClick={onBack}
           className="inline-flex items-center gap-2 text-xs font-bold text-slate-600  hover:text-blue-600  transition"
         >
@@ -396,7 +397,7 @@ export default function DossierDetail({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="bg-blue-600 text-white text-[11px] font-mono font-extrabold px-2.5 py-1 rounded">
+              <span data-testid="dossier-id-title" className="bg-blue-600 text-white text-[11px] font-mono font-extrabold px-2.5 py-1 rounded">
                 {dossier.id}
               </span>
               <InterventionTypeBadge type={dossier.typeDossier} />

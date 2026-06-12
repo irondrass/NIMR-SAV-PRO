@@ -54,12 +54,26 @@ export default function DirectorDashboard({ dossiers, techniciens, onSelectDossi
   const [status, setStatus] = useState<DossierStatus | "all">("all");
   const [technicianId, setTechnicianId] = useState<string | "all">("all");
   const [priority, setPriority] = useState<DossierPriority | "all">("all");
+  const [dashboardSearchQuery, setDashboardSearchQuery] = useState("");
+
+  const filteredDossiersForKpis = useMemo(() => {
+    if (!dashboardSearchQuery.trim()) {
+      return dossiers;
+    }
+    const q = dashboardSearchQuery.toLowerCase().trim();
+    return dossiers.filter(d =>
+      d.id?.toLowerCase().includes(q) ||
+      d.vehiculeImmatriculation?.toLowerCase().includes(q) ||
+      d.vehiculeVIN?.toLowerCase().includes(q) ||
+      d.clientNom?.toLowerCase().includes(q)
+    );
+  }, [dossiers, dashboardSearchQuery]);
 
   const kpis = useMemo(() => buildDirectorDashboardKpis({
-    dossiers,
+    dossiers: filteredDossiersForKpis,
     techniciens,
     filters: { period, status, technicianId, priority },
-  }), [dossiers, period, priority, status, technicianId, techniciens]);
+  }), [filteredDossiersForKpis, period, priority, status, technicianId, techniciens]);
 
   const chartColor = "#2563eb";
   const secondaryChartColor = "#10b981";
@@ -101,7 +115,18 @@ export default function DirectorDashboard({ dossiers, techniciens, onSelectDossi
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <label className="space-y-1">
+            <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Rechercher</span>
+            <input
+              type="text"
+              data-testid="dashboard-search-input"
+              value={dashboardSearchQuery}
+              onChange={event => setDashboardSearchQuery(event.target.value)}
+              placeholder="Immat, VIN, dossier, client..."
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
           <FilterSelect
             testId="dashboard-filter-status"
             label="Statut"

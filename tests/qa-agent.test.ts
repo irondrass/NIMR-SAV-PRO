@@ -14,6 +14,11 @@ import {
   isReadOnlyRole,
 } from "../src/permissions";
 import {
+  getVehicleAggregatedStatus,
+  searchVehiclesAndDossiers,
+  getVehicleKey,
+} from "../src/vehicle-status.js";
+import {
   AtelierZone,
   DossierPriority,
   DossierSAV,
@@ -473,6 +478,53 @@ function getFilesRecursively(dir: string): string[] {
 }
 
 // -----------------------------------------------------------------
+// Lot 5E Invariants
+// -----------------------------------------------------------------
+
+registerCheck("Planning", "Statut tâche visible dans le code source de planification", () => {
+  const fileContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(fileContent.includes("gantt-task-status-pending"));
+  assert.ok(fileContent.includes("gantt-task-status-in-progress"));
+  assert.ok(fileContent.includes("gantt-task-status-paused"));
+  assert.ok(fileContent.includes("gantt-task-status-blocked"));
+  assert.ok(fileContent.includes("gantt-task-status-done"));
+  assert.ok(fileContent.includes("gantt-task-status-reopened"));
+  assert.ok(fileContent.includes("gantt-status-legend"));
+});
+
+registerCheck("Véhicules", "Véhicule multi-dossiers correctement agrégé", () => {
+  const d1 = getMockDossier({ id: "D1", vehiculeImmatriculation: "IMMAT_X", statut: DossierStatus.LIVRE });
+  const d2 = getMockDossier({
+    id: "D2",
+    vehiculeImmatriculation: "IMMAT_X",
+    statut: DossierStatus.EN_TRAVAUX,
+    ordresReparation: [
+      { id: "task_01", designation: "Vidange", tempsEstime: 1, tempsPasse: 0, status: "in_progress" }
+    ]
+  });
+
+  const status = getVehicleAggregatedStatus([d1, d2]);
+  assert.equal(status, "En cours");
+});
+
+registerCheck("Véhicules", "Recherche véhicule/dossier opérationnelle", () => {
+  const d1 = getMockDossier({ id: "D1", clientNom: "Alice", vehiculeImmatriculation: "IMMAT_Y" });
+  const d2 = getMockDossier({ id: "D2", clientNom: "Bob", vehiculeImmatriculation: "IMMAT_Z" });
+
+  const results = searchVehiclesAndDossiers([d1, d2], "Alice");
+  assert.equal(results.length, 1);
+  assert.equal(results[0].vehiculeImmatriculation, "IMMAT_Y");
+});
+
+registerCheck("Véhicules", "Ancien dossier livré ne masque pas dossier actif", () => {
+  const dOld = getMockDossier({ id: "D_OLD", vehiculeImmatriculation: "IMMAT_W", statut: DossierStatus.LIVRE });
+  const dNew = getMockDossier({ id: "D_NEW", vehiculeImmatriculation: "IMMAT_W", statut: DossierStatus.BLOQUE });
+
+  const status = getVehicleAggregatedStatus([dOld, dNew]);
+  assert.equal(status, "Bloqué");
+});
+
+// -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
 console.log("Démarrage de l'agent QA...");
@@ -495,7 +547,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 5D - Planning Intelligent & Agent QA)
+- **Version** : v1.1.0 (Lot 5E - Statut Planning & Recherche Véhicule)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

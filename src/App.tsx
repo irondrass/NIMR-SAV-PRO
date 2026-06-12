@@ -54,6 +54,7 @@ import { STORAGE_KEYS } from "./storage-keys";
 
 // Views
 import DirectorDashboard from "./components/DirectorDashboard";
+import VehicleSearchView from "./components/VehicleSearchView";
 import GuidedReception from "./components/GuidedReception";
 import DossierDetail from "./components/DossierDetail";
 import WorkshopPlanning from "./components/WorkshopPlanning";
@@ -164,6 +165,7 @@ export default function App() {
   const [globalSearchTerm, setGlobalSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("Tous");
   const [priorityFilter, setPriorityFilter] = useState<string>("Toutes");
+  const [dossierViewMode, setDossierViewMode] = useState<"standard" | "vehicles">("standard");
   const currentUser = currentSession ? users.find(user => user.id === currentSession.userId) ?? null : null;
   const activeRole = currentUser?.role ?? currentSession?.role ?? UserRole.LECTURE_SEULE;
 
@@ -660,101 +662,136 @@ export default function App() {
 
               {activeTab === "dossiers-liste" && (
                 <div className="space-y-4">
-                  {/* Filter header bar */}
-                  <div className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap gap-2.5 items-center justify-between shadow-sm">
-                    <div>
-                      <h3 className="text-sm font-extrabold tracking-tight uppercase font-display text-slate-900">Tous les Dossiers Actifs SAV ({filteredDossiers.length})</h3>
-                      <p className="text-slate-400 text-xs text-left">Fiches d'intervention et réparations d'assurance, garantie et mécanique</p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <select
-                        className="p-1.5 px-3 bg-slate-50 border border-slate-200 rounded-md font-semibold text-zinc-800 focus:outline-none focus:border-blue-500"
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                      >
-                        <option value="Tous">Tous les statuts</option>
-                        {Object.values(DossierStatus).map(st => (
-                          <option key={st} value={st}>{st}</option>
-                        ))}
-                      </select>
-
-                      <select
-                        className="p-1.5 px-3 bg-slate-50 border border-slate-200 rounded-md font-semibold text-zinc-800 focus:outline-none focus:border-blue-500"
-                        value={priorityFilter}
-                        onChange={(e) => setPriorityFilter(e.target.value)}
-                      >
-                        <option value="Toutes">Toutes les priorités</option>
-                        {Object.values(DossierPriority).map(pr => (
-                          <option key={pr} value={pr}>{pr}</option>
-                        ))}
-                      </select>
-                    </div>
+                  {/* View Mode Toggle Sub-navigation */}
+                  <div className="flex border-b border-gray-200 bg-white p-2.5 rounded-lg shadow-sm gap-2">
+                    <button
+                      onClick={() => setDossierViewMode("standard")}
+                      data-testid="dossier-mode-standard"
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        dossierViewMode === "standard"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+                      }`}
+                    >
+                      Liste simple des dossiers
+                    </button>
+                    <button
+                      onClick={() => setDossierViewMode("vehicles")}
+                      data-testid="dossier-mode-vehicles"
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        dossierViewMode === "vehicles"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+                      }`}
+                    >
+                      Recherche par véhicule
+                    </button>
                   </div>
 
-                  {/* Rendering standard table of dossiers */}
-                  <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
-                    {filteredDossiers.length === 0 ? (
-                      <div className="text-center py-10 space-y-2 text-xs text-slate-400">
-                        <Inbox className="w-8 h-8 text-slate-300 mx-auto" />
-                        <span>Aucun dossier ne correspond à vos options de filtres actifs.</span>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto min-w-full">
-                        <table className="w-full text-left border-collapse text-xs font-semibold">
-                          <thead>
-                            <tr className="border-b border-gray-200 uppercase font-bold text-[9px] text-slate-400 bg-slate-50/60 p-2 tracking-wider font-display">
-                              <th className="py-2.5 px-4">Dossier</th>
-                              <th className="py-2.5 px-4">Client & Immatriculation (TU)</th>
-                              <th className="py-2.5 px-4">Type</th>
-                              <th className="py-2.5 px-4 font-bold">Priorité</th>
-                              <th className="py-2.5 px-4">Statut SAV</th>
-                              <th className="py-2.5 px-4 text-right">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {filteredDossiers.map(doss => (
-                              <tr 
-                                key={doss.id}
-                                className="hover:bg-slate-50/40 cursor-pointer transition"
-                                onClick={() => setSelectedDossierId(doss.id)}
-                              >
-                                <td className="py-3 px-4 font-mono font-bold text-slate-900">{doss.id}</td>
-                                <td className="py-3 px-4 space-y-1">
-                                  <div className="font-bold text-slate-800 leading-none font-display text-xs">
-                                    {doss.clientNom}
-                                  </div>
-                                  <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-                                    <span>{doss.vehiculeMarque} {doss.vehiculeModele}</span>
-                                    <span>•</span>
-                                    <span>{doss.vehiculeImmatriculation}</span>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-4 uppercase text-[10px] text-zinc-500 font-mono">{doss.typeDossier}</td>
-                                <td className="py-3 px-4">
-                                  <PriorityBadge priority={doss.priorite} />
-                                </td>
-                                <td className="py-3 px-4">
-                                  <StatusBadge status={doss.statut} />
-                                </td>
-                                <td className="py-3 px-4 text-right">
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDossierId(doss.id);
-                                    }}
-                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-md font-bold text-[10px] hover:bg-blue-700 hover:scale-105 active:scale-95 transition duration-150 cursor-pointer"
-                                  >
-                                    Fiche complète
-                                  </button>
-                                </td>
-                              </tr>
+                  {dossierViewMode === "standard" ? (
+                    <>
+                      {/* Filter header bar */}
+                      <div className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap gap-2.5 items-center justify-between shadow-sm">
+                        <div>
+                          <h3 className="text-sm font-extrabold tracking-tight uppercase font-display text-slate-900">Tous les Dossiers Actifs SAV ({filteredDossiers.length})</h3>
+                          <p className="text-slate-400 text-xs text-left">Fiches d'intervention et réparations d'assurance, garantie et mécanique</p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <select
+                            className="p-1.5 px-3 bg-slate-50 border border-slate-200 rounded-md font-semibold text-zinc-800 focus:outline-none focus:border-blue-500"
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                          >
+                            <option value="Tous">Tous les statuts</option>
+                            {Object.values(DossierStatus).map(st => (
+                              <option key={st} value={st}>{st}</option>
                             ))}
-                          </tbody>
-                        </table>
+                          </select>
+
+                          <select
+                            className="p-1.5 px-3 bg-slate-50 border border-slate-200 rounded-md font-semibold text-zinc-800 focus:outline-none focus:border-blue-500"
+                            value={priorityFilter}
+                            onChange={(e) => setPriorityFilter(e.target.value)}
+                          >
+                            <option value="Toutes">Toutes les priorités</option>
+                            {Object.values(DossierPriority).map(pr => (
+                              <option key={pr} value={pr}>{pr}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
-                    )}
-                  </div>
+
+                      {/* Rendering standard table of dossiers */}
+                      <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+                        {filteredDossiers.length === 0 ? (
+                          <div className="text-center py-10 space-y-2 text-xs text-slate-400">
+                            <Inbox className="w-8 h-8 text-slate-300 mx-auto" />
+                            <span>Aucun dossier ne correspond à vos options de filtres actifs.</span>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto min-w-full">
+                            <table className="w-full text-left border-collapse text-xs font-semibold">
+                              <thead>
+                                <tr className="border-b border-gray-200 uppercase font-bold text-[9px] text-slate-400 bg-slate-50/60 p-2 tracking-wider font-display">
+                                  <th className="py-2.5 px-4">Dossier</th>
+                                  <th className="py-2.5 px-4">Client & Immatriculation (TU)</th>
+                                  <th className="py-2.5 px-4">Type</th>
+                                  <th className="py-2.5 px-4 font-bold">Priorité</th>
+                                  <th className="py-2.5 px-4">Statut SAV</th>
+                                  <th className="py-2.5 px-4 text-right">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {filteredDossiers.map(doss => (
+                                  <tr
+                                    key={doss.id}
+                                    className="hover:bg-slate-50/40 cursor-pointer transition"
+                                    onClick={() => setSelectedDossierId(doss.id)}
+                                  >
+                                    <td className="py-3 px-4 font-mono font-bold text-slate-900">{doss.id}</td>
+                                    <td className="py-3 px-4 space-y-1">
+                                      <div className="font-bold text-slate-800 leading-none font-display text-xs">
+                                        {doss.clientNom}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                                        <span>{doss.vehiculeMarque} {doss.vehiculeModele}</span>
+                                        <span>•</span>
+                                        <span>{doss.vehiculeImmatriculation}</span>
+                                      </div>
+                                    </td>
+                                    <td className="py-3 px-4 uppercase text-[10px] text-zinc-500 font-mono">{doss.typeDossier}</td>
+                                    <td className="py-3 px-4">
+                                      <PriorityBadge priority={doss.priorite} />
+                                    </td>
+                                    <td className="py-3 px-4">
+                                      <StatusBadge status={doss.statut} />
+                                    </td>
+                                    <td className="py-3 px-4 text-right">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedDossierId(doss.id);
+                                        }}
+                                        className="px-3 py-1.5 bg-blue-600 text-white rounded-md font-bold text-[10px] hover:bg-blue-700 hover:scale-105 active:scale-95 transition duration-150 cursor-pointer"
+                                      >
+                                        Fiche complète
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <VehicleSearchView
+                      dossiers={dossiers}
+                      onSelectDossier={(id) => setSelectedDossierId(id)}
+                    />
+                  )}
                 </div>
               )}
 

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, RepairOrderStatus } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -34,6 +34,30 @@ import {
   Save 
 } from "lucide-react";
 import { LicencePlate, StatusBadge } from "./UIParts";
+
+const getTaskStatusLabel = (status: RepairOrderStatus) => {
+  switch (status) {
+    case "pending": return "À faire";
+    case "in_progress": return "En cours";
+    case "paused": return "En pause";
+    case "blocked": return "Bloquée";
+    case "done": return "Terminée";
+    case "reopened": return "Réouverte";
+    default: return status;
+  }
+};
+
+const getTaskStatusTestId = (status: RepairOrderStatus) => {
+  switch (status) {
+    case "pending": return "gantt-task-status-pending";
+    case "in_progress": return "gantt-task-status-in-progress";
+    case "paused": return "gantt-task-status-paused";
+    case "blocked": return "gantt-task-status-blocked";
+    case "done": return "gantt-task-status-done";
+    case "reopened": return "gantt-task-status-reopened";
+    default: return "";
+  }
+};
 
 interface WorkshopPlanningProps {
   techniciens: TechnicienResource[];
@@ -72,6 +96,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
 
   // Visual saved feedback indicator
   const [showSavedIndicator, setShowSavedIndicator] = useState(false);
+  const [ganttSearchQuery, setGanttSearchQuery] = useState("");
 
   // Local helper to format Date to YYYY-MM-DD
   const getLocalDateStr = (d: Date) => {
@@ -364,6 +389,16 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
     if (dossier.statut !== DossierStatus.LIVRE && dossier.statut !== DossierStatus.CLOTURE) {
       dossier.ordresReparation.forEach(line => {
         if (line.planningDate === selectedDateStr && line.planningStart && line.planningEnd) {
+          if (ganttSearchQuery.trim()) {
+            const query = ganttSearchQuery.toLowerCase().trim();
+            const matchesImmat = dossier.vehiculeImmatriculation?.toLowerCase().includes(query);
+            const matchesVin = dossier.vehiculeVIN?.toLowerCase().includes(query);
+            const matchesDossier = dossier.id?.toLowerCase().includes(query);
+            const matchesClient = dossier.clientNom?.toLowerCase().includes(query);
+            if (!matchesImmat && !matchesVin && !matchesDossier && !matchesClient) {
+              return;
+            }
+          }
           activePlannedLines.push({ dossier, line });
         }
       });
@@ -772,6 +807,17 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Rechercher immat, VIN, dossier, client..."
+              className="p-2 pl-8 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              value={ganttSearchQuery}
+              onChange={(e) => setGanttSearchQuery(e.target.value)}
+              data-testid="gantt-search-input"
+            />
+            <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+          </div>
           <select
             className="p-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800"
             value={filterZone}
@@ -990,7 +1036,15 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                               }}
                               title={`${dossier.id} - ${line.designation} (${dossier.vehiculeMarque} ${dossier.vehiculeModele}) ${dossier.vehiculeImmatriculation}`}
                             >
-                              <span className="truncate block leading-tight">{dossier.vehiculeModele}</span>
+                              <div className="flex items-center justify-between gap-1 overflow-hidden">
+                                <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
+                                <span
+                                  data-testid={getTaskStatusTestId(line.status)}
+                                  className="px-1 py-0.2 text-[7px] bg-black/25 text-white rounded font-black whitespace-nowrap"
+                                >
+                                  {getTaskStatusLabel(line.status)}
+                                </span>
+                              </div>
                               <span className="truncate block text-[7px] opacity-90 leading-none">{dossier.vehiculeImmatriculation}</span>
                               <span className="truncate block text-[7px] opacity-80 leading-none">
                                 {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
@@ -1143,7 +1197,15 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                           }}
                           title={`${dossier.id} - ${line.designation} (${dossier.vehiculeMarque} ${dossier.vehiculeModele})`}
                         >
-                          <span className="truncate block leading-tight">{dossier.id}</span>
+                          <div className="flex items-center justify-between gap-1 overflow-hidden">
+                            <span className="truncate block leading-tight font-extrabold">{dossier.id}</span>
+                            <span
+                              data-testid={getTaskStatusTestId(line.status)}
+                              className="px-1 py-0.2 text-[7px] bg-black/25 text-white rounded font-black whitespace-nowrap"
+                            >
+                              {getTaskStatusLabel(line.status)}
+                            </span>
+                          </div>
                           <span className="truncate block text-[7px] opacity-80 leading-none">{line.designation}</span>
                         </div>
                       );
@@ -1154,6 +1216,17 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
               </div>
             );
           })}
+        </div>
+
+        {/* Legend */}
+        <div data-testid="gantt-status-legend" className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-4 text-[10px] text-gray-500">
+          <span className="font-bold">Légende statut tâche :</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-blue-500"></span> À faire</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-orange-500"></span> En cours</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-yellow-500"></span> En pause</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-500"></span> Bloquée</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-green-500"></span> Terminée</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-purple-500"></span> Réouverte</span>
         </div>
 
       </div>
