@@ -442,13 +442,27 @@ export const INITIAL_RECLAMATIONS: ReclammationClient[] = [
     dossierId: "NIMR-2026-002",
     clientNom: "Client Démo 002",
     vehiculeNom: "Dongfeng Aeolus Huge - 000 TU 0002",
+    immatriculation: "000 TU 0002",
     motif: "Traces de graisse noire sur le montant en tissu beige intérieur conducteur après contrôle du joint.",
     criticite: "moyenne",
     responsable: "Réceptionnaire Démo (Réceptionnaire)",
     statut: "nouvelle",
     actionCorrective: "Nettoyage à sec professionnel immédiat de la garniture de pavillon.",
+    delaiCible: "2026-06-09T16:00:00Z",
     delaiTraitement: "Aujourd'hui, avant la livraison finale (16:00)",
     dateCreation: "2026-06-09T14:40:00Z",
+    dateDerniereModification: "2026-06-09T14:40:00Z",
+    historiqueActions: [
+      {
+        id: "hist_rec_2026_001_creation",
+        date: "2026-06-09T14:40:00Z",
+        utilisateur: "Réceptionnaire Démo",
+        role: "Réceptionnaire",
+        action: "Création réclamation",
+        nouveauStatut: "nouvelle",
+        commentaire: "Réclamation enregistrée par réceptionnaire.",
+      }
+    ],
     historiqueLogs: ["2026-06-09T14:40:00Z - Réclamation enregistrée par réceptionnaire."]
   },
   {
@@ -456,13 +470,37 @@ export const INITIAL_RECLAMATIONS: ReclammationClient[] = [
     dossierId: "NIMR-2026-001",
     clientNom: "Client Démo 001",
     vehiculeNom: "Forthing T5 EVO - 000 TU 0001",
+    immatriculation: "000 TU 0001",
     motif: "Délai de réponse d'acceptation de devis jugé excessif de la part de l'assurance suite à retard de diagnostic.",
     criticite: "haute",
     responsable: "Responsable Démo SAV (Directeur SAV)",
-    statut: "en_cours",
+    statut: "en_analyse",
     actionCorrective: "Appeler directement le directeur d'agence de l'assurance et lui proposer un véhicule de courtoisie Forthing.",
+    delaiCible: "2026-06-10T15:00:00Z",
     delaiTraitement: "Moins de 24 heures",
     dateCreation: "2026-06-09T15:00:00Z",
+    dateDerniereModification: "2026-06-09T15:05:00Z",
+    historiqueActions: [
+      {
+        id: "hist_rec_2026_002_analyse",
+        date: "2026-06-09T15:05:00Z",
+        utilisateur: "Responsable Démo SAV",
+        role: "Directeur SAV",
+        action: "Statut réclamation: En analyse",
+        ancienStatut: "nouvelle",
+        nouveauStatut: "en_analyse",
+        commentaire: "Directeur SAV prend personnellement le dossier en main.",
+      },
+      {
+        id: "hist_rec_2026_002_creation",
+        date: "2026-06-09T15:00:00Z",
+        utilisateur: "Réceptionnaire Démo",
+        role: "Réceptionnaire",
+        action: "Création réclamation",
+        nouveauStatut: "nouvelle",
+        commentaire: "Réclamation signalée par le client.",
+      }
+    ],
     historiqueLogs: [
       "2026-06-09T15:00:00Z - Réclamation signalée par le client.",
       "2026-06-09T15:05:00Z - Directeur SAV prend personnellement le dossier en main."

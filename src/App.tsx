@@ -651,6 +651,7 @@ export default function App() {
             <DossierDetail 
               dossier={selectedDossier}
               dossiers={dossiers}
+              reclamations={reclamations}
               userRole={activeRole}
               onBack={() => setSelectedDossierId(null)}
               onUpdateDossier={handleUpdateDossier}
@@ -851,9 +852,13 @@ export default function App() {
               {activeTab === "reclamations" && (
                 <ComplaintsView 
                   reclamations={reclamations}
+                  dossiers={dossiers}
                   existingReclamationIds={reclamations.map(r => r.id)}
+                  userRole={activeRole}
+                  currentUserLabel={currentUser.displayName}
                   onAddReclamation={handleAddReclamation}
                   onUpdateReclamation={handleUpdateReclamation}
+                  onSelectDossier={(id) => setSelectedDossierId(id)}
                 />
               )}
 

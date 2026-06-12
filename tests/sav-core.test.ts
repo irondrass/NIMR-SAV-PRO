@@ -1345,5 +1345,6 @@ testLot5DNewPlanningRules();
 
 // Run vehicle status tests
 import "./vehicle-status.test.js";
+import "./complaints-workflow.test.js";
 
 console.log("sav-core tests passed");

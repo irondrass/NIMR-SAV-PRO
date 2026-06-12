@@ -22,6 +22,7 @@ import {
   UserRole,
   WorkshopBay,
 } from "./types";
+import { createComplaint } from "./complaints-workflow";
 
 const DELIVERY_OFFSET_MS = 48 * 3600 * 1000;
 const WORKDAY_START_HOUR = 8;
@@ -86,10 +87,12 @@ export interface ReclamationInput {
   dossierId: string;
   clientNom: string;
   vehiculeNom: string;
+  immatriculation?: string;
   motif: string;
   criticite: ReclammationClient["criticite"];
   responsable: string;
   actionCorrective: string;
+  delaiCible?: string;
 }
 
 export interface WorkshopSlotSuggestionInput {
@@ -250,22 +253,10 @@ export function createReclamationClient(
   existingIds: string[],
   now = new Date()
 ): ReclammationClient {
-  const createdAt = now.toISOString();
-
-  return {
-    id: createSequentialBusinessId("REC", existingIds, now),
-    dossierId: input.dossierId.trim() || "NIMR-GEN",
-    clientNom: input.clientNom.trim(),
-    vehiculeNom: input.vehiculeNom.trim() || "Non spécifié",
-    motif: input.motif.trim(),
-    criticite: input.criticite,
-    responsable: input.responsable.trim() || "Responsable Démo SAV",
-    statut: "nouvelle",
-    actionCorrective: input.actionCorrective.trim() || "À définir suite d'investigation d'atelier",
-    delaiTraitement: "Sous 48 heures",
-    dateCreation: createdAt,
-    historiqueLogs: [`${createdAt} - Réclamation créée.`],
-  };
+  return createComplaint(input, existingIds, {
+    user: "Utilisateur NIMR",
+    role: "Système",
+  }, now);
 }
 
 export function assignTechnicianToDossier(dossier: DossierSAV, techId: string, now = new Date()): DossierSAV {
@@ -1135,8 +1126,8 @@ export function isReclamationClient(value: unknown): value is ReclammationClient
     isString(value.clientNom) &&
     isString(value.vehiculeNom) &&
     isString(value.motif) &&
-    ["moyenne", "haute", "critique"].includes(String(value.criticite)) &&
-    ["nouvelle", "en_cours", "resolue", "classee"].includes(String(value.statut)) &&
+    ["basse", "moyenne", "haute", "critique"].includes(String(value.criticite)) &&
+    ["nouvelle", "en_analyse", "action_corrective", "attente_client", "resolue", "cloturee", "reouverte", "en_cours", "classee"].includes(String(value.statut)) &&
     Array.isArray(value.historiqueLogs)
   );
 }

@@ -175,18 +175,48 @@ export interface DeliveryProtocole {
   clotureInterne: boolean;
 }
 
+export type ComplaintCriticity = "basse" | "moyenne" | "haute" | "critique";
+
+export type ComplaintStatus =
+  | "nouvelle"
+  | "en_analyse"
+  | "action_corrective"
+  | "attente_client"
+  | "resolue"
+  | "cloturee"
+  | "reouverte"
+  | "en_cours"
+  | "classee";
+
+export interface ComplaintHistoryEntry {
+  id: string;
+  date: string;
+  utilisateur: string;
+  role: UserRole | string;
+  action: string;
+  ancienStatut?: ComplaintStatus;
+  nouveauStatut?: ComplaintStatus;
+  commentaire?: string;
+  ancienResponsable?: string;
+  nouveauResponsable?: string;
+}
+
 export interface ReclammationClient {
   id: string;
   dossierId: string;
   clientNom: string;
   vehiculeNom: string;
+  immatriculation?: string;
   motif: string;
-  criticite: "moyenne" | "haute" | "critique";
+  criticite: ComplaintCriticity;
   responsable: string;
-  statut: "nouvelle" | "en_cours" | "resolue" | "classee";
+  statut: ComplaintStatus;
   actionCorrective: string;
+  delaiCible?: string;
   delaiTraitement: string;
   dateCreation: string;
+  dateDerniereModification?: string;
+  historiqueActions?: ComplaintHistoryEntry[];
   historiqueLogs: string[];
 }
 

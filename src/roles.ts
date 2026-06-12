@@ -45,6 +45,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "atelier-kanban",
     "chef-atelier",
     "dossiers-liste",
+    "reclamations",
   ],
   [UserRole.TECHNICIEN]: [
     "tech-view",
@@ -52,13 +53,16 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
   [UserRole.CONTROLE_QUALITE]: [
     "atelier-kanban",
     "dossiers-liste",
+    "reclamations",
   ],
   [UserRole.LIVRAISON]: [
     "dossiers-liste",
+    "reclamations",
   ],
   [UserRole.LECTURE_SEULE]: [
     "dashboard",
     "dossiers-liste",
+    "reclamations",
   ],
 };
 

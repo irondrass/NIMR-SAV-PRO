@@ -14,6 +14,7 @@ import {
   RepairOrderLine,
   ComplementTravail,
   AccordSuivi,
+  ReclammationClient,
   UserRole,
   PHOTO_CATEGORIES,
   PhotoCategory
@@ -37,6 +38,7 @@ import {
   startRepairOrder,
   submitQualityControl
 } from "../sav-core";
+import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
 import { 
   ArrowLeft, 
@@ -65,6 +67,7 @@ import { StatusBadge, PriorityBadge, LicencePlate, FuelIndicator, MiniProgress, 
 interface DossierDetailProps {
   dossier: DossierSAV;
   dossiers: DossierSAV[];
+  reclamations: ReclammationClient[];
   userRole: UserRole;
   onBack: () => void;
   onUpdateDossier: (updated: DossierSAV) => void;
@@ -74,6 +77,7 @@ interface DossierDetailProps {
 export default function DossierDetail({ 
   dossier, 
   dossiers,
+  reclamations,
   userRole, 
   onBack, 
   onUpdateDossier,
@@ -361,6 +365,9 @@ export default function DossierDetail({
   const canValidateQuality = perm.canValidateQC(userRole);
   const canDeliverVehicle = perm.canDeliver(userRole);
   const deliveryGate = canDeliverDossier(dossier);
+  const linkedComplaints = reclamations
+    .map(normalizeComplaint)
+    .filter(reclamation => reclamation.dossierId === dossier.id);
 
   return (
     <div data-testid="dossier-detail-view" className="space-y-6">
@@ -520,6 +527,34 @@ export default function DossierDetail({
                     <div>
                       <span className="font-bold">Facteur Bloquant Atelier :</span>
                       <p className="font-medium mt-0.5">{dossier.bloqueRaison}</p>
+                    </div>
+                  </div>
+                )}
+
+                {linkedComplaints.length > 0 && (
+                  <div data-testid="dossier-linked-complaints" className="p-3 bg-red-50/50 border border-red-100 rounded-lg space-y-2 text-xs">
+                    <div className="flex items-center gap-2 font-black uppercase text-red-700">
+                      <ShieldAlert className="w-4 h-4" />
+                      Réclamations liées au dossier
+                    </div>
+                    <div className="space-y-2">
+                      {linkedComplaints.map(reclamation => {
+                        const status = normalizeComplaintStatus(reclamation.statut);
+                        return (
+                          <div key={reclamation.id} className="rounded border border-red-100 bg-white p-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono font-black text-slate-900">{reclamation.id}</span>
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-black uppercase text-slate-700">
+                                {COMPLAINT_STATUS_LABELS[status]}
+                              </span>
+                              <span className="rounded-full border border-red-100 bg-red-50 px-2 py-0.5 text-[9px] font-black uppercase text-red-700">
+                                {reclamation.criticite}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[11px] font-semibold text-slate-600">{reclamation.motif}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

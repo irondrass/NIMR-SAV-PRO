@@ -23,11 +23,22 @@ import {
   getVehicleKey,
 } from "../src/vehicle-status.js";
 import {
+  addComplaintAction,
+  canEditComplaint,
+  changeComplaintStatus,
+  closeComplaint,
+  isComplaintLinkedToReadyDelivery,
+  isComplaintOpen,
+  isComplaintOverdue,
+  normalizeComplaint,
+} from "../src/complaints-workflow";
+import {
   AtelierZone,
   DossierPriority,
   DossierSAV,
   DossierStatus,
   InterventionType,
+  ReclammationClient,
   TechnicienResource,
   UserRole,
   WorkshopBay,
@@ -97,6 +108,26 @@ const getMockDossier = (overrides: Partial<DossierSAV> = {}): DossierSAV => ({
   accords: [],
   checklistQC: { essaiEffectue: false, defautRepare: false, aucunVoyantAllume: false, niveauxVerifies: false, serrageSecurite: false, propreteVehicule: false, documentsPrets: false, photosApresOk: false, validationGlobale: "en_attente" },
   livraison: { controleQualiteOk: false, clientInforme: false, dateLivraisonPrevue: "", remarquesLivraison: "", confirmationReceptionClient: false, clotureInterne: false },
+  ...overrides,
+});
+
+const getMockComplaint = (overrides: Partial<ReclammationClient> = {}): ReclammationClient => ({
+  id: "REC-QA-001",
+  dossierId: "NIMR-QA-001",
+  clientNom: "Client Réclamation QA",
+  vehiculeNom: "Dongfeng S50",
+  immatriculation: "123 TU 456",
+  motif: "Retard traitement réclamation",
+  criticite: "haute",
+  responsable: "Responsable QA",
+  statut: "nouvelle",
+  actionCorrective: "Analyse initiale",
+  delaiCible: "2026-06-12T12:00:00Z",
+  delaiTraitement: "2026-06-12T12:00:00Z",
+  dateCreation: "2026-06-12T08:00:00Z",
+  dateDerniereModification: "2026-06-12T08:00:00Z",
+  historiqueActions: [],
+  historiqueLogs: [],
   ...overrides,
 });
 
@@ -600,6 +631,46 @@ registerCheck("Lot 5F-1", "Recherche véhicule garde l'historique mais distingue
 });
 
 // -----------------------------------------------------------------
+// Lot 5F-2 Complaint Workflow Invariants
+// -----------------------------------------------------------------
+
+registerCheck("Lot 5F-2", "Réclamation critique ouverte détectée", () => {
+  const complaint = getMockComplaint({ criticite: "critique", statut: "action_corrective" });
+  assert.equal(complaint.criticite, "critique");
+  assert.equal(isComplaintOpen(complaint), true);
+});
+
+registerCheck("Lot 5F-2", "Réclamation en retard détectée", () => {
+  const complaint = getMockComplaint({ delaiCible: "2026-06-12T08:00:00Z", statut: "en_analyse" });
+  assert.equal(isComplaintOverdue(complaint, new Date("2026-06-12T10:00:00Z")), true);
+});
+
+registerCheck("Lot 5F-2", "Lecture seule ne peut pas modifier une réclamation", () => {
+  assert.equal(canEditComplaint(UserRole.LECTURE_SEULE, getMockComplaint()), false);
+});
+
+registerCheck("Lot 5F-2", "Chaque changement statut crée historique", () => {
+  const first = changeComplaintStatus(getMockComplaint(), "en_analyse", { user: "QA", role: UserRole.DIRECTEUR_SAV }, "Analyse", new Date("2026-06-12T09:00:00Z"));
+  const second = changeComplaintStatus(first, "action_corrective", { user: "QA", role: UserRole.DIRECTEUR_SAV }, "Action", new Date("2026-06-12T09:30:00Z"));
+  const normalized = normalizeComplaint(second);
+  assert.equal(normalized.historiqueActions?.length, 2);
+  assert.equal(normalized.historiqueActions?.[0].nouveauStatut, "action_corrective");
+});
+
+registerCheck("Lot 5F-2", "Réclamation clôturée non modifiable sauf réouverture autorisée", () => {
+  const closed = closeComplaint(getMockComplaint({ statut: "resolue" }), { user: "QA", role: UserRole.DIRECTEUR_SAV }, "Clôture", new Date("2026-06-12T10:00:00Z"));
+  assert.equal(canEditComplaint(UserRole.DIRECTEUR_SAV, closed), false);
+  assert.throws(() => addComplaintAction(closed, "Action interdite"), /clôturée/i);
+});
+
+registerCheck("Lot 5F-2", "Réclamation liée à dossier conserve le lien", () => {
+  const dossier = getMockDossier({ id: "NIMR-QA-LINK", statut: DossierStatus.PRET_A_LIVRER });
+  const complaint = getMockComplaint({ dossierId: dossier.id });
+  assert.equal(complaint.dossierId, dossier.id);
+  assert.equal(isComplaintLinkedToReadyDelivery(complaint, [dossier]), true);
+});
+
+// -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
 console.log("Démarrage de l'agent QA...");
@@ -622,7 +693,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 5F-1 - Nettoyage opérationnel Technicien & Dossiers actifs)
+- **Version** : v1.1.0 (Lot 5F-2 - Workflow Réclamations SAV)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 
