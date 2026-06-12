@@ -7,6 +7,7 @@ import React from "react";
 import { APP_NAME, APP_VERSION_LABEL } from "../app-identity";
 import { UserRole } from "../types";
 import { SlidersHorizontal, Download, Upload, ShieldCheck, Clock, RefreshCcw, HardDriveUpload } from "lucide-react";
+import * as perm from "../permissions";
 
 interface SettingsViewProps {
   onExportData: () => void;
@@ -64,29 +65,33 @@ export default function SettingsView({
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button 
-              onClick={onExportData}
-              data-testid="export-json"
-              className="p-3 bg-zinc-900 hover:bg-zinc-950 text-white font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              Exporter Base de données (JSON / CSV)
-            </button>
+            {perm.canExportData(activeRole) && (
+              <button 
+                onClick={onExportData}
+                data-testid="export-json"
+                className="p-3 bg-zinc-900 hover:bg-zinc-950 text-white font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                Exporter Base de données (JSON / CSV)
+              </button>
+            )}
 
-            <label 
-              data-testid="import-json"
-              className="p-3 bg-blue-50/70 border border-blue-200    hover:bg-blue-100 text-blue-800  font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer text-center"
-            >
-              <Upload className="w-4 h-4" />
-              Restaurer Base / Importer
-              <input 
-                type="file" 
-                accept=".json" 
-                data-testid="import-json-input"
-                onChange={onImportData} 
-                className="hidden" 
-              />
-            </label>
+            {perm.canImportData(activeRole) && (
+              <label 
+                data-testid="import-json"
+                className="p-3 bg-blue-50/70 border border-blue-200    hover:bg-blue-100 text-blue-800  font-extrabold rounded-lg hover:scale-105 transition duration-150 flex items-center justify-center gap-2 cursor-pointer text-center"
+              >
+                <Upload className="w-4 h-4" />
+                Restaurer Base / Importer
+                <input 
+                  type="file" 
+                  accept=".json" 
+                  data-testid="import-json-input"
+                  onChange={onImportData} 
+                  className="hidden" 
+                />
+              </label>
+            )}
           </div>
 
           {importSuccessMessage && (

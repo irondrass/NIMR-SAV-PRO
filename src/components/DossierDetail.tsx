@@ -18,6 +18,7 @@ import {
   PHOTO_CATEGORIES,
   PhotoCategory
 } from "../types";
+import * as perm from "../permissions";
 import {
   addPhotoToDossier,
   blockRepairOrder,
@@ -354,11 +355,11 @@ export default function DossierDetail({
     setModalTargetLineId(null);
   };
 
-  const canManageDossier = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole);
-  const canUpdateWorkOrders = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER, UserRole.TECHNICIEN].includes(userRole);
-  const canHandleApprovals = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE].includes(userRole);
-  const canValidateQuality = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER, UserRole.CONTROLE_QUALITE].includes(userRole);
-  const canDeliverVehicle = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE, UserRole.LIVRAISON].includes(userRole);
+  const canManageDossier = perm.canPlanWorkshop(userRole);
+  const canUpdateWorkOrders = perm.canStartTask(userRole);
+  const canHandleApprovals = perm.canCreateDossier(userRole);
+  const canValidateQuality = perm.canValidateQC(userRole);
+  const canDeliverVehicle = perm.canDeliver(userRole);
   const deliveryGate = canDeliverDossier(dossier);
 
   return (

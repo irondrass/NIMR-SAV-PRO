@@ -55,6 +55,7 @@ export default function LoginView({ onLogin }: LoginViewProps) {
                 value={username}
                 onChange={event => setUsername(event.target.value)}
                 autoComplete="username"
+                autoFocus
                 className="w-full rounded-md border border-slate-200 bg-white px-4 py-3 text-base font-bold outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 placeholder="directeur"
               />
@@ -75,7 +76,11 @@ export default function LoginView({ onLogin }: LoginViewProps) {
             </label>
 
             {error ? (
-              <div data-testid="login-error" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">
+              <div 
+                data-testid="login-error" 
+                aria-live="polite"
+                className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700"
+              >
                 {error}
               </div>
             ) : null}
@@ -84,6 +89,7 @@ export default function LoginView({ onLogin }: LoginViewProps) {
               type="submit"
               data-testid="login-submit"
               disabled={loading}
+              aria-label="Se connecter à l'application"
               className="flex w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-black uppercase tracking-wide text-white transition hover:bg-blue-700 disabled:bg-slate-300"
             >
               {loading ? <LockKeyhole className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}

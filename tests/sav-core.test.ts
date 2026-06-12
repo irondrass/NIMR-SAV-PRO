@@ -16,6 +16,7 @@ import {
   setUserActive,
   updateUserProfile,
   verifyPin,
+  resetLoginAttempts,
 } from "../src/auth";
 import {
   addPhotoToDossier,
@@ -50,6 +51,7 @@ import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-
 import { buildDirectorDashboardKpis } from "../src/dashboard-kpis";
 import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TECHNICIENS } from "../src/data";
 import { canAccessTab, canChangeRole, getDefaultTabForRole, normalizeTabForRole, ROLE_TABS } from "../src/roles";
+import * as perm from "../src/permissions";
 import { LOCAL_STORAGE_PREFIX, STORAGE_KEYS } from "../src/storage-keys";
 import { DossierPriority, DossierSAV, DossierStatus, InterventionType, RepairOrderLine, TechnicienResource, UserRole, WorkshopBay } from "../src/types";
 
@@ -976,7 +978,7 @@ async function testLocalUsersAndSessions() {
   if (!directorLogin.ok) throw new Error("Director login should succeed");
   assert.equal(directorLogin.user.displayName, "Directeur Démo SAV");
   assert.equal(directorLogin.session.role, UserRole.DIRECTEUR_SAV);
-  assert.equal(isSessionValid(directorLogin.session, directorLogin.users), true);
+  assert.equal(isSessionValid(directorLogin.session, directorLogin.users, now), true);
 
   const wrongPin = await loginUser(users, "directeur", "9999", now);
   assert.equal(wrongPin.ok, false);
@@ -988,8 +990,37 @@ async function testLocalUsersAndSessions() {
   if (!disabledLogin.ok) assert.equal(disabledLogin.reason, "disabled-user");
 
   const session = createSession(directorLogin.user, now);
-  assert.equal(isSessionValid(session, directorLogin.users), true);
-  assert.equal(isSessionValid(null, directorLogin.users), false);
+  assert.equal(isSessionValid(session, directorLogin.users, now), true);
+  assert.equal(isSessionValid(null, directorLogin.users, now), false);
+
+  // TTL expiration tests
+  assert.equal(isSessionValid(session, directorLogin.users, new Date(now.getTime() + 7 * 60 * 60 * 1000)), true); // 7h
+  assert.equal(isSessionValid(session, directorLogin.users, new Date(now.getTime() + 9 * 60 * 60 * 1000)), false); // 9h
+
+  // Rate limiting tests
+  // Reset memory storage before tests to ensure isolation
+  resetLoginAttempts();
+  const cleanUsers = await createDefaultUsers(now);
+  // Fail 4 times
+  for (let i = 0; i < 4; i++) {
+    const res = await loginUser(cleanUsers, "directeur", "wrong_pin", now);
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, "invalid-credentials");
+  }
+  // 5th failure -> locked out
+  const lockoutRes = await loginUser(cleanUsers, "directeur", "wrong_pin", now);
+  assert.equal(lockoutRes.ok, false);
+  assert.equal(lockoutRes.reason, "locked-out");
+
+  // Even correct PIN is locked out
+  const correctLocked = await loginUser(cleanUsers, "directeur", "0000", now);
+  assert.equal(correctLocked.ok, false);
+  assert.equal(correctLocked.reason, "locked-out");
+
+  // Lockout expires after 5 minutes
+  const afterLockoutNow = new Date(now.getTime() + 6 * 60 * 1000); // 6 mins
+  const correctUnlocked = await loginUser(cleanUsers, "directeur", "0000", afterLockoutNow);
+  assert.equal(correctUnlocked.ok, true);
 
   assert.equal(canManageUsers(UserRole.DIRECTEUR_SAV), true);
   assert.equal(canManageUsers(UserRole.RECEPTIONNAIRE), false);
@@ -1043,6 +1074,79 @@ async function testLocalUsersAndSessions() {
   }
 }
 
+function testCentralizedPermissions() {
+  // canManageUsers
+  assert.equal(perm.canManageUsers(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canManageUsers(UserRole.CHEF_ATELIER), false);
+  assert.equal(perm.canManageUsers(UserRole.RECEPTIONNAIRE), false);
+
+  // canCreateDossier
+  assert.equal(perm.canCreateDossier(UserRole.RECEPTIONNAIRE), true);
+  assert.equal(perm.canCreateDossier(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canCreateDossier(UserRole.CHEF_ATELIER), false);
+
+  // canEditDossier
+  assert.equal(perm.canEditDossier(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canEditDossier(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canEditDossier(UserRole.RECEPTIONNAIRE), true);
+  assert.equal(perm.canEditDossier(UserRole.LIVRAISON), true);
+  assert.equal(perm.canEditDossier(UserRole.TECHNICIEN), false);
+
+  // canForceStatus
+  assert.equal(perm.canForceStatus(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canForceStatus(UserRole.CHEF_ATELIER), false);
+
+  // canPlanWorkshop
+  assert.equal(perm.canPlanWorkshop(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canPlanWorkshop(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canPlanWorkshop(UserRole.TECHNICIEN), false);
+
+  // canStartTask
+  assert.equal(perm.canStartTask(UserRole.TECHNICIEN), true);
+  assert.equal(perm.canStartTask(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canStartTask(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canStartTask(UserRole.LECTURE_SEULE), false);
+
+  // canBlockTask
+  assert.equal(perm.canBlockTask(UserRole.TECHNICIEN), true);
+  assert.equal(perm.canBlockTask(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canBlockTask(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canBlockTask(UserRole.LECTURE_SEULE), false);
+
+  // canReleaseBlock
+  assert.equal(perm.canReleaseBlock(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canReleaseBlock(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canReleaseBlock(UserRole.TECHNICIEN), false);
+
+  // canReopenTask
+  assert.equal(perm.canReopenTask(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canReopenTask(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canReopenTask(UserRole.TECHNICIEN), false);
+
+  // canValidateQC
+  assert.equal(perm.canValidateQC(UserRole.CONTROLE_QUALITE), true);
+  assert.equal(perm.canValidateQC(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canValidateQC(UserRole.CHEF_ATELIER), true);
+
+  // canDeliver
+  assert.equal(perm.canDeliver(UserRole.LIVRAISON), true);
+  assert.equal(perm.canDeliver(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canDeliver(UserRole.RECEPTIONNAIRE), true);
+
+  // canImportData
+  assert.equal(perm.canImportData(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canImportData(UserRole.CHEF_ATELIER), false);
+
+  // canExportData
+  assert.equal(perm.canExportData(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canExportData(UserRole.CHEF_ATELIER), true);
+  assert.equal(perm.canExportData(UserRole.LIVRAISON), false);
+
+  // isReadOnlyRole
+  assert.equal(perm.isReadOnlyRole(UserRole.LECTURE_SEULE), true);
+  assert.equal(perm.isReadOnlyRole(UserRole.DIRECTEUR_SAV), false);
+}
+
 testReceptionCreation();
 testTechnicianAssignment();
 testQualityControl();
@@ -1067,5 +1171,6 @@ testApplicationIdentityVersion();
 testAdvancedPlanningHelpers();
 testDirectorDashboardKpis();
 await testLocalUsersAndSessions();
+testCentralizedPermissions();
 
 console.log("sav-core tests passed");

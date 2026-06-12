@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   UserRole, 
   DossierStatus, 
@@ -23,7 +23,6 @@ import {
   INITIAL_ACTIVITE_LOGS
 } from "./data";
 import {
-  canManageUsers,
   createUser,
   ensureDefaultUsers,
   isSessionValid,
@@ -35,7 +34,9 @@ import {
   updateUserProfile,
   CreateUserInput,
   LoginResult,
+  touchSession,
 } from "./auth";
+import * as perm from "./permissions";
 import {
   createBackupPayload,
   createRuntimeId,
@@ -48,7 +49,7 @@ import {
   validateBackupPayload
 } from "./sav-core";
 import { APP_NAME, APP_VERSION } from "./app-identity";
-import { canAccessTab, getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
+import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
 
 // Views
@@ -63,6 +64,7 @@ import PerformanceSAV from "./components/PerformanceSAV";
 import SettingsView from "./components/SettingsView";
 import LoginView from "./components/LoginView";
 import UserManagementView from "./components/UserManagementView";
+import { KanbanBoard } from "./components/KanbanBoard";
 import { StatusBadge, PriorityBadge } from "./components/UIParts";
 
 // Icons
@@ -78,8 +80,6 @@ import {
   Wrench, 
   ShieldAlert, 
   Volume2, 
-  Moon, 
-  Sun,
   Search,
   Bell,
   CheckCircle,
@@ -131,13 +131,18 @@ function loadStoredSession(): UserSession | null {
 }
 
 export default function App() {
-  // Theme state
-  const [darkMode, setDarkMode] = useState<boolean>(false);
-
   // Local internal authentication state
   const [authReady, setAuthReady] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [currentSession, setCurrentSession] = useState<UserSession | null>(null);
+
+  const handleTouchSession = () => {
+    if (currentSession) {
+      const touched = touchSession(currentSession);
+      setCurrentSession(touched);
+      writeLocalStorageJSON(STORAGE_KEYS.session, touched);
+    }
+  };
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
@@ -178,7 +183,9 @@ export default function App() {
       setUsers(nextUsers);
       writeLocalStorageJSON(STORAGE_KEYS.users, nextUsers);
       if (isSessionValid(storedSession, nextUsers)) {
-        setCurrentSession(storedSession);
+        const touched = touchSession(storedSession!);
+        setCurrentSession(touched);
+        writeLocalStorageJSON(STORAGE_KEYS.session, touched);
         setActiveTab(getDefaultTabForRole(storedSession!.role));
       } else {
         localStorage.removeItem(STORAGE_KEYS.session);
@@ -193,7 +200,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!canAccessTab(activeRole, activeTab)) {
+    if (!perm.canAccessTab(activeRole, activeTab)) {
       setSelectedDossierId(null);
       setActiveTab(getDefaultTabForRole(activeRole));
     }
@@ -212,6 +219,7 @@ export default function App() {
   };
 
   const handleUpdateDossier = (updatedDossier: DossierSAV) => {
+    handleTouchSession();
     // Generate an automatic log entry if status has updated
     const original = dossiers.find(d => d.id === updatedDossier.id);
     if (original && original.statut !== updatedDossier.statut) {
@@ -234,6 +242,7 @@ export default function App() {
   };
 
   const handleAddDossier = (newDossier: DossierSAV) => {
+    handleTouchSession();
     const nextDossiers = [newDossier, ...dossiers];
     
     // Log creation
@@ -253,12 +262,14 @@ export default function App() {
   };
 
   const handleAddReclamation = (newRec: ReclammationClient) => {
+    handleTouchSession();
     const nextRecs = [newRec, ...reclamations];
     setReclamations(nextRecs);
     writeLocalStorageJSON(STORAGE_KEYS.reclamations, nextRecs);
   };
 
   const handleUpdateReclamation = (updatedRec: ReclammationClient) => {
+    handleTouchSession();
     const nextRecs = reclamations.map(r => r.id === updatedRec.id ? updatedRec : r);
     setReclamations(nextRecs);
     writeLocalStorageJSON(STORAGE_KEYS.reclamations, nextRecs);
@@ -266,6 +277,7 @@ export default function App() {
 
   // State Import/Export logic
   const handleExportDataJSON = () => {
+    handleTouchSession();
     const fullBackup = createBackupPayload(dossiers, reclamations, techList, activityLogs);
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullBackup, null, 2));
     const downloadAnchor = document.createElement("a");
@@ -277,6 +289,7 @@ export default function App() {
   };
 
   const handleImportDataJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleTouchSession();
     setImportSuccessMessage(null);
     setImportErrorMessage(null);
     const reader = new FileReader();
@@ -326,18 +339,26 @@ export default function App() {
   };
 
   // Filter application search indexing
-  const filteredDossiers = dossiers.filter(d => {
-    const textToSearch = `${d.id} ${d.clientNom} ${d.vehiculeImmatriculation} ${d.vehiculeMarque} ${d.vehiculeModele} ${d.clientTelephone}`.toLowerCase();
-    const matchesSearch = textToSearch.includes(globalSearchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "Tous" || d.statut === statusFilter;
-    const matchesPriority = priorityFilter === "Toutes" || d.priorite === priorityFilter;
-    return matchesSearch && matchesStatus && matchesPriority;
-  });
+  const filteredDossiers = useMemo(() => {
+    return dossiers.filter(d => {
+      const textToSearch = `${d.id} ${d.clientNom} ${d.vehiculeImmatriculation} ${d.vehiculeMarque} ${d.vehiculeModele} ${d.clientTelephone}`.toLowerCase();
+      const matchesSearch = textToSearch.includes(globalSearchTerm.toLowerCase());
+      const matchesStatus = statusFilter === "Tous" || d.statut === statusFilter;
+      const matchesPriority = priorityFilter === "Toutes" || d.priorite === priorityFilter;
+      return matchesSearch && matchesStatus && matchesPriority;
+    });
+  }, [dossiers, globalSearchTerm, statusFilter, priorityFilter]);
+
+  const blockedCount = useMemo(() => {
+    return dossiers.filter(d => d.statut === DossierStatus.BLOQUE).length;
+  }, [dossiers]);
+
   const selectedDossier = selectedDossierId ? dossiers.find(d => d.id === selectedDossierId) : null;
   const goToTab = (tab: string) => {
     const nextTab = normalizeTabForRole(activeRole, tab);
     setSelectedDossierId(null);
     setActiveTab(nextTab);
+    handleTouchSession();
   };
 
   const persistUsers = (nextUsers: User[]) => {
@@ -388,7 +409,8 @@ export default function App() {
   };
 
   const handleCreateUser = async (input: CreateUserInput): Promise<{ ok: boolean; message: string }> => {
-    if (!canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    handleTouchSession();
+    if (!perm.canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
     if (!input.username.trim() || !input.pin.trim()) {
       return { ok: false, message: "Identifiant et PIN obligatoires." };
     }
@@ -401,7 +423,8 @@ export default function App() {
   };
 
   const handleUpdateUser = (userId: string, changes: { displayName: string; role: UserRole }): { ok: boolean; message: string } => {
-    if (!canManageUsers(activeRole) || !currentUser) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    handleTouchSession();
+    if (!perm.canManageUsers(activeRole) || !currentUser) return { ok: false, message: "Accès réservé au Directeur SAV." };
     const result = updateUserProfile(users, userId, changes, currentUser.id);
     if (result.ok === false) return result;
     persistUsers(result.users);
@@ -410,7 +433,8 @@ export default function App() {
   };
 
   const handleToggleUserActive = (userId: string, active: boolean): { ok: boolean; message: string } => {
-    if (!canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    handleTouchSession();
+    if (!perm.canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
     const result = setUserActive(users, userId, active);
     if (result.ok === false) return result;
     persistUsers(result.users);
@@ -419,7 +443,8 @@ export default function App() {
   };
 
   const handleResetUserPin = async (userId: string, pin: string): Promise<{ ok: boolean; message: string }> => {
-    if (!canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    handleTouchSession();
+    if (!perm.canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
     const result = await resetUserPin(users, userId, pin);
     if (result.ok === false) return result;
     persistUsers(result.users);
@@ -492,7 +517,7 @@ export default function App() {
               { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal },
               { id: "users", label: "Gestion utilisateurs", icon: UserCog }
             ].map(item => {
-              if (!canAccessTab(activeRole, item.id)) return null;
+              if (!perm.canAccessTab(activeRole, item.id)) return null;
               
               const LinkIcon = item.icon;
               const isSel = activeTab === item.id;
@@ -535,19 +560,8 @@ export default function App() {
 
         </div>
 
-        {/* Footer info and theme button */}
+        {/* Footer info */}
         <div className="pt-4 border-t border-gray-200 space-y-4">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-zinc-500 font-bold uppercase tracking-wider">Thème</span>
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 border border-gray-200 rounded-md text-zinc-600 hover:text-zinc-800 transition cursor-pointer"
-              title="Toggle theme mode"
-            >
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-          </div>
-          
           <div className="text-[10px] text-zinc-400 font-semibold leading-relaxed">
             <span>© NIMR Concessions 2026. Tout droit réservé.</span>
           </div>
@@ -571,7 +585,7 @@ export default function App() {
               onChange={(e) => {
                 setGlobalSearchTerm(e.target.value);
                 // Auto route to view folders list when typing search queries
-                if (activeTab !== "dossiers-liste" && canAccessTab(activeRole, "dossiers-liste")) {
+                if (activeTab !== "dossiers-liste" && perm.canAccessTab(activeRole, "dossiers-liste")) {
                   setActiveTab("dossiers-liste");
                 }
               }}
@@ -797,7 +811,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "users" && canManageUsers(activeRole) && (
+              {activeTab === "users" && perm.canManageUsers(activeRole) && (
                 <UserManagementView
                   users={users}
                   currentUser={currentUser}
@@ -810,101 +824,7 @@ export default function App() {
 
               {/* Kanban visual screen */}
               {activeTab === "atelier-kanban" && (
-                <div className="space-y-4 text-xs font-semibold">
-                  <div className="bg-white border border-gray-200 p-4 rounded-xl shadow-sm">
-                    <h3 className="font-extrabold text-sm uppercase tracking-tight text-slate-900">Tableau Kanban d'Avancement de l'Atelier</h3>
-                    <p className="text-xs text-zinc-500">Visualisation dynamique des colonnes de production par statut</p>
-                  </div>
-
-                  {/* Grid of columns representing stats */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
-                    
-                    {/* Received column */}
-                    <div className="bg-slate-50 border border-gray-200 p-4 rounded-lg space-y-3 shadow-xs">
-                      <span className="font-bold text-xs uppercase text-zinc-500 block border-b pb-1 font-display">
-                        1. Réceptionnés ({dossiers.filter(d => [DossierStatus.VEHICULE_RECU, DossierStatus.TRAVAUX_PLANIFIES].includes(d.statut)).length})
-                      </span>
-                      
-                      <div className="space-y-2">
-                        {dossiers.filter(d => [DossierStatus.VEHICULE_RECU, DossierStatus.TRAVAUX_PLANIFIES].includes(d.statut)).map(d => (
-                          <div 
-                            key={d.id} 
-                            onClick={() => setSelectedDossierId(d.id)}
-                            className="bg-white p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:shadow-xs transition cursor-pointer space-y-1.5"
-                          >
-                            <span className="font-mono text-blue-600 font-extrabold text-[11px]">{d.id}</span>
-                            <div className="font-bold text-slate-800 leading-tight block truncate font-display">{d.clientNom}</div>
-                            <span className="text-[10px] text-zinc-400 font-bold block">{d.vehiculeMarque} {d.vehiculeModele}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Works in progress column */}
-                    <div className="bg-sky-50/50 border border-sky-100 p-4 rounded-lg space-y-3 shadow-xs">
-                      <span className="font-bold text-xs uppercase text-sky-600 block border-b pb-1 font-display">
-                        2. En travaux ({dossiers.filter(d => d.statut === DossierStatus.EN_TRAVAUX).length})
-                      </span>
-                      
-                      <div className="space-y-2">
-                        {dossiers.filter(d => d.statut === DossierStatus.EN_TRAVAUX).map(d => (
-                          <div 
-                            key={d.id} 
-                            onClick={() => setSelectedDossierId(d.id)}
-                            className="bg-white p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:shadow-xs transition cursor-pointer space-y-1.5"
-                          >
-                            <span className="font-mono text-blue-600 font-extrabold text-[11px]">{d.id}</span>
-                            <div className="font-bold text-slate-800 leading-tight block truncate font-display">{d.clientNom}</div>
-                            <span className="text-[10px] text-zinc-400 font-bold block">{d.vehiculeMarque} {d.vehiculeModele}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Blocked column */}
-                    <div className="bg-red-50/50 border border-red-100 p-4 rounded-lg space-y-3 shadow-xs">
-                      <span className="font-bold text-xs uppercase text-red-600 block border-b pb-1 font-display">
-                        3. Bloqués ({dossiers.filter(d => d.statut === DossierStatus.BLOQUE).length})
-                      </span>
-                      
-                      <div className="space-y-2">
-                        {dossiers.filter(d => d.statut === DossierStatus.BLOQUE).map(d => (
-                          <div 
-                            key={d.id} 
-                            onClick={() => setSelectedDossierId(d.id)}
-                            className="bg-white p-3 rounded-lg border border-gray-200 hover:border-red-500 hover:shadow-xs transition cursor-pointer space-y-1.5"
-                          >
-                            <span className="font-mono text-red-600 font-black text-[11px]">{d.id}</span>
-                            <div className="font-bold text-slate-800 leading-tight block truncate font-display">{d.clientNom}</div>
-                            <span className="text-[10px] text-red-600 font-bold block truncate">{d.bloqueRaison || "Facteur bloquant"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Ready to hand over column */}
-                    <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-lg space-y-3 shadow-xs">
-                      <span className="font-bold text-xs uppercase text-emerald-600 block border-b pb-1 font-display">
-                        4. À livrer ({dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER).length})
-                      </span>
-                      
-                      <div className="space-y-2">
-                        {dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER).map(d => (
-                          <div 
-                            key={d.id} 
-                            onClick={() => setSelectedDossierId(d.id)}
-                            className="bg-white p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:shadow-xs transition cursor-pointer space-y-1.5"
-                          >
-                            <span className="font-mono text-blue-600 font-extrabold text-[11px]">{d.id}</span>
-                            <div className="font-bold text-slate-800 leading-tight block truncate font-display">{d.clientNom}</div>
-                            <span className="text-[10px] text-zinc-400 font-bold block">{d.vehiculeMarque} {d.vehiculeModele}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
+                <KanbanBoard dossiers={dossiers} onSelectDossier={setSelectedDossierId} />
               )}
             </>
           )}

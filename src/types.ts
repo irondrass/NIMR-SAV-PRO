@@ -30,6 +30,7 @@ export interface UserSession {
   displayName: string;
   role: UserRole;
   loginAt: string;
+  lastActivityAt?: string;
 }
 
 export enum DossierStatus {

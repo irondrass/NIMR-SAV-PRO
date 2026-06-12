@@ -21,7 +21,7 @@ export const DEFAULT_USER_CREDENTIALS = [
 
 export type LoginResult =
   | { ok: true; user: User; users: User[]; session: UserSession }
-  | { ok: false; reason: "invalid-credentials" | "disabled-user"; message: string };
+  | { ok: false; reason: "invalid-credentials" | "disabled-user" | "locked-out"; message: string };
 
 export interface CreateUserInput {
   username: string;
@@ -53,15 +53,85 @@ export async function ensureDefaultUsers(storedUsers: User[], now = new Date(DEF
   }));
 }
 
+export const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+export const LOGIN_MAX_ATTEMPTS = 5;
+export const LOGIN_LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+export interface LoginAttemptState {
+  count: number;
+  firstAttemptAt: string;
+  lockedUntil?: string;
+}
+
+let globalAttemptsInMemory: Record<string, LoginAttemptState> = {};
+
+function getAttemptsStorage(): Record<string, LoginAttemptState> {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return globalAttemptsInMemory;
+  }
+  const raw = localStorage.getItem("nimr-sav-pro-login-attempts");
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function saveAttemptsStorage(attempts: Record<string, LoginAttemptState>): void {
+  if (typeof window === "undefined" || !window.localStorage) {
+    globalAttemptsInMemory = attempts;
+    return;
+  }
+  localStorage.setItem("nimr-sav-pro-login-attempts", JSON.stringify(attempts));
+}
+
 export async function loginUser(users: User[], username: string, pin: string, now = new Date()): Promise<LoginResult> {
   const normalizedUsername = normalizeUsername(username);
+  const attempts = getAttemptsStorage();
+  const attempt = attempts[normalizedUsername];
+
+  if (attempt && attempt.lockedUntil) {
+    const lockedUntilTime = new Date(attempt.lockedUntil).getTime();
+    if (now.getTime() < lockedUntilTime) {
+      const remainingMin = Math.ceil((lockedUntilTime - now.getTime()) / 60000);
+      return {
+        ok: false,
+        reason: "locked-out",
+        message: `Trop de tentatives. Compte temporairement bloqué. Réessayez dans ${remainingMin} minute(s).`
+      };
+    } else {
+      delete attempts[normalizedUsername];
+      saveAttemptsStorage(attempts);
+    }
+  }
+
   const user = users.find(item => normalizeUsername(item.username) === normalizedUsername);
   if (!user || !(await verifyPin(user, pin))) {
+    const currentAttempt = attempts[normalizedUsername] || { count: 0, firstAttemptAt: now.toISOString() };
+    currentAttempt.count += 1;
+    if (currentAttempt.count >= LOGIN_MAX_ATTEMPTS) {
+      currentAttempt.lockedUntil = new Date(now.getTime() + LOGIN_LOCKOUT_MS).toISOString();
+    }
+    attempts[normalizedUsername] = currentAttempt;
+    saveAttemptsStorage(attempts);
+
+    if (currentAttempt.count >= LOGIN_MAX_ATTEMPTS) {
+      return {
+        ok: false,
+        reason: "locked-out",
+        message: "Trop de tentatives. Compte temporairement bloqué. Réessayez dans 5 minute(s)."
+      };
+    }
     return { ok: false, reason: "invalid-credentials", message: "Identifiant ou PIN incorrect." };
   }
+
   if (!user.active) {
     return { ok: false, reason: "disabled-user", message: "Utilisateur désactivé." };
   }
+
+  delete attempts[normalizedUsername];
+  saveAttemptsStorage(attempts);
 
   const timestamp = now.toISOString();
   const updatedUser: User = { ...user, lastLoginAt: timestamp, updatedAt: timestamp };
@@ -80,13 +150,26 @@ export function createSession(user: User, now = new Date()): UserSession {
     displayName: user.displayName,
     role: user.role,
     loginAt: now.toISOString(),
+    lastActivityAt: now.toISOString(),
   };
 }
 
-export function isSessionValid(session: UserSession | null, users: User[]): boolean {
+export function isSessionValid(session: UserSession | null, users: User[], now = new Date()): boolean {
   if (!session) return false;
   const user = users.find(item => item.id === session.userId);
-  return Boolean(user && user.active && user.role === session.role && user.displayName === session.displayName);
+  if (!user || !user.active || user.role !== session.role || user.displayName !== session.displayName) {
+    return false;
+  }
+  const activityTime = session.lastActivityAt ? new Date(session.lastActivityAt).getTime() : new Date(session.loginAt).getTime();
+  const currentTime = now.getTime();
+  return (currentTime - activityTime) < SESSION_TTL_MS;
+}
+
+export function touchSession(session: UserSession, now = new Date()): UserSession {
+  return {
+    ...session,
+    lastActivityAt: now.toISOString(),
+  };
 }
 
 export async function createUser(input: CreateUserInput, existingUsers: User[], now = new Date()): Promise<User> {
@@ -208,7 +291,8 @@ export function isUserSession(value: unknown): value is UserSession {
     typeof value.userId === "string" &&
     typeof value.displayName === "string" &&
     Object.values(UserRole).includes(value.role as UserRole) &&
-    typeof value.loginAt === "string"
+    typeof value.loginAt === "string" &&
+    (value.lastActivityAt === undefined || typeof value.lastActivityAt === "string")
   );
 }
 
@@ -237,4 +321,16 @@ function fallbackHash(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function resetLoginAttempts(username?: string): void {
+  const attempts = getAttemptsStorage();
+  if (username) {
+    delete attempts[normalizeUsername(username)];
+  } else {
+    for (const key in attempts) {
+      delete attempts[key];
+    }
+  }
+  saveAttemptsStorage(attempts);
 }
