@@ -27,10 +27,11 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
   const [criticite, setCriticite] = useState<"moyenne" | "haute" | "critique">("moyenne");
   const [responsable, setResponsable] = useState("");
   const [actionCorrective, setActionCorrective] = useState("");
+  const [formError, setFormError] = useState("");
 
   const handleCreateReclamation = () => {
     if (!clientNom.trim() || !motif.trim()) {
-      alert("Veuillez saisir au moins le client et le motif de la réclamation.");
+      setFormError("Veuillez saisir au moins le client et le motif de la réclamation.");
       return;
     }
 
@@ -53,6 +54,7 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
     setMotif("");
     setResponsable("");
     setActionCorrective("");
+    setFormError("");
     setShowAddForm(false);
   };
 
@@ -99,7 +101,10 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
             </select>
 
             <button 
-              onClick={() => setShowAddForm(!showAddForm)}
+              onClick={() => {
+                setFormError("");
+                setShowAddForm(!showAddForm);
+              }}
               className="p-2 px-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded transition flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -113,6 +118,11 @@ export default function ComplaintsView({ reclamations, existingReclamationIds, o
       {showAddForm && (
         <div className="bg-white  border border-red-200  rounded-2xl p-5 shadow-md space-y-4 max-w-2xl mx-auto text-xs animate-fade-in">
           <span className="font-bold text-sm text-red-700  block border-b pb-1.5 uppercase">Nouveau Dossier de litige client SAV</span>
+          {formError && (
+            <div className="p-3 bg-red-50 text-red-700 rounded-lg font-semibold text-xs border border-red-200 text-left animate-fade-in">
+              ⚠️ {formError}
+            </div>
+          )}
           
           <div className="grid grid-cols-2 gap-4">
             <div>

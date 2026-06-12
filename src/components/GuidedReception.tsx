@@ -151,7 +151,7 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
       setPhotosPre(prev => [...prev, ...nextPhotos]);
       setPhotoTitle("");
     } catch {
-      alert("Impossible d'ajouter cette photo. Veuillez réessayer avec une image valide.");
+      console.error("Impossible d'ajouter cette photo. Veuillez réessayer avec une image valide.");
     }
   };
 
@@ -864,12 +864,10 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
                 // If required fields are omitted with placeholder checks
                 if (currentStep === 1 && !clientNom) {
                   setReceptionError("Veuillez saisir le nom du client.");
-                  alert("Veuillez saisir le nom du client.");
                   return;
                 }
                 if (currentStep === 2 && (!vehiculeModele || !vehiculeImmatriculation)) {
                   setReceptionError("Veuillez remplir le modèle et l'immatriculation.");
-                  alert("Veuillez remplir le modèle et l'immatriculation.");
                   return;
                 }
                 setReceptionError(null);

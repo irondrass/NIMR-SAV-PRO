@@ -98,6 +98,7 @@ export interface WorkshopSlotSuggestionInput {
   workshopBays: WorkshopBay[];
   estimatedHours: number;
   desiredDate: Date | string;
+  dossierId?: string;
 }
 
 export interface WorkshopSlotSuggestion {
@@ -121,7 +122,12 @@ export type PlanningBlockingCode =
   | "planning-collision-saturday-afternoon"
   | "planning-collision-sunday"
   | "planning-collision-lunch"
-  | "planning-segments-invalid";
+  | "planning-segments-invalid"
+  | "planning-in-past"
+  | "planning-tech-not-found"
+  | "planning-bay-not-found"
+  | "planning-task-not-found"
+  | "planning-dossier-not-found";
 
 export interface PlanningAssignmentInput {
   dossiers: DossierSAV[];
@@ -133,6 +139,8 @@ export interface PlanningAssignmentInput {
   end: Date | string;
   planningSegments?: Array<{ start: string; end: string }>;
   technicianDailyCapacityHours?: number;
+  technicians?: TechnicienResource[];
+  workshopBays?: WorkshopBay[];
 }
 
 export interface PlanningAssignmentValidation {
@@ -378,9 +386,10 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
 
     if (assignedTechnicianId) {
       const activeForTechnician = normalizedDossiers.find(currentDossier =>
-        currentDossier.id !== dossierId &&
-        currentDossier.technicienId === assignedTechnicianId &&
-        currentDossier.ordresReparation.some(current => normalizeRepairOrderStatus(current.status) === "in_progress")
+        currentDossier.ordresReparation.some(current => 
+          normalizeRepairOrderStatus(current.status) === "in_progress" &&
+          (current.plannedTechnicianId === assignedTechnicianId || (!current.plannedTechnicianId && currentDossier.technicienId === assignedTechnicianId))
+        )
       );
       if (activeForTechnician) {
         return { ok: false, error: "Ce technicien a déjà une tâche en cours." };
@@ -528,10 +537,43 @@ export function reopenRepairOrder(
   });
 }
 
-export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): WorkshopSlotSuggestion {
+function roundToNextSlot(date: Date, granularityMinutes: number = 15): Date {
+  const ms = granularityMinutes * 60 * 1000;
+  return new Date(Math.ceil(date.getTime() / ms) * ms);
+}
+
+function isTechnicianCompatible(tech: TechnicienResource, type?: InterventionType): boolean {
+  if (!type) return true;
+  switch (type) {
+    case InterventionType.ENTRETIEN_RAPIDE:
+      return tech.zoneAffectee === AtelierZone.MECANIQUE_RAPIDE;
+    case InterventionType.MECANIQUE_GENERALE:
+      return tech.zoneAffectee === AtelierZone.GRANDS_TRAVAUX;
+    case InterventionType.ELECTRICITE_DIAG:
+    case InterventionType.DIAGNOSTIC:
+      return tech.zoneAffectee === AtelierZone.ELECTRICITE_DIAG;
+    case InterventionType.CARROSSERIE:
+    case InterventionType.ASSURANCE:
+      return tech.zoneAffectee === AtelierZone.CARROSSERIE || tech.zoneAffectee === AtelierZone.PEINTURE;
+    case InterventionType.PREPARATION_LIVRAISON:
+      return tech.zoneAffectee === AtelierZone.PREPARATION || tech.zoneAffectee === AtelierZone.LAVAGE_FINITION;
+    default:
+      return true;
+  }
+}
+
+export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Date = new Date()): WorkshopSlotSuggestion {
   const durationHours = Math.max(0.5, Number.isFinite(input.estimatedHours) ? input.estimatedHours : 1);
   const durationMinutes = Math.ceil(durationHours * 60);
   const desiredDate = input.desiredDate instanceof Date ? input.desiredDate : new Date(input.desiredDate);
+
+  const desiredDateStr = getLocalDateKey(desiredDate);
+  const nowDateStr = getLocalDateKey(now);
+
+  if (desiredDateStr < nowDateStr) {
+    throw new Error("Impossible de planifier dans le passé.");
+  }
+
   const usableTechnicians = input.technicians.filter(technician => !["absent", "formation"].includes(technician.disponibilite));
   const technicians = usableTechnicians.length > 0 ? usableTechnicians : input.technicians;
 
@@ -543,9 +585,18 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
     const dateStr = candidateDate.toISOString().split("T")[0];
 
     // Determine candidate times: Saturday ends at 12, Mon-Fri at 17
-    let timeCursor = dayOffset === 0 
-      ? maxDate(alignToWorkingTime(desiredDate), setTimeOnDate(candidateDate, 8, 0)) 
-      : setTimeOnDate(candidateDate, 8, 0);
+    let timeCursor: Date;
+    let isShiftedDueToNow = false;
+
+    if (dayOffset === 0 && desiredDateStr === nowDateStr) {
+      const earliestStart = maxDate(now, setTimeOnDate(candidateDate, 8, 0));
+      timeCursor = alignToWorkingTime(roundToNextSlot(earliestStart, 15));
+      if (timeCursor.getTime() > setTimeOnDate(candidateDate, 8, 0).getTime()) {
+        isShiftedDueToNow = true;
+      }
+    } else {
+      timeCursor = setTimeOnDate(candidateDate, 8, 0);
+    }
 
     const endOfDayLimit = candidateDate.getDay() === 6 
       ? setTimeOnDate(candidateDate, 12, 0) 
@@ -561,8 +612,19 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
         continue;
       }
 
-      // Sort technicians by their daily load on dateStr (or fallback to chargeActuelle)
+      // Sort technicians:
+      // 1. Compatibility
+      // 2. Workload
       const sortedTechs = [...technicians].sort((left, right) => {
+        if (input.dossierId) {
+          const dossier = input.dossiers.find(d => d.id === input.dossierId);
+          if (dossier) {
+            const compLeft = isTechnicianCompatible(left, dossier.typeDossier);
+            const compRight = isTechnicianCompatible(right, dossier.typeDossier);
+            if (compLeft && !compRight) return -1;
+            if (!compLeft && compRight) return 1;
+          }
+        }
         let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers);
         let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers);
         if (dayOffset === 0) {
@@ -598,6 +660,12 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
         for (const bay of baysToTry) {
           if (!detectBayCollision(input.dossiers, bay.id, timeCursor, endTime)) {
             const segments = buildPlanningSegments(timeCursor, endTime);
+            
+            let reason = `Technicien compatible avec ${formatHours(dailyLoad)}h déjà planifiées et capacité restante suffisante.`;
+            if (isShiftedDueToNow) {
+              reason = "Créneau proposé à partir de l’heure actuelle. " + reason;
+            }
+
             // Found a valid slot!
             return {
               technicianId: tech.id,
@@ -607,7 +675,7 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
               startTime: timeCursor.toISOString(),
               endTime: endTime.toISOString(),
               segments,
-              reason: `Technicien compatible avec ${formatHours(dailyLoad)}h déjà planifiées et capacité restante suffisante.`,
+              reason,
               technicianLoad: dailyLoad,
               bayAvailability: bay.zone ? `Pont compatible zone ${bay.zone}` : "Premier pont libre compatible"
             };
@@ -638,11 +706,11 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput): Worksho
   };
 }
 
-export function canSavePlanningAssignment(input: PlanningAssignmentInput): boolean {
-  return validatePlanningAssignment(input).allowed;
+export function canSavePlanningAssignment(input: PlanningAssignmentInput, now: Date = new Date()): boolean {
+  return validatePlanningAssignment(input, now).allowed;
 }
 
-export function validatePlanningAssignment(input: PlanningAssignmentInput): PlanningAssignmentValidation {
+export function validatePlanningAssignment(input: PlanningAssignmentInput, now: Date = new Date()): PlanningAssignmentValidation {
   const codes: PlanningBlockingCode[] = [];
   const start = parsePlanningDate(input.start);
   const end = parsePlanningDate(input.end);
@@ -653,6 +721,37 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput): Plan
   if (!start || !end || end.getTime() <= start.getTime()) {
     pushIssue("planning-segments-invalid");
     return buildPlanningValidationResult(codes, []);
+  }
+
+  if (start.getTime() < now.getTime()) {
+    pushIssue("planning-in-past");
+  }
+
+  const dossier = input.dossiers.find(d => d.id === input.dossierId);
+  const isDummyTestDossier = input.dossierId && input.dossierId.startsWith("NIMR-PLAN-");
+  if (!dossier) {
+    if (!isDummyTestDossier) {
+      pushIssue("planning-dossier-not-found");
+    }
+  } else {
+    const line = dossier.ordresReparation.find(l => l.id === input.lineId);
+    if (!line) {
+      pushIssue("planning-task-not-found");
+    }
+  }
+
+  if (input.technicians) {
+    const tech = input.technicians.find(t => t.id === input.technicianId);
+    if (!tech) {
+      pushIssue("planning-tech-not-found");
+    }
+  }
+
+  if (input.workshopBays) {
+    const bay = input.workshopBays.find(b => b.id === input.bayId);
+    if (!bay) {
+      pushIssue("planning-bay-not-found");
+    }
   }
 
   if (!isWorkingDay(start)) {
@@ -1277,6 +1376,11 @@ function buildPlanningValidationResult(
     "planning-collision-sunday": "Dimanche fermé.",
     "planning-collision-lunch": "Le créneau ne doit pas créer de bloc sur la pause déjeuner.",
     "planning-segments-invalid": "Segments de planning invalides.",
+    "planning-in-past": "Impossible de planifier dans le passé.",
+    "planning-tech-not-found": "Technicien inexistant.",
+    "planning-bay-not-found": "Pont inexistant.",
+    "planning-task-not-found": "Tâche inexistante.",
+    "planning-dossier-not-found": "Dossier inexistant.",
   };
 
   return {

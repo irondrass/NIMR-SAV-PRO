@@ -85,6 +85,14 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
   const isSat = selectedDate.getDay() === 6;
   const isClosedDay = !isWorkingDay(selectedDate);
 
+  const getSystemTime = () => {
+    if (typeof window !== "undefined" && (window as any).__mockNow) {
+      return new Date((window as any).__mockNow);
+    }
+    return new Date();
+  };
+  const now = getSystemTime();
+
   // Sync manual select values
   const targetDossiers = dossiers.filter(dossier =>
     dossier.statut !== DossierStatus.LIVRE &&
@@ -168,16 +176,22 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
     const targetDesiredDate = new Date(selectedDate);
     targetDesiredDate.setHours(8, 0, 0, 0);
 
-    const res = suggestWorkshopSlot({
-      dossiers,
-      technicians: techniciens,
-      workshopBays: DEFAULT_WORKSHOP_BAYS,
-      estimatedHours,
-      desiredDate: targetDesiredDate,
-    });
+    try {
+      const res = suggestWorkshopSlot({
+        dossiers,
+        technicians: techniciens,
+        workshopBays: DEFAULT_WORKSHOP_BAYS,
+        estimatedHours,
+        desiredDate: targetDesiredDate,
+        dossierId: selectedTargetIdForSuggest,
+      }, getSystemTime());
 
-    setSuggestion(res);
-    setSuggestionError("");
+      setSuggestion(res);
+      setSuggestionError("");
+    } catch (err: any) {
+      setSuggestionError(err.message || "Erreur de suggestion");
+      setSuggestion(null);
+    }
   };
 
   // Apply suggestion
@@ -247,7 +261,9 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
       bayId: manualBayId,
       start,
       end,
-    }).codes;
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+    }, getSystemTime()).codes;
   };
 
   const manualWarnings = checkManualCollisions();
@@ -265,7 +281,9 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
       bayId: manualBayId,
       start,
       end,
-    });
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+    }, getSystemTime());
 
     if (!validation.allowed) {
       return;
@@ -331,6 +349,15 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
 
   const totalGanttMinutes = isSat ? 4 * 60 : 9 * 60; // 240 or 540 minutes
 
+  const todayStrForLine = getLocalDateStr(now);
+  const isSelectedDateTodayForLine = selectedDateStr === todayStrForLine;
+  const nowHourForLine = now.getHours();
+  const nowMinForLine = now.getMinutes();
+  const nowMinutesSince8ForLine = (nowHourForLine - 8) * 60 + nowMinForLine;
+  const isTimeInWorkingHoursForLine = nowMinutesSince8ForLine >= 0 && nowMinutesSince8ForLine <= totalGanttMinutes;
+  const showNowLine = isSelectedDateTodayForLine && isTimeInWorkingHoursForLine;
+  const nowPct = showNowLine ? (nowMinutesSince8ForLine / totalGanttMinutes) * 100 : 0;
+
   // Find all tasks planned on the selected date
   const activePlannedLines: Array<{ dossier: DossierSAV; line: RepairOrderLine }> = [];
   dossiers.forEach(dossier => {
@@ -355,6 +382,12 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
               PLANNING & CHARGE DES TECHNICIENS (GANTT)
             </h2>
             <p className="text-gray-500 text-xs">Visualisation de la charge journalière et affectation des créneaux de travaux.</p>
+            {isSelectedDateTodayForLine && (
+              <p data-testid="planning-current-time" className="text-rose-600 text-xs font-bold flex items-center gap-1 mt-1">
+                <Clock className="w-3.5 h-3.5" />
+                Heure actuelle : {now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -513,6 +546,11 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                 </div>
                 <div className="pt-2 border-t border-blue-100/60">
                   <p className="text-blue-800 font-semibold leading-normal">{suggestion.reason}</p>
+                  {suggestion.reason.includes("Créneau proposé à partir de l’heure actuelle.") && (
+                    <p data-testid="planning-suggest-shifted-warning" className="text-amber-600 font-bold text-[10px] mt-1">
+                      Créneau proposé à partir de l'heure actuelle.
+                    </p>
+                  )}
                 </div>
               </div>
               <button
@@ -689,6 +727,36 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                     Segments invalides : aucune plage ne doit couvrir pause midi ou heures fermées.
                   </p>
                 )}
+                {manualWarnings.includes("planning-in-past") && (
+                  <p data-testid="planning-collision-past" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Impossible de planifier dans le passé.
+                  </p>
+                )}
+                {manualWarnings.includes("planning-tech-not-found") && (
+                  <p data-testid="planning-collision-tech-not-found" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Technicien inexistant.
+                  </p>
+                )}
+                {manualWarnings.includes("planning-bay-not-found") && (
+                  <p data-testid="planning-collision-bay-not-found" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Pont inexistant.
+                  </p>
+                )}
+                {manualWarnings.includes("planning-task-not-found") && (
+                  <p data-testid="planning-collision-task-not-found" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Tâche inexistante.
+                  </p>
+                )}
+                {manualWarnings.includes("planning-dossier-not-found") && (
+                  <p data-testid="planning-collision-dossier-not-found" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Dossier inexistant.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -776,40 +844,58 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                 const isOverloaded = dailyLoad > maxCap;
 
                 // Determine availability status
-                const activeDossier = dossiers.find(d => 
+                const isNonDisponible = tech.disponibilite === "absent" || tech.disponibilite === "formation";
+
+                const hasInProgressTask = dossiers.some(d => 
+                  d.ordresReparation.some(l => 
+                    l.plannedTechnicianId === tech.id && 
+                    normalizeRepairOrderStatus(l.status) === "in_progress"
+                  )
+                ) || dossiers.some(d => 
                   d.technicienId === tech.id && 
                   d.ordresReparation.some(l => normalizeRepairOrderStatus(l.status) === "in_progress")
                 );
-                
-                const blockedDossier = dossiers.find(d => 
-                  d.technicienId === tech.id && 
-                  d.statut === DossierStatus.BLOQUE
-                );
+
+                const todayTechSegments: Array<{ start: Date; end: Date }> = [];
+                const todayStr = getLocalDateStr(now);
+                dossiers.forEach(d => {
+                  if (d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE) {
+                    d.ordresReparation.forEach(l => {
+                      if (l.plannedTechnicianId === tech.id && l.planningDate === todayStr && l.planningStart && l.planningEnd) {
+                        const segments = l.planningSegments || [{ start: l.planningStart, end: l.planningEnd }];
+                        segments.forEach(seg => {
+                          todayTechSegments.push({
+                            start: new Date(seg.start),
+                            end: new Date(seg.end)
+                          });
+                        });
+                      }
+                    });
+                  }
+                });
+
+                const hasSegmentCoveringNow = todayTechSegments.some(seg => {
+                  const t = now.getTime();
+                  return t >= seg.start.getTime() && t <= seg.end.getTime();
+                });
+
+                const hasSegmentsToday = todayTechSegments.length > 0;
 
                 let statusLabel = "Disponible";
                 let statusColor = "bg-green-500 text-white";
-                
-                if (tech.disponibilite === "absent") {
-                  statusLabel = "Absent";
+
+                if (isNonDisponible) {
+                  statusLabel = "Non disponible";
                   statusColor = "bg-red-500 text-white";
-                } else if (tech.disponibilite === "formation") {
-                  statusLabel = "Formation";
+                } else if (hasInProgressTask || hasSegmentCoveringNow) {
+                  statusLabel = "Occupé maintenant";
+                  statusColor = "bg-orange-500 text-white";
+                } else if (hasSegmentsToday) {
+                  statusLabel = "Planifié aujourd’hui";
                   statusColor = "bg-blue-500 text-white";
                 } else {
-                  // Check lunch hour
-                  const currentHour = new Date().getHours();
-                  const isLunch = !isSat && currentHour >= 12 && currentHour < 13;
-                  
-                  if (isLunch) {
-                    statusLabel = "En pause";
-                    statusColor = "bg-amber-500 text-white";
-                  } else if (blockedDossier) {
-                    statusLabel = "Tâche bloquée";
-                    statusColor = "bg-red-600 text-white";
-                  } else if (activeDossier) {
-                    statusLabel = "Occupé";
-                    statusColor = "bg-orange-500 text-white";
-                  }
+                  statusLabel = "Disponible";
+                  statusColor = "bg-green-500 text-white";
                 }
 
                 return (
@@ -852,6 +938,18 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                         </div>
                       )}
 
+                      {showNowLine && (
+                        <div 
+                          data-testid="gantt-now-indicator"
+                          className="absolute top-0 bottom-0 w-0.5 bg-rose-600 z-30 pointer-events-none"
+                          style={{ left: `${nowPct}%` }}
+                        >
+                          <span className="absolute top-0 -translate-x-1/2 bg-rose-600 text-white text-[7px] font-extrabold px-1 rounded-sm uppercase tracking-wider select-none">
+                            Maintenant
+                          </span>
+                        </div>
+                      )}
+
                       {/* Display task blocks on this row */}
                       {techPlannedLines.map(({ dossier, line }) => {
                         const segments = line.planningSegments && line.planningSegments.length > 0
@@ -867,8 +965,11 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                           const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
                           const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
 
+                          const isPast = e.getTime() < now.getTime();
                           let blockBg = "bg-blue-500 hover:bg-blue-600 border-blue-600";
-                          if (line.status === "done") {
+                          if (isPast) {
+                            blockBg = "bg-gray-400 hover:bg-gray-400 border-gray-400 opacity-60 text-gray-100";
+                          } else if (line.status === "done") {
                             blockBg = "bg-green-500 hover:bg-green-600 border-green-600";
                           } else if (line.status === "blocked" || dossier.statut === DossierStatus.BLOQUE) {
                             blockBg = "bg-red-500 hover:bg-red-600 border-red-600";
@@ -914,9 +1015,48 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
           </h5>
 
           {filteredBays.map(bay => {
+            // Get all planned segments on this bay today
+            const todayBaySegments: Array<{ start: Date; end: Date }> = [];
+            const todayStr = getLocalDateStr(now);
+            dossiers.forEach(d => {
+              if (d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE) {
+                d.ordresReparation.forEach(l => {
+                  if (l.plannedBayId === bay.id && l.planningDate === todayStr && l.planningStart && l.planningEnd) {
+                    const segments = l.planningSegments || [{ start: l.planningStart, end: l.planningEnd }];
+                    segments.forEach(seg => {
+                      todayBaySegments.push({
+                        start: new Date(seg.start),
+                        end: new Date(seg.end)
+                      });
+                    });
+                  }
+                });
+              }
+            });
+
+            const hasBaySegmentCoveringNow = todayBaySegments.some(seg => {
+              const t = now.getTime();
+              return t >= seg.start.getTime() && t <= seg.end.getTime();
+            });
+
+            const hasBaySegmentsToday = todayBaySegments.length > 0;
+
+            let bayStatusLabel = "Libre maintenant";
+            let bayStatusColor = "bg-green-500 text-white";
+
+            if (hasBaySegmentCoveringNow) {
+              bayStatusLabel = "Occupé maintenant";
+              bayStatusColor = "bg-orange-500 text-white";
+            } else if (hasBaySegmentsToday) {
+              bayStatusLabel = "Planifié aujourd’hui";
+              bayStatusColor = "bg-blue-500 text-white";
+            } else {
+              bayStatusLabel = "Libre maintenant";
+              bayStatusColor = "bg-green-500 text-white";
+            }
+
             // Find all tasks planned today on this bay
             const bayPlannedLines = activePlannedLines.filter(item => item.line.plannedBayId === bay.id);
-            const isOccupied = bayPlannedLines.length > 0;
 
             return (
               <div key={bay.id} className="grid grid-cols-12 gap-2 items-center hover:bg-gray-50/50 p-1.5 rounded-xl transition">
@@ -924,10 +1064,8 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                 <div className="col-span-3 space-y-1 pl-2">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-extrabold text-gray-900 text-xs">{bay.name}</span>
-                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase ${
-                      isOccupied ? "bg-orange-500 text-white" : "bg-green-500 text-white"
-                    }`}>
-                      {isOccupied ? "Occupé" : "Libre"}
+                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase ${bayStatusColor}`}>
+                      {bayStatusLabel}
                     </span>
                   </div>
                   <span className="text-[9px] text-gray-400 font-bold block uppercase tracking-wider">
@@ -953,6 +1091,18 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                     </div>
                   )}
 
+                  {showNowLine && (
+                    <div 
+                      data-testid="gantt-now-indicator"
+                      className="absolute top-0 bottom-0 w-0.5 bg-rose-600 z-30 pointer-events-none"
+                      style={{ left: `${nowPct}%` }}
+                    >
+                      <span className="absolute top-0 -translate-x-1/2 bg-rose-600 text-white text-[7px] font-extrabold px-1 rounded-sm uppercase tracking-wider select-none">
+                        Maintenant
+                      </span>
+                    </div>
+                  )}
+
                   {/* Display task blocks on this row */}
                   {bayPlannedLines.map(({ dossier, line }) => {
                     const segments = line.planningSegments && line.planningSegments.length > 0
@@ -968,8 +1118,11 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                       const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
                       const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
 
+                      const isPast = e.getTime() < now.getTime();
                       let blockBg = "bg-blue-500 hover:bg-blue-600 border-blue-600";
-                      if (line.status === "done") {
+                      if (isPast) {
+                        blockBg = "bg-gray-400 hover:bg-gray-400 border-gray-400 opacity-60 text-gray-100";
+                      } else if (line.status === "done") {
                         blockBg = "bg-green-500 hover:bg-green-600 border-green-600";
                       } else if (line.status === "blocked" || dossier.statut === DossierStatus.BLOQUE) {
                         blockBg = "bg-red-500 hover:bg-red-600 border-red-600";

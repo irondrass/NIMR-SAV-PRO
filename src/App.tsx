@@ -301,7 +301,6 @@ export default function App() {
           const validation = validateBackupPayload(parsed);
           if (validation.ok === false) {
             setImportErrorMessage(validation.error);
-            alert(validation.error);
             return;
           }
 
@@ -323,16 +322,13 @@ export default function App() {
             writeLocalStorageJSON(STORAGE_KEYS.logs, validation.data.activityLogs);
           }
           setImportSuccessMessage("Base restaurée avec succès !");
-          alert("Base restaurée avec succès !");
         } catch (err) {
           setImportErrorMessage("Erreur de format de fichier de sauvegarde.");
-          alert("Erreur de format de fichier de sauvegarde.");
         }
         e.target.value = "";
       };
       reader.onerror = () => {
         setImportErrorMessage("Impossible de lire le fichier de sauvegarde.");
-        alert("Impossible de lire le fichier de sauvegarde.");
       };
       reader.readAsText(files[0]);
     }

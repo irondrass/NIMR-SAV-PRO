@@ -53,7 +53,7 @@ import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TEC
 import { canAccessTab, canChangeRole, getDefaultTabForRole, normalizeTabForRole, ROLE_TABS } from "../src/roles";
 import * as perm from "../src/permissions";
 import { LOCAL_STORAGE_PREFIX, STORAGE_KEYS } from "../src/storage-keys";
-import { DossierPriority, DossierSAV, DossierStatus, InterventionType, RepairOrderLine, TechnicienResource, UserRole, WorkshopBay } from "../src/types";
+import { AtelierZone, DossierPriority, DossierSAV, DossierStatus, InterventionType, RepairOrderLine, TechnicienResource, UserRole, WorkshopBay } from "../src/types";
 
 const fixedNow = new Date("2026-06-09T10:00:00.000Z");
 
@@ -386,13 +386,14 @@ function testWorkshopSlotSuggestionFirstTechnicianAndBay() {
     { id: "bay_01", name: "Pont 1" },
     { id: "bay_02", name: "Pont 2" },
   ];
+  const desiredDate = new Date("2026-06-10T08:00:00");
   const suggestion = suggestWorkshopSlot({
     dossiers: [],
     technicians,
     workshopBays: bays,
     estimatedHours: 1,
-    desiredDate: new Date("2026-06-10T08:00:00"),
-  });
+    desiredDate,
+  }, desiredDate);
 
   assert.equal(suggestion.technicianId, "tech_free");
   assert.equal(suggestion.bayId, "bay_01");
@@ -402,13 +403,14 @@ function testWorkshopSlotSuggestionLunchBreak() {
   const technicians: TechnicienResource[] = [
     { ...MOCK_TECHNICIENS[0], id: "tech_lunch", nom: "Tech midi", disponibilite: "disponible", chargeActuelle: 0 },
   ];
+  const desiredDate = new Date("2026-06-10T11:30:00");
   const suggestion = suggestWorkshopSlot({
     dossiers: [],
     technicians,
     workshopBays: [{ id: "bay_01", name: "Pont 1" }],
     estimatedHours: 1,
-    desiredDate: new Date("2026-06-10T11:30:00"),
-  });
+    desiredDate,
+  }, desiredDate);
   const start = new Date(suggestion.startTime);
   const end = new Date(suggestion.endTime);
 
@@ -426,13 +428,14 @@ function testWorkshopSlotSuggestionNextWorkingDayWhenSaturated() {
     { ...MOCK_TECHNICIENS[0], id: "tech_full_1", disponibilite: "disponible", chargeActuelle: 8 },
     { ...MOCK_TECHNICIENS[1], id: "tech_full_2", disponibilite: "disponible", chargeActuelle: 8 },
   ];
+  const desiredDate = new Date("2026-06-10T09:00:00");
   const suggestion = suggestWorkshopSlot({
     dossiers: [],
     technicians,
     workshopBays: [{ id: "bay_01", name: "Pont 1" }],
     estimatedHours: 1,
-    desiredDate: new Date("2026-06-10T09:00:00"),
-  });
+    desiredDate,
+  }, desiredDate);
   const start = new Date(suggestion.startTime);
 
   assert.equal(start.getFullYear(), 2026);
@@ -1147,6 +1150,129 @@ function testCentralizedPermissions() {
   assert.equal(perm.isReadOnlyRole(UserRole.DIRECTEUR_SAV), false);
 }
 
+function testLot5DNewPlanningRules() {
+  const technicians: TechnicienResource[] = [
+    { id: "tech_01", nom: "Salah", specialite: "Diagnostic", disponibilite: "disponible", compétences: [], zoneAffectee: AtelierZone.ELECTRICITE_DIAG, absencesConges: [], capaciteJournaliere: 8, chargeActuelle: 0 },
+  ];
+  const workshopBays: WorkshopBay[] = [
+    { id: "bay_01", name: "Pont 1", zone: AtelierZone.ELECTRICITE_DIAG },
+  ];
+
+  // 1. Suggestion rule: now = 09:53, desired date today -> suggestion >= 10:00
+  const nowMock = new Date("2026-06-12T09:53:00");
+  const suggestion = suggestWorkshopSlot({
+    dossiers: [],
+    technicians,
+    workshopBays,
+    estimatedHours: 2.5,
+    desiredDate: new Date("2026-06-12T08:00:00"),
+  }, nowMock);
+
+  const start = new Date(suggestion.startTime);
+  const end = new Date(suggestion.endTime);
+
+  // Suggested starting slot must be exactly 10:00:00 local time
+  assert.equal(start.getHours(), 10);
+  assert.equal(start.getMinutes(), 0);
+
+  // 10:00 + 2h30 crosses lunch (12:00-13:00) so segments should be:
+  // 10:00-12:00 (2h) and 13:00-13:30 (30m)
+  assert.equal(suggestion.segments.length, 2);
+  
+  const s0Start = new Date(suggestion.segments[0].start);
+  const s0End = new Date(suggestion.segments[0].end);
+  assert.equal(s0Start.getHours(), 10);
+  assert.equal(s0Start.getMinutes(), 0);
+  assert.equal(s0End.getHours(), 12);
+  assert.equal(s0End.getMinutes(), 0);
+
+  const s1Start = new Date(suggestion.segments[1].start);
+  const s1End = new Date(suggestion.segments[1].end);
+  assert.equal(s1Start.getHours(), 13);
+  assert.equal(s1Start.getMinutes(), 0);
+  assert.equal(s1End.getHours(), 13);
+  assert.equal(s1End.getMinutes(), 30);
+
+  // 2. Refuses suggestion in the past
+  assert.throws(() => {
+    suggestWorkshopSlot({
+      dossiers: [],
+      technicians,
+      workshopBays,
+      estimatedHours: 1,
+      desiredDate: new Date("2026-06-11T08:00:00"),
+    }, nowMock);
+  }, /Impossible de planifier dans le passé/);
+
+  // 3. validatePlanningAssignment rules
+  const dossiers: DossierSAV[] = [
+    {
+      id: "NIMR-001",
+      clientNom: "Client 1",
+      clientTelephone: "123",
+      deposantNom: "Client 1",
+      deposantTelephone: "123",
+      vehiculeMarque: "Dongfeng",
+      vehiculeModele: "S50",
+      vehiculeImmatriculation: "123 TU 456",
+      vehiculeVIN: "123456789",
+      vehiculeKilometrage: 1000,
+      vehiculeCouleur: "Noir",
+      typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+      priorite: DossierPriority.NORMALE,
+      plainteClient: "RAS",
+      observationsReception: "RAS",
+      photosAvant: [],
+      niveauCarburant: 50,
+      etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, autresNotes: "" },
+      objetsLaisses: [],
+      dateReception: "2026-06-12T08:00:00Z",
+      dateSouhaiteeLivraison: "2026-06-12T17:00:00Z",
+      statut: DossierStatus.TRAVAUX_PLANIFIES,
+      prochaineActionRecommended: "",
+      dateDernierStatut: "2026-06-12T08:00:00Z",
+      avancementGlobal: 0,
+      ordresReparation: [
+        { id: "task_01", designation: "Vidange", tempsEstime: 1, tempsPasse: 0, status: "pending" }
+      ],
+      complements: [],
+      accords: [],
+      checklistQC: { essaiEffectue: false, defautRepare: false, aucunVoyantAllume: false, niveauxVerifies: false, serrageSecurite: false, propreteVehicule: false, documentsPrets: false, photosApresOk: false, validationGlobale: "en_attente" },
+      livraison: { controleQualiteOk: false, clientInforme: false, dateLivraisonPrevue: "", remarquesLivraison: "", confirmationReceptionClient: false, clotureInterne: false }
+    }
+  ];
+
+  // Refuse past time validation
+  const pastVal = validatePlanningAssignment({
+    dossiers,
+    dossierId: "NIMR-001",
+    lineId: "task_01",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: "2026-06-12T08:00:00",
+    end: "2026-06-12T09:00:00",
+    technicians,
+    workshopBays,
+  }, nowMock);
+  assert.equal(pastVal.allowed, false);
+  assert.ok(pastVal.codes.includes("planning-in-past"));
+
+  // Refuse non-existent resource validation
+  const invalidTechVal = validatePlanningAssignment({
+    dossiers,
+    dossierId: "NIMR-001",
+    lineId: "task_01",
+    technicianId: "tech_nonexistent",
+    bayId: "bay_01",
+    start: "2026-06-12T10:00:00",
+    end: "2026-06-12T11:00:00",
+    technicians,
+    workshopBays,
+  }, nowMock);
+  assert.equal(invalidTechVal.allowed, false);
+  assert.ok(invalidTechVal.codes.includes("planning-tech-not-found"));
+}
+
 testReceptionCreation();
 testTechnicianAssignment();
 testQualityControl();
@@ -1172,5 +1298,6 @@ testAdvancedPlanningHelpers();
 testDirectorDashboardKpis();
 await testLocalUsersAndSessions();
 testCentralizedPermissions();
+testLot5DNewPlanningRules();
 
 console.log("sav-core tests passed");

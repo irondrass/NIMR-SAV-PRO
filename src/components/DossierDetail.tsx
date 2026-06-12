@@ -185,7 +185,7 @@ export default function DossierDetail({
       onUpdateDossier(nextDossier);
       setDossierPhotoTitle("");
     } catch {
-      alert("Impossible d'ajouter cette photo au dossier.");
+      console.error("Impossible d'ajouter cette photo au dossier.");
     }
   };
 

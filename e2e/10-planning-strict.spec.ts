@@ -352,4 +352,38 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await humanClick(page, page.locator('[data-testid="planning-print-table"]'));
     await expect.poll(() => page.evaluate(() => (window as Window & { __printCalls?: number }).__printCalls ?? 0)).toBe(2);
   });
+
+  test("Lot 5D - Suggestion intelligente, ligne Maintenant et statuts", async ({ page }) => {
+    // 1. Simuler l'heure système à 09:53 le 2026-06-15
+    await page.addInitScript(() => {
+      (window as any).__mockNow = "2026-06-15T09:53:00";
+    });
+    await page.reload();
+    await changeUserRole(page, "role-option-chef-atelier");
+    await openPlanning(page);
+    await setPlanningDate(page, "2026-06-15");
+
+    // 2. Vérifier la présence de la ligne verticale "Maintenant"
+    const nowIndicator = page.locator('[data-testid="gantt-now-indicator"]').first();
+    await expect(nowIndicator).toBeVisible();
+
+    // 3. Cliquer sur "Suggérer meilleur créneau" pour dossierUnplanned
+    await page.locator('[data-testid="planning-suggest-dossier"]').selectOption(dossierUnplanned.id);
+    await humanClick(page, page.locator('[data-testid="planning-suggest-submit"]'));
+
+    // 4. Vérifier que l'heure proposée est >= 10h00 (09:53 arrondi)
+    const startText = await page.locator('[data-testid="planning-suggest-start"]').textContent();
+    expect(startText).toContain("10:00");
+    await expect(page.locator('[data-testid="planning-suggest-shifted-warning"]')).toBeVisible();
+
+    // 5. Vérifier les statuts des techniciens
+    // techA a un planning de 09:30 à 12:00, donc à 09:53 il doit être "Occupé maintenant"
+    await expect(page.locator(`[data-testid="tech-row-${techA.id}"]`)).toContainText("Occupé maintenant");
+
+    // techB a un planning à 14:00, donc à 09:53 il doit être "Planifié aujourd’hui" (pas Occupé)
+    await expect(page.locator(`[data-testid="tech-row-${techB.id}"]`)).toContainText("Planifié aujourd’hui");
+
+    // techFree n'a aucune tâche planifiée, donc il doit être "Disponible"
+    await expect(page.locator(`[data-testid="tech-row-${techFree.id}"]`)).toContainText("Disponible");
+  });
 });
