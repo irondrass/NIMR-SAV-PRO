@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5D
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5E
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C et 5D) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D et 5E) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -180,7 +180,52 @@ Pour clore le cycle de stabilisation locale de la v1.1.0, nous avons structuré 
 
 ---
 
-## 9. Résultats de la Validation Globale
+## 9. Lot 5E : Statut Planning + Recherche Véhicule/Dossier
+
+Le Lot 5E finalise la lisibilité atelier du planning et ajoute une recherche véhicule/dossier exploitable sur l'historique SAV :
+
+### Statut Planning
+- Affichage du statut tâche dans chaque bloc Gantt :
+  - À faire
+  - En cours
+  - En pause
+  - Bloquée
+  - Terminée
+  - Réouverte
+- Ajout de la légende statut tâche dans le planning.
+- Séparation claire entre :
+  - statut ressource
+  - statut tâche
+  - statut dossier
+  - statut véhicule
+
+### Recherche Véhicule/Dossier
+- Ajout du module pur `vehicle-status.ts`.
+- Groupement des dossiers par véhicule.
+- Recherche par :
+  - numéro dossier
+  - immatriculation
+  - VIN / châssis
+  - client
+  - modèle
+- Gestion d'un véhicule avec plusieurs dossiers SAV.
+- Calcul du statut véhicule agrégé.
+- Garantie métier : un ancien dossier livré ne masque pas un dossier actif.
+- Ajout de la sous-vue **Recherche par véhicule** dans Dossiers SAV.
+- Filtres rapides véhicules :
+  - Tous
+  - dossier actif
+  - bloqués
+  - en cours
+  - prêts à livrer
+  - livrés
+  - plusieurs dossiers
+- Recherche dans Planning par immatriculation / VIN / dossier / client.
+- Recherche dans Dashboard Directeur.
+
+---
+
+## 10. Résultats de la Validation Globale
 
 Le pipeline complet de validation locale a été exécuté et validé avec succès :
 
@@ -189,23 +234,24 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
 | **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit et session TTL) sont au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **177 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 18/18 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **186 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 22/22 contrôles validés** |
 
 ---
 
-## 10. Nouveaux Tests E2E Playwright
+## 11. Nouveaux Tests E2E Playwright
 
-La suite E2E a été enrichie avec 3 nouveaux fichiers de tests complets :
+La suite E2E a été enrichie avec 4 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
 2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des tickets de réclamation et le filtrage par criticité.
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
+4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
 
 ---
 
-## 11. Décision avant Lot 6
+## 12. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5D sont validés.
-La base est maintenant prête pour démarrer le Lot 6 Historique + Rapports SAV.
+Les Lots 1 à 5E sont validés.
+Cependant, avant Lot 6, un dernier lot métier atelier est nécessaire : **Lot 5F Exploitation Réelle Atelier**.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
