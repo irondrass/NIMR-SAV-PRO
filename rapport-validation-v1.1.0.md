@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-2
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-3
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1 et 5F-2) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2 et 5F-3) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -311,34 +311,47 @@ Le Lot 5F-2 transforme la page Réclamations SAV en module de suivi opérationne
 
 ---
 
-## 12. Résultats de la Validation Globale
+## 12. Lot 5F-3 : Import Devis & Durées Main-d'œuvre
+
+Le Lot 5F-3 intègre proprement l'importation de devis et la gestion de la validation des durées de main-d'œuvre :
+- **Module pur d'importation** (`src/quote-import.ts`) : normalisation de texte, extraction intelligente des heures (`2.5H`, `1H30`, `90 min`), classification automatique (Main-d'œuvre, Pièces, Divers) et construction de la prévisualisation d'import.
+- **QuoteImportModal** (`src/components/QuoteImportModal.tsx`) : interface interactive permettant de copier-coller un texte de devis brut ou d'importer un fichier CSV, de prévisualiser les lignes, de modifier les descriptions/durées et de valider la sélection avant d'ajouter les tâches (avec source `"quote-import"`).
+- **Garanties et validation de durée** :
+  - Blocage strict de la planification de toute tâche n'ayant pas de durée valide ou n'ayant pas été validée.
+  - Bouton **"Valider durée"** pour valider manuellement les tâches générées automatiquement (`preset` / `demo`) avant de pouvoir les planifier.
+  - Formulaire d'ajout manuel renforcé (description obligatoire, durée > 0 obligatoire, bouton d'ajout désactivé si invalide).
+- **Zéro CA / Caisse / Paiement / Stock** : Aucune donnée financière, facturation réelle ou gestion de stock n'a été ajoutée, respectant le cahier des charges strict du lot.
+
+---
+
+## 13. Résultats de la Validation Globale
 
 Le pipeline complet de validation locale a été exécuté et validé avec succès :
 
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit et session TTL) sont au vert. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit, session TTL, et quote-import) sont au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **207 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 33/33 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **243 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 46/46 contrôles validés** |
 
 ---
 
-## 13. Nouveaux Tests E2E Playwright
+## 14. Nouveaux Tests E2E Playwright
 
-La suite E2E a été enrichie avec 5 nouveaux fichiers de tests complets :
+La suite E2E a été enrichie avec 6 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
 2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des réclamations, l'affectation, la criticité, les changements de statut, l'action corrective, la résolution, la clôture, la réouverture, l'historique, les filtres et le lien vers le dossier lié.
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
 4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
 5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
+6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel, le classement des pièces et de la main-d'œuvre, le pré-remplissage des heures, la non-sélection par défaut des pièces, la validation de durée pour les tâches preset, et l'absence de CA/prix/paiement/caisse/stock.
 
 ---
 
-## 14. Décision avant Lot 6
+## 15. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5F-2 sont validés.
-Avant Lot 6, poursuivre avec : **Lot 5F-3 Import Devis & Durées Main-d'œuvre / migration logique ancienne application**.
+Les Lots 1 à 5F-3 sont validés.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.

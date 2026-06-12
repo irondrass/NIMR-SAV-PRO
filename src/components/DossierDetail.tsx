@@ -5,6 +5,8 @@
 
 import React, { useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
+import QuoteImportModal from "./QuoteImportModal";
+import { applyQuoteImportPreview } from "../quote-import";
 import { 
   DossierSAV, 
   DossierStatus, 
@@ -88,6 +90,7 @@ export default function DossierDetail({
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
   const [newROLineTime, setNewROLineTime] = useState<number>(1.0);
+  const [showQuoteImport, setShowQuoteImport] = useState(false);
 
   // For adding custom logs
   const [newLogText, setNewLogText] = useState("");
@@ -121,7 +124,9 @@ export default function DossierDetail({
       designation: newROLineText.trim(),
       tempsEstime: Number(newROLineTime),
       tempsPasse: 0,
-      status: "pending"
+      status: "pending",
+      estimateSource: "manual",
+      isEstimatedDurationValidated: true
     };
     const updatedRO = [...dossier.ordresReparation, newLine];
     
@@ -135,6 +140,31 @@ export default function DossierDetail({
     });
     setNewROLineText("");
     setNewROLineTime(1.0);
+  };
+
+  const handleValidateDuration = (lineId: string) => {
+    const updatedLines = dossier.ordresReparation.map(l =>
+      l.id === lineId ? { ...l, isEstimatedDurationValidated: true } : l
+    );
+    updateDossierState({
+      ordresReparation: updatedLines
+    });
+  };
+
+  const handleQuoteImportConfirm = (
+    result: ReturnType<typeof applyQuoteImportPreview>,
+    historyEntry: string
+  ) => {
+    const nextRO = [...dossier.ordresReparation, ...result.importedLines];
+    const updatedLogs = [
+      ...(dossier.historiqueLogs || []),
+      `[${userRole}] - ${historyEntry}`
+    ];
+    updateDossierState({
+      ordresReparation: nextRO,
+      historiqueLogs: updatedLogs
+    });
+    setShowQuoteImport(false);
   };
 
   const applyTaskMutation = (result: ReturnType<typeof startRepairOrder>) => {
@@ -724,9 +754,20 @@ export default function DossierDetail({
                 <h3 className="font-bold text-sm text-slate-800  font-display uppercase tracking-tight">Ordres de Travaux & Remplacement Pièces</h3>
                 <p className="text-slate-400 text-xs">Suivi des travaux de main-d'œuvre spécifiques à l'atelier</p>
               </div>
-              <span className="bg-blue-50  text-blue-700  text-xs font-bold px-3 py-1 rounded font-mono">
-                Total estimé : {dossier.ordresReparation.reduce((acc, current) => acc + current.tempsEstime, 0)} Heures
-              </span>
+              <div className="flex items-center gap-2">
+                {[UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole) && (
+                  <button
+                    onClick={() => setShowQuoteImport(true)}
+                    data-testid="quote-import-button"
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
+                  >
+                    Importer devis / MO
+                  </button>
+                )}
+                <span className="bg-blue-50  text-blue-700  text-xs font-bold px-3 py-1 rounded font-mono">
+                  Total estimé : {dossier.ordresReparation.reduce((acc, current) => acc + current.tempsEstime, 0)} Heures
+                </span>
+              </div>
             </div>
 
             {taskError && (
@@ -777,9 +818,38 @@ export default function DossierDetail({
                   >
                     <div className="space-y-1">
                       <span className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
-                      <div className="flex items-center gap-4 text-slate-400 text-[11px] font-semibold">
+                      <div className="flex flex-wrap items-center gap-4 text-slate-400 text-[11px] font-semibold">
                         <span>Estimation: <span className="text-stone-700  font-bold font-mono">{line.tempsEstime}H</span></span>
                         <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
+                        {line.estimateSource && (
+                          <span
+                            data-testid={`task-source-badge-${line.id}`}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                              line.estimateSource === "manual" ? "bg-slate-100 text-slate-700 border border-slate-200" :
+                              line.estimateSource === "quote-import" ? "bg-indigo-50 text-indigo-700 border border-indigo-200" :
+                              line.estimateSource === "preset" ? "bg-sky-50 text-sky-700 border border-sky-200" :
+                              "bg-amber-50 text-amber-700 border border-amber-200"
+                            }`}
+                          >
+                            Source: {
+                              line.estimateSource === "manual" ? "Manuel" :
+                              line.estimateSource === "quote-import" ? "Devis" :
+                              line.estimateSource === "preset" ? "Preset" : "Démo"
+                            }
+                          </span>
+                        )}
+                        {line.estimateSource && (
+                          <span
+                            data-testid={line.isEstimatedDurationValidated ? `task-duration-validated-badge-${line.id}` : `task-duration-preset-badge-${line.id}`}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                              line.isEstimatedDurationValidated
+                                ? "bg-green-50 text-green-700 border border-green-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                            }`}
+                          >
+                            {line.isEstimatedDurationValidated ? "Durée validée" : "Durée preset à valider"}
+                          </span>
+                        )}
                       </div>
                       {line.reopenedReason && (
                         <p className="text-[10px] text-violet-600  font-bold">
@@ -822,6 +892,16 @@ export default function DossierDetail({
                           </div>
                         ) : (
                           <div className="flex flex-wrap justify-end gap-1">
+                            {canManageDossier && (line.estimateSource === "preset" || line.estimateSource === "demo") && !line.isEstimatedDurationValidated && (
+                              <button
+                                onClick={() => handleValidateDuration(line.id)}
+                                data-testid={`task-validate-duration-${line.id}`}
+                                className="p-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
+                                title="Valider la durée estimée"
+                              >
+                                Valider durée
+                              </button>
+                            )}
                             {status === "blocked" && canManageDossier && (
                               <button
                                 onClick={() => handleUnblockROLine(line.id)}
@@ -907,7 +987,8 @@ export default function DossierDetail({
                   <button 
                     onClick={handleAddROLine}
                     data-testid="new-task-submit"
-                    className="py-2 bg-slate-900 hover:bg-slate-950 text-white   font-bold rounded cursor-pointer transition flex items-center justify-center gap-1"
+                    disabled={!newROLineText.trim() || !newROLineTime || newROLineTime <= 0}
+                    className="py-2 bg-slate-900 hover:bg-slate-950 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold rounded cursor-pointer transition flex items-center justify-center gap-1"
                   >
                     <Plus className="w-4 h-4" />
                     Ajouter
@@ -1427,6 +1508,15 @@ export default function DossierDetail({
         />
 
       </div>
+
+      {showQuoteImport && (
+        <QuoteImportModal
+          dossierId={dossier.id}
+          onConfirm={handleQuoteImportConfirm}
+          onCancel={() => setShowQuoteImport(false)}
+        />
+      )}
+
     </div>
   );
 }

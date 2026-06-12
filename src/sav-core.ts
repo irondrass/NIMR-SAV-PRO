@@ -130,7 +130,9 @@ export type PlanningBlockingCode =
   | "planning-tech-not-found"
   | "planning-bay-not-found"
   | "planning-task-not-found"
-  | "planning-dossier-not-found";
+  | "planning-dossier-not-found"
+  | "planning-duration-missing"
+  | "planning-duration-not-validated";
 
 export interface PlanningAssignmentInput {
   dossiers: DossierSAV[];
@@ -228,6 +230,8 @@ export function createReceptionDossier(
         tempsEstime: 2.5,
         tempsPasse: 0,
         status: "pending",
+        estimateSource: "preset" as const,
+        isEstimatedDurationValidated: false,
       },
       {
         id: createRuntimeId("ro_auto"),
@@ -235,6 +239,8 @@ export function createReceptionDossier(
         tempsEstime: 1.0,
         tempsPasse: 0,
         status: "pending",
+        estimateSource: "preset" as const,
+        isEstimatedDurationValidated: false,
       },
     ],
     complements: [],
@@ -839,6 +845,26 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     pushIssue("planning-collision-overload");
   }
 
+  // Lot 5F-3: validate task duration
+  if (dossier) {
+    const line = dossier.ordresReparation.find(l => l.id === input.lineId);
+    if (line) {
+      const hours = line.tempsEstime;
+      if (!hours || hours <= 0) {
+        pushIssue("planning-duration-missing");
+      } else {
+        const src = line.estimateSource;
+        const validated = line.isEstimatedDurationValidated;
+        // preset/demo require explicit validation before scheduling
+        if ((src === "preset" || src === "demo") && !validated) {
+          pushIssue("planning-duration-not-validated");
+        }
+        // manual with duration > 0 is considered validated implicitly
+        // quote-import is always validated (set during import confirmation)
+      }
+    }
+  }
+
   return buildPlanningValidationResult(codes, submittedSegments);
 }
 
@@ -1419,7 +1445,10 @@ function buildPlanningValidationResult(
     "planning-bay-not-found": "Pont inexistant.",
     "planning-task-not-found": "Tâche inexistante.",
     "planning-dossier-not-found": "Dossier inexistant.",
+    "planning-duration-missing": "Durée estimée absente ou nulle. Ouvrez le dossier pour saisir ou importer la durée.",
+    "planning-duration-not-validated": "Durée preset à valider. Ouvrez le dossier et validez la durée avant de planifier.",
   };
+
 
   return {
     allowed: codes.length === 0,

@@ -109,6 +109,39 @@ export interface CameraPhoto {
 
 export type RepairOrderStatus = "pending" | "in_progress" | "paused" | "blocked" | "done" | "reopened";
 
+export type QuoteLineType = "labor" | "part" | "paint" | "misc" | "unknown";
+
+export interface QuoteLine {
+  id: string;
+  rawText: string;
+  description: string;
+  type: QuoteLineType;
+  hours: number; // hours, 0 if not labor or not detected
+  confidence: "high" | "medium" | "low";
+  selected: boolean; // user selects which labor lines to import
+  editedDescription?: string;
+  editedHours?: number;
+}
+
+export interface QuoteImportPreview {
+  importId: string;
+  sourceType: "text" | "csv" | "xlsx";
+  fileName?: string;
+  lines: QuoteLine[];
+  laborCount: number;
+  partCount: number;
+  totalDetectedHours: number;
+}
+
+export interface QuoteImportResult {
+  importId: string;
+  importedLines: RepairOrderLine[];
+  laborLinesCount: number;
+  partLinesCount: number;
+  totalHours: number;
+  historyEntry: string;
+}
+
 export interface RepairOrderLine {
   id: string;
   designation: string;
@@ -117,7 +150,15 @@ export interface RepairOrderLine {
   status: RepairOrderStatus;
   reopenedReason?: string;
   history?: string[];
-  
+
+  // Lot 5F-3: estimate source and duration validation
+  estimateSource?: "manual" | "preset" | "quote-import" | "demo";
+  isEstimatedDurationValidated?: boolean;
+  quoteImportId?: string;
+  quoteLineRef?: string;
+  operationCode?: string;
+  operationFamily?: string;
+
   // Fields for Lot 4 planning
   planningStart?: string;
   planningEnd?: string;

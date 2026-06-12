@@ -782,6 +782,7 @@ export default function App() {
                                 {filteredDossiers.map(doss => (
                                   <tr
                                     key={doss.id}
+                                    data-testid={`dossier-card-${doss.id}`}
                                     className="hover:bg-slate-50/40 cursor-pointer transition"
                                     onClick={() => setSelectedDossierId(doss.id)}
                                   >

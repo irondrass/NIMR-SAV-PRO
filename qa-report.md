@@ -1,9 +1,9 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 12/06/2026 14:35:41
-- **Version** : v1.1.0 (Lot 5F-2 - Workflow Réclamations SAV)
-- **Contrôles exécutés** : 33
-- **Résultat global** : **OK** (33 OK / 0 KO)
+- **Date** : 12/06/2026 15:56:36
+- **Version** : v1.1.0 (Lot 5F-3 - Import Devis & Durées Main-d'œuvre)
+- **Contrôles exécutés** : 46
+- **Résultat global** : **OK** (46 OK / 0 KO)
 
 ## Anomalies détectées
 - Aucune anomalie détectée. Les invariants fonctionnels sont tous respectés.

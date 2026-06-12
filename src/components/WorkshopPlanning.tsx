@@ -792,9 +792,22 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                     Dossier inexistant.
                   </p>
                 )}
+                {manualWarnings.includes("planning-duration-missing") && (
+                  <p data-testid="planning-duration-missing" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Durée estimée absente ou nulle. Ouvrez le dossier pour saisir ou importer la durée.
+                  </p>
+                )}
+                {manualWarnings.includes("planning-duration-not-validated") && (
+                  <p data-testid="planning-duration-not-validated" className="text-[10px] text-amber-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-amber-500" />
+                    Durée estimée à valider. Ouvrez le dossier et validez la durée avant de planifier.
+                  </p>
+                )}
               </div>
             </div>
           )}
+
         </div>
 
       </div>

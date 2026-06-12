@@ -33,12 +33,21 @@ import {
   normalizeComplaint,
 } from "../src/complaints-workflow";
 import {
+  parseQuoteText,
+  buildQuoteImportPreview,
+  validateQuoteImportPreview,
+  mapLaborLinesToRepairOrderLines,
+  extractLaborHours,
+  classifyQuoteLine,
+} from "../src/quote-import";
+import {
   AtelierZone,
   DossierPriority,
   DossierSAV,
   DossierStatus,
   InterventionType,
   ReclammationClient,
+  RepairOrderLine,
   TechnicienResource,
   UserRole,
   WorkshopBay,
@@ -671,6 +680,155 @@ registerCheck("Lot 5F-2", "Réclamation liée à dossier conserve le lien", () =
 });
 
 // -----------------------------------------------------------------
+// Lot 5F-3 Import Devis & Durées MO Invariants
+// -----------------------------------------------------------------
+
+registerCheck("Lot 5F-3", "extractLaborHours — 2.5H = 2.5", () => {
+  assert.equal(extractLaborHours("2.5H"), 2.5);
+});
+
+registerCheck("Lot 5F-3", "extractLaborHours — 1H30 = 1.5", () => {
+  assert.equal(extractLaborHours("1H30"), 1.5);
+});
+
+registerCheck("Lot 5F-3", "extractLaborHours — 90 min = 1.5", () => {
+  assert.equal(extractLaborHours("90 min"), 1.5);
+});
+
+registerCheck("Lot 5F-3", "classifyQuoteLine — Main d'œuvre classé labor", () => {
+  assert.equal(classifyQuoteLine("Main d'œuvre remplacement amortisseur 2H"), "labor");
+});
+
+registerCheck("Lot 5F-3", "classifyQuoteLine — Filtre à air classé part", () => {
+  assert.equal(classifyQuoteLine("Filtre à air 1"), "part");
+});
+
+registerCheck("Lot 5F-3", "classifyQuoteLine — Ligne légale filtrée comme unknown", () => {
+  assert.equal(classifyQuoteLine("CE DEVIS RESTE ESTIMATIF"), "unknown");
+});
+
+registerCheck("Lot 5F-3", "parseQuoteText — sépare MO et pièces", () => {
+  const text = `Vidange + filtre huile 1H\nRemplacement plaquettes frein avant 2H\nFiltre à air 1\nHuile moteur 5W40 5L`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+  assert.ok(laborLines.length >= 2, `Expected >= 2 labor, got ${laborLines.length}`);
+  assert.ok(partLines.length >= 2, `Expected >= 2 parts, got ${partLines.length}`);
+});
+
+registerCheck("Lot 5F-3", "Parts non présélectionnées par défaut", () => {
+  const text = `Remplacement plaquettes 2H\nFiltre à air 1`;
+  const lines = parseQuoteText(text);
+  const partSelected = lines.filter(l => l.type === "part" && l.selected);
+  assert.equal(partSelected.length, 0, "Part lines must not be selected by default");
+});
+
+registerCheck("Lot 5F-3", "validateQuoteImportPreview — échoue sans sélection", () => {
+  const text = `Remplacement plaquettes 2H`;
+  const lines = parseQuoteText(text).map(l => ({ ...l, selected: false }));
+  const preview = buildQuoteImportPreview(lines);
+  const errors = validateQuoteImportPreview(preview);
+  assert.ok(errors.length > 0, "Should fail when no lines selected");
+});
+
+registerCheck("Lot 5F-3", "mapLaborLinesToRepairOrderLines — estimateSource = quote-import", () => {
+  const text = `Remplacement plaquettes 2H`;
+  const lines = parseQuoteText(text);
+  const preview = buildQuoteImportPreview(lines);
+  const roLines = mapLaborLinesToRepairOrderLines(preview);
+  assert.ok(roLines.length > 0, "Expected at least 1 RepairOrderLine");
+  assert.equal(roLines[0].estimateSource, "quote-import");
+  assert.equal(roLines[0].isEstimatedDurationValidated, true);
+});
+
+registerCheck("Lot 5F-3", "planning bloqué si durée manquante (tempsEstime=0)", () => {
+  const dossier: DossierSAV = {
+    ...getMockDossier({ id: "NIMR-QA-5F3-001" }),
+    ordresReparation: [{
+      id: "ro_qa_dur_missing",
+      designation: "Test durée manquante",
+      tempsEstime: 0,
+      tempsPasse: 0,
+      status: "pending",
+      estimateSource: "manual",
+      isEstimatedDurationValidated: true,
+    } as RepairOrderLine],
+  };
+  const now = new Date("2026-06-12T09:00:00");
+  const result = validatePlanningAssignment({
+    dossiers: [dossier],
+    dossierId: dossier.id,
+    lineId: "ro_qa_dur_missing",
+    technicianId: mockTechs[0].id,
+    bayId: mockBays[0].id,
+    start: new Date("2026-06-12T10:00:00"),
+    end: new Date("2026-06-12T12:00:00"),
+    technicians: mockTechs,
+    workshopBays: mockBays,
+  }, now);
+  assert.equal(result.allowed, false);
+  assert.ok(result.codes.includes("planning-duration-missing"), `Codes: ${result.codes.join(", ")}`);
+});
+
+registerCheck("Lot 5F-3", "planning bloqué si preset non validé", () => {
+  const dossier: DossierSAV = {
+    ...getMockDossier({ id: "NIMR-QA-5F3-002" }),
+    ordresReparation: [{
+      id: "ro_qa_preset",
+      designation: "Test preset non validé",
+      tempsEstime: 2.0,
+      tempsPasse: 0,
+      status: "pending",
+      estimateSource: "preset",
+      isEstimatedDurationValidated: false,
+    } as RepairOrderLine],
+  };
+  const now = new Date("2026-06-12T09:00:00");
+  const result = validatePlanningAssignment({
+    dossiers: [dossier],
+    dossierId: dossier.id,
+    lineId: "ro_qa_preset",
+    technicianId: mockTechs[0].id,
+    bayId: mockBays[0].id,
+    start: new Date("2026-06-12T10:00:00"),
+    end: new Date("2026-06-12T12:00:00"),
+    technicians: mockTechs,
+    workshopBays: mockBays,
+  }, now);
+  assert.equal(result.allowed, false);
+  assert.ok(result.codes.includes("planning-duration-not-validated"), `Codes: ${result.codes.join(", ")}`);
+});
+
+registerCheck("Lot 5F-3", "planning autorisé avec quote-import validé", () => {
+  const dossier: DossierSAV = {
+    ...getMockDossier({ id: "NIMR-QA-5F3-003" }),
+    ordresReparation: [{
+      id: "ro_qa_quote",
+      designation: "Test quote-import validé",
+      tempsEstime: 2.0,
+      tempsPasse: 0,
+      status: "pending",
+      estimateSource: "quote-import",
+      isEstimatedDurationValidated: true,
+    } as RepairOrderLine],
+  };
+  const now = new Date("2026-06-12T09:00:00");
+  const result = validatePlanningAssignment({
+    dossiers: [dossier],
+    dossierId: dossier.id,
+    lineId: "ro_qa_quote",
+    technicianId: mockTechs[0].id,
+    bayId: mockBays[0].id,
+    start: new Date("2026-06-12T10:00:00"),
+    end: new Date("2026-06-12T12:00:00"),
+    technicians: mockTechs,
+    workshopBays: mockBays,
+  }, now);
+  assert.ok(!result.codes.includes("planning-duration-missing") && !result.codes.includes("planning-duration-not-validated"),
+    `Should not be blocked for duration. Codes: ${result.codes.join(", ")}`);
+});
+
+// -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
 console.log("Démarrage de l'agent QA...");
@@ -693,7 +851,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 5F-2 - Workflow Réclamations SAV)
+- **Version** : v1.1.0 (Lot 5F-3 - Import Devis & Durées Main-d'œuvre)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 
