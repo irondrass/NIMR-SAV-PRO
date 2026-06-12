@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-1
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-2
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E et 5F-1) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1 et 5F-2) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -264,7 +264,54 @@ Le Lot 5F-1 nettoie les vues opérationnelles afin que l'atelier voie uniquement
 
 ---
 
-## 11. Résultats de la Validation Globale
+## 11. Lot 5F-2 : Workflow Réclamations SAV
+
+Le Lot 5F-2 transforme la page Réclamations SAV en module de suivi opérationnel complet.
+
+- Ajout des statuts :
+  - Nouvelle
+  - En analyse
+  - Action corrective en cours
+  - En attente client
+  - Résolue
+  - Clôturée
+  - Réouverte
+- Création du module pur `src/complaints-workflow.ts`.
+- Gestion des actions :
+  - création réclamation
+  - modification
+  - affectation responsable
+  - changement criticité
+  - changement statut
+  - action corrective
+  - commentaire de suivi
+  - résolution
+  - clôture
+  - réouverture
+- Historique obligatoire à chaque action.
+- Timeline en lecture seule avec :
+  - date / heure
+  - utilisateur
+  - rôle
+  - action
+  - ancien statut
+  - nouveau statut
+  - commentaire
+  - responsable modifié
+- Permissions :
+  - Directeur SAV : accès complet
+  - Réceptionnaire : création et suivi
+  - Chef Atelier : traitement action corrective
+  - Contrôle Qualité : consultation / intervention
+  - Livraison : consultation
+  - Technicien : pas d'accès global
+  - Lecture seule : consultation uniquement
+- Lecture seule ne voit aucun bouton de modification.
+- Réclamation clôturée non modifiable sauf réouverture autorisée.
+
+---
+
+## 12. Résultats de la Validation Globale
 
 Le pipeline complet de validation locale a été exécuté et validé avec succès :
 
@@ -273,25 +320,25 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
 | **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit et session TTL) sont au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **198 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 27/27 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **207 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 33/33 contrôles validés** |
 
 ---
 
-## 12. Nouveaux Tests E2E Playwright
+## 13. Nouveaux Tests E2E Playwright
 
 La suite E2E a été enrichie avec 5 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
-2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des tickets de réclamation et le filtrage par criticité.
+2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des réclamations, l'affectation, la criticité, les changements de statut, l'action corrective, la résolution, la clôture, la réouverture, l'historique, les filtres et le lien vers le dossier lié.
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
 4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
 5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
 
 ---
 
-## 13. Décision avant Lot 6
+## 14. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5F-1 sont validés.
-Avant Lot 6, poursuivre avec : **Lot 5F-2 Workflow Réclamations SAV**.
+Les Lots 1 à 5F-2 sont validés.
+Avant Lot 6, poursuivre avec : **Lot 5F-3 Import Devis & Durées Main-d'œuvre / migration logique ancienne application**.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
