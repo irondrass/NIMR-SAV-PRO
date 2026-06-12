@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5E
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-1
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D et 5E) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E et 5F-1) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -225,7 +225,46 @@ Le Lot 5E finalise la lisibilité atelier du planning et ajoute une recherche v�
 
 ---
 
-## 10. Résultats de la Validation Globale
+## 10. Lot 5F-1 : Nettoyage opérationnel Technicien & Dossiers actifs
+
+Le Lot 5F-1 nettoie les vues opérationnelles afin que l'atelier voie uniquement ce qui reste réellement à traiter, sans masquer l'historique métier utile :
+
+### Mode Technicien nettoyé
+- Les dossiers terminés, livrés, clôturés ou prêts facturation ERP sont masqués.
+- Seules les tâches utiles restent visibles :
+  - à faire
+  - en cours
+  - en pause
+  - bloquées
+  - réouvertes
+
+### Dossiers SAV
+- Vue par défaut **Actifs**.
+- Ajout des filtres :
+  - **Prêts facturation ERP**
+  - **Livrés**
+  - **Tous**
+- Les dossiers prêts ERP, livrés ou clôturés ne polluent plus la vue active.
+
+### Kanban Atelier
+- Vue de production uniquement.
+- Exclusion des dossiers prêts ERP, livrés et clôturés.
+
+### Recherche véhicule
+- Historique complet conservé pour chaque véhicule.
+- Ajout des badges :
+  - **Actif**
+  - **Prêt facturation ERP**
+  - **Livré**
+  - **Clôturé**
+
+### Dashboard Directeur
+- Conservation des KPI ERP/livrés.
+- Distinction claire entre **Opérationnel actif** et **Clôturé / ERP**.
+
+---
+
+## 11. Résultats de la Validation Globale
 
 Le pipeline complet de validation locale a été exécuté et validé avec succès :
 
@@ -234,24 +273,25 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
 | **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit et session TTL) sont au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **186 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 22/22 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **198 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 27/27 contrôles validés** |
 
 ---
 
-## 11. Nouveaux Tests E2E Playwright
+## 12. Nouveaux Tests E2E Playwright
 
-La suite E2E a été enrichie avec 4 nouveaux fichiers de tests complets :
+La suite E2E a été enrichie avec 5 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
 2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des tickets de réclamation et le filtrage par criticité.
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
 4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
+5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
 
 ---
 
-## 12. Décision avant Lot 6
+## 13. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5E sont validés.
-Cependant, avant Lot 6, un dernier lot métier atelier est nécessaire : **Lot 5F Exploitation Réelle Atelier**.
+Les Lots 1 à 5F-1 sont validés.
+Avant Lot 6, poursuivre avec : **Lot 5F-2 Workflow Réclamations SAV**.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
