@@ -49,7 +49,7 @@ test.describe("Rôle : Livraison", () => {
       valDossiers: [dossierNoQc, dossierReady]
     });
     await page.reload();
-    await changeUserRole(page, "role-option-receptionnaire");
+    await changeUserRole(page, "role-option-livraison");
   });
 
   test("Refus de livraison si le contrôle qualité n'est pas validé", async ({ page }) => {

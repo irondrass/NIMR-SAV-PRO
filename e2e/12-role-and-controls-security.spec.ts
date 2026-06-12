@@ -21,30 +21,21 @@ test.describe("Sécurité des rôles et contrôle de forçage", () => {
     await page.reload();
   });
 
-  test("Directeur SAV peut changer de rôle via l'interface réelle", async ({ page }) => {
-    // 1. Initialized as Directeur SAV
+  test("Directeur SAV accède à la gestion utilisateurs sans sélecteur de rôle libre", async ({ page }) => {
     await changeUserRole(page, "role-option-directeur");
     await expect(page.locator('[data-testid="current-role"]')).toHaveText("Directeur SAV");
 
-    // 2. Click "Changer" link
-    const switchBtn = page.locator('[data-testid="role-switch-button"]');
-    await expect(switchBtn).toBeVisible();
-    await humanClick(page, switchBtn);
-
-    // 3. We should be on Settings tab. Click "role-option-receptionnaire" button
-    const recepBtn = page.locator('[data-testid="role-option-receptionnaire"]');
-    await expect(recepBtn).toBeVisible();
-    await humanClick(page, recepBtn);
-
-    // 4. Verify role changes to Réceptionnaire and switch button is gone
-    await expect(page.locator('[data-testid="current-role"]')).toHaveText("Réceptionnaire");
-    await expect(switchBtn).not.toBeVisible();
+    await expect(page.locator('[data-testid="role-switch-button"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="nav-users"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="nav-users"]'));
+    await expect(page.locator('[data-testid="user-management-page"]')).toBeVisible();
   });
 
-  test("Les autres rôles ne peuvent pas changer de rôle via l'interface réelle", async ({ page }) => {
+  test("Les autres rôles ne peuvent pas accéder à la gestion utilisateurs", async ({ page }) => {
     const rolesToCheck = [
       { id: "role-option-chef-atelier", label: "Chef d’atelier" },
       { id: "role-option-technicien", label: "Technicien" },
+      { id: "role-option-livraison", label: "Livraison" },
       { id: "role-option-lecture-seule", label: "Lecture seule" }
     ];
 
@@ -52,15 +43,8 @@ test.describe("Sécurité des rôles et contrôle de forçage", () => {
       await changeUserRole(page, roleInfo.id);
       await expect(page.locator('[data-testid="current-role"]')).toHaveText(roleInfo.label);
 
-      // Verify "Changer" button is not visible
       await expect(page.locator('[data-testid="role-switch-button"]')).toHaveCount(0);
-
-      // Verify blocking message is visible and understandable in the sidebar
-      const blockedMsg = page.locator('[data-testid="role-change-blocked-message"]');
-      await expect(blockedMsg).toBeVisible();
-      await expect(blockedMsg).toHaveText("Modification bloquée");
-
-      // Even if they try to navigate to settings view (which they shouldn't be able to, but let's check)
+      await expect(page.locator('[data-testid="nav-users"]')).toHaveCount(0);
       await expect(page.locator('[data-testid="nav-settings"]')).toHaveCount(0);
     }
   });
@@ -71,6 +55,7 @@ test.describe("Sécurité des rôles et contrôle de forçage", () => {
       { roleId: "role-option-technicien", label: "Technicien", canEditPriority: false },
       { roleId: "role-option-lecture-seule", label: "Lecture seule", canEditPriority: false },
       { roleId: "role-option-controle-qualite", label: "Contrôle Qualité", canEditPriority: false },
+      { roleId: "role-option-livraison", label: "Livraison", canEditPriority: false },
       { roleId: "role-option-receptionnaire", label: "Réceptionnaire", canEditPriority: false },
       { roleId: "role-option-chef-atelier", label: "Chef d’atelier", canEditPriority: true },
       { roleId: "role-option-directeur", label: "Directeur SAV", canEditPriority: true }

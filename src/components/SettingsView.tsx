@@ -5,15 +5,13 @@
 
 import React from "react";
 import { APP_NAME, APP_VERSION_LABEL } from "../app-identity";
-import { UserRole, DossierStatus, InterventionType } from "../types";
+import { UserRole } from "../types";
 import { SlidersHorizontal, Download, Upload, ShieldCheck, Clock, RefreshCcw, HardDriveUpload } from "lucide-react";
 
 interface SettingsViewProps {
   onExportData: () => void;
   onImportData: (e: React.ChangeEvent<HTMLInputElement>) => void;
   activeRole: UserRole;
-  canChangeRole: boolean;
-  onChangeRole: (role: UserRole) => void;
   importSuccessMessage?: string | null;
   importErrorMessage?: string | null;
 }
@@ -22,8 +20,6 @@ export default function SettingsView({
   onExportData, 
   onImportData, 
   activeRole, 
-  canChangeRole, 
-  onChangeRole,
   importSuccessMessage,
   importErrorMessage
 }: SettingsViewProps) {
@@ -35,17 +31,9 @@ export default function SettingsView({
     { role: UserRole.RECEPTIONNAIRE, desc: "Création dossiers, réceptions tablettes, photos, accords clients, livraisons", canModify: "OUI (Réception)" },
     { role: UserRole.TECHNICIEN, desc: "Dossiers assignés personnels uniquement, timer de tâche, notes & photo diagnostic", canModify: "OUI (Ses Tâches)" },
     { role: UserRole.CONTROLE_QUALITE, desc: "Checklist d'essais routiers et statiques globales, refus ou acceptation qualité", canModify: "OUI (Qualité)" },
-    { role: UserRole.LECTURE_SEULE, desc: "Portails d'affichage TV atelier et consultation générale d'avancement ERP", canModify: "NON (Consulte)" }
+    { role: UserRole.LIVRAISON, desc: "Restitution véhicule après QC accepté et clôture opérationnelle", canModify: "OUI (Livraison)" },
+    { role: UserRole.LECTURE_SEULE, desc: "Consultation générale d'avancement sans action de modification", canModify: "NON (Consulte)" }
   ];
-
-  const roleTestIds: Record<UserRole, string> = {
-    [UserRole.DIRECTEUR_SAV]: "role-option-directeur",
-    [UserRole.RECEPTIONNAIRE]: "role-option-receptionnaire",
-    [UserRole.CHEF_ATELIER]: "role-option-chef-atelier",
-    [UserRole.TECHNICIEN]: "role-option-technicien",
-    [UserRole.CONTROLE_QUALITE]: "role-option-controle-qualite",
-    [UserRole.LECTURE_SEULE]: "role-option-lecture-seule"
-  };
 
   const openingHours = [
     { day: "Lundi - Vendredi", hm: "08:00 - 12:00, 14:00 - 18:00", active: true },
@@ -62,7 +50,7 @@ export default function SettingsView({
           <SlidersHorizontal className="w-5 h-5 text-blue-600" />
           PARAMÈTRES SYSTÈME & ARCHITECTURE {APP_VERSION_LABEL}
         </h2>
-        <p className="text-slate-400 text-xs text-left">Configuration des habilitations de rôles, horaires d'atelier, et utilitaires locaux de transfert ERP</p>
+        <p className="text-slate-400 text-xs text-left">Configuration des habilitations, horaires d'atelier et sauvegardes locales.</p>
       </div>
 
       {/* Grid containing Quick Backups and Schedule */}
@@ -142,37 +130,10 @@ export default function SettingsView({
       {/* Role and Permissions Control Board */}
       <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="font-bold text-sm text-slate-800 ">PORTAIL D'HABILITATION DE RÔLE (DÉMO INTERNE)</h3>
+          <h3 className="font-bold text-sm text-slate-800 ">Matrice des habilitations</h3>
           <p className="text-slate-400 text-xs">
-            {canChangeRole ? (
-              "Ajuster instantanément votre profil utilisateur connecté pour examiner l'ensemble des limites d'accès"
-            ) : (
-              <span data-testid="role-change-blocked-message">Votre rôle connecté ne permet pas de modifier les habilitations.</span>
-            )}
+            Vous êtes connecté avec le rôle <strong data-testid="settings-current-role">{activeRole}</strong>. La modification des comptes se fait dans Gestion utilisateurs.
           </p>
-        </div>
-
-        {/* Quick action role buttons */}
-        <div className="flex flex-wrap gap-2">
-          {Object.values(UserRole).map(role => {
-            const isSel = activeRole === role;
-            return (
-              <button
-                key={role}
-                disabled={!canChangeRole}
-                data-testid={roleTestIds[role]}
-                onClick={() => onChangeRole(role)}
-                className={`p-2.5 px-4 rounded-xl text-xs font-bold transition duration-150 border cursor-pointer hover:scale-105 ${
-                  isSel 
-                    ? "bg-slate-900 text-white  border-slate-800 font-black shadow-md" 
-                    : "bg-white  text-slate-600  border-slate-200 hover:bg-slate-100"
-                } ${!canChangeRole ? "opacity-50 cursor-not-allowed hover:scale-100" : "cursor-pointer"
-                }`}
-              >
-                {role}
-              </button>
-            );
-          })}
         </div>
 
         <div className="overflow-x-auto min-w-full pt-2">
@@ -181,7 +142,7 @@ export default function SettingsView({
               <tr className="border-b text-slate-400 font-bold uppercase text-[9px] bg-slate-50  p-2 text-left tracking-wider">
                 <th className="py-2.5 px-3">Rôle SAV</th>
                 <th className="py-2.5 px-3">Description des Devoirs & Pouvoirs</th>
-                <th className="py-2.5 px-3 text-right">Modifications ERP possible</th>
+                <th className="py-2.5 px-3 text-right">Actions autorisées</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 ">

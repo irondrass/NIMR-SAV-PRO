@@ -358,7 +358,7 @@ export default function DossierDetail({
   const canUpdateWorkOrders = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER, UserRole.TECHNICIEN].includes(userRole);
   const canHandleApprovals = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE].includes(userRole);
   const canValidateQuality = [UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER, UserRole.CONTROLE_QUALITE].includes(userRole);
-  const canDeliverVehicle = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE].includes(userRole);
+  const canDeliverVehicle = [UserRole.DIRECTEUR_SAV, UserRole.RECEPTIONNAIRE, UserRole.LIVRAISON].includes(userRole);
   const deliveryGate = canDeliverDossier(dossier);
 
   return (

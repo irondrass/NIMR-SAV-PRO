@@ -5,6 +5,19 @@
 
 import assert from "node:assert/strict";
 import {
+  canManageUsers,
+  createDefaultUsers,
+  createSession,
+  createUser,
+  hashPin,
+  isSessionValid,
+  loginUser,
+  resetUserPin,
+  setUserActive,
+  updateUserProfile,
+  verifyPin,
+} from "../src/auth";
+import {
   addPhotoToDossier,
   assignTechnicianToDossier,
   canDeliverDossier,
@@ -430,12 +443,17 @@ function testRoleTabsAndPermissions() {
   assert.equal(getDefaultTabForRole(UserRole.DIRECTEUR_SAV), "dashboard");
   assert.equal(getDefaultTabForRole(UserRole.RECEPTIONNAIRE), "reception-rapide");
   assert.equal(getDefaultTabForRole(UserRole.TECHNICIEN), "tech-view");
+  assert.equal(getDefaultTabForRole(UserRole.LIVRAISON), "dossiers-liste");
 
   assert.equal(canAccessTab(UserRole.CHEF_ATELIER, "chef-atelier"), true);
   assert.equal(canAccessTab(UserRole.CHEF_ATELIER, "parametres"), false);
   assert.equal(canAccessTab(UserRole.TECHNICIEN, "dossiers-liste"), false);
   assert.equal(canAccessTab(UserRole.CONTROLE_QUALITE, "atelier-kanban"), true);
   assert.equal(canAccessTab(UserRole.RECEPTIONNAIRE, "reception-rapide"), true);
+  assert.equal(canAccessTab(UserRole.DIRECTEUR_SAV, "users"), true);
+  assert.equal(canAccessTab(UserRole.RECEPTIONNAIRE, "users"), false);
+  assert.equal(canAccessTab(UserRole.LIVRAISON, "dossiers-liste"), true);
+  assert.equal(canAccessTab(UserRole.LIVRAISON, "dashboard"), false);
 
   assert.equal(normalizeTabForRole(UserRole.TECHNICIEN, "dashboard"), "tech-view");
   assert.equal(normalizeTabForRole(UserRole.RECEPTIONNAIRE, "parametres"), "reception-rapide");
@@ -454,6 +472,9 @@ function testStorageKeysUseNewPrefixOnly() {
 
   const values = Object.values(STORAGE_KEYS);
   assert.equal(new Set(values).size, values.length);
+  assert.equal(STORAGE_KEYS.users, "nimr-sav-pro-users");
+  assert.equal(STORAGE_KEYS.session, "nimr-sav-pro-session");
+  assert.equal((values as readonly string[]).includes("nimr-sav-pro-user-role-v1"), false);
   const oldUnderscorePrefix = ["nimr", "sav"].join("_");
   const oldHyphenPrefix = ["nimr", "sav"].join("-");
 
@@ -940,6 +961,88 @@ function testDirectorDashboardKpis() {
   assert.match(serialized, /En attente clôture ERP/);
 }
 
+async function testLocalUsersAndSessions() {
+  const now = new Date("2026-06-11T08:00:00.000Z");
+  const users = await createDefaultUsers(now);
+
+  assert.equal(users.length, 7);
+  assert.equal(users.some(user => user.username === "directeur" && user.role === UserRole.DIRECTEUR_SAV), true);
+  assert.equal(users.some(user => user.username === "livraison" && user.role === UserRole.LIVRAISON), true);
+  assert.notEqual(users.find(user => user.username === "directeur")?.pinHash, "0000");
+  assert.match(users.find(user => user.username === "directeur")?.pinHash ?? "", /^sha256:/);
+
+  const directorLogin = await loginUser(users, "directeur", "0000", now);
+  assert.equal(directorLogin.ok, true);
+  if (!directorLogin.ok) throw new Error("Director login should succeed");
+  assert.equal(directorLogin.user.displayName, "Directeur Démo SAV");
+  assert.equal(directorLogin.session.role, UserRole.DIRECTEUR_SAV);
+  assert.equal(isSessionValid(directorLogin.session, directorLogin.users), true);
+
+  const wrongPin = await loginUser(users, "directeur", "9999", now);
+  assert.equal(wrongPin.ok, false);
+  if (!wrongPin.ok) assert.equal(wrongPin.reason, "invalid-credentials");
+
+  const disabledUsers = users.map(user => user.username === "technicien" ? { ...user, active: false } : user);
+  const disabledLogin = await loginUser(disabledUsers, "technicien", "3333", now);
+  assert.equal(disabledLogin.ok, false);
+  if (!disabledLogin.ok) assert.equal(disabledLogin.reason, "disabled-user");
+
+  const session = createSession(directorLogin.user, now);
+  assert.equal(isSessionValid(session, directorLogin.users), true);
+  assert.equal(isSessionValid(null, directorLogin.users), false);
+
+  assert.equal(canManageUsers(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(canManageUsers(UserRole.RECEPTIONNAIRE), false);
+
+  const created = await createUser({
+    username: "controle-test",
+    displayName: "Contrôle Test",
+    role: UserRole.CONTROLE_QUALITE,
+    pin: "2468",
+  }, directorLogin.users, now);
+  assert.equal(created.username, "controle-test");
+  assert.equal(await verifyPin(created, "2468"), true);
+  assert.equal(created.pinHash, await hashPin(created.username, "2468"));
+
+  const withNewUser = [...directorLogin.users, created];
+  const roleUpdate = updateUserProfile(
+    withNewUser,
+    created.id,
+    { displayName: "Contrôle Modifié", role: UserRole.LIVRAISON },
+    directorLogin.user.id,
+    now
+  );
+  assert.equal(roleUpdate.ok, true);
+  if (roleUpdate.ok) {
+    const updated = roleUpdate.users.find(user => user.id === created.id);
+    assert.equal(updated?.displayName, "Contrôle Modifié");
+    assert.equal(updated?.role, UserRole.LIVRAISON);
+    assert.equal(canAccessTab(updated!.role, "dossiers-liste"), true);
+    assert.equal(canAccessTab(updated!.role, "users"), false);
+  }
+
+  const selfRoleUpdate = updateUserProfile(
+    directorLogin.users,
+    directorLogin.user.id,
+    { displayName: directorLogin.user.displayName, role: UserRole.LECTURE_SEULE },
+    directorLogin.user.id,
+    now
+  );
+  assert.equal(selfRoleUpdate.ok, false);
+
+  const lastDirectorToggle = setUserActive(directorLogin.users, directorLogin.user.id, false, now);
+  assert.equal(lastDirectorToggle.ok, false);
+  if (!lastDirectorToggle.ok) assert.match(lastDirectorToggle.message, /dernier Directeur/i);
+
+  const reset = await resetUserPin(withNewUser, created.id, "1357", now);
+  assert.equal(reset.ok, true);
+  if (reset.ok) {
+    const updated = reset.users.find(user => user.id === created.id);
+    assert.equal(await verifyPin(updated!, "1357"), true);
+    assert.equal(await verifyPin(updated!, "2468"), false);
+  }
+}
+
 testReceptionCreation();
 testTechnicianAssignment();
 testQualityControl();
@@ -963,5 +1066,6 @@ testStorageKeysUseNewPrefixOnly();
 testApplicationIdentityVersion();
 testAdvancedPlanningHelpers();
 testDirectorDashboardKpis();
+await testLocalUsersAndSessions();
 
 console.log("sav-core tests passed");

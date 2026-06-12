@@ -12,7 +12,9 @@ import {
   ActiviteLog, 
   TechnicienResource,
   AtelierZone,
-  DossierPriority
+  DossierPriority,
+  User,
+  UserSession
 } from "./types";
 import { 
   INITIAL_DOSSIERS, 
@@ -20,6 +22,20 @@ import {
   INITIAL_RECLAMATIONS, 
   INITIAL_ACTIVITE_LOGS
 } from "./data";
+import {
+  canManageUsers,
+  createUser,
+  ensureDefaultUsers,
+  isSessionValid,
+  isUser,
+  isUserSession,
+  loginUser,
+  resetUserPin,
+  setUserActive,
+  updateUserProfile,
+  CreateUserInput,
+  LoginResult,
+} from "./auth";
 import {
   createBackupPayload,
   createRuntimeId,
@@ -32,7 +48,7 @@ import {
   validateBackupPayload
 } from "./sav-core";
 import { APP_NAME, APP_VERSION } from "./app-identity";
-import { canAccessTab, canChangeRole, getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
+import { canAccessTab, getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
 
 // Views
@@ -45,6 +61,8 @@ import TechnicianView from "./components/TechnicianView";
 import ComplaintsView from "./components/ComplaintsView";
 import PerformanceSAV from "./components/PerformanceSAV";
 import SettingsView from "./components/SettingsView";
+import LoginView from "./components/LoginView";
+import UserManagementView from "./components/UserManagementView";
 import { StatusBadge, PriorityBadge } from "./components/UIParts";
 
 // Icons
@@ -69,7 +87,9 @@ import {
   Sparkles,
   Inbox,
   Lock,
-  Plus
+  LogOut,
+  Plus,
+  UserCog
 } from "lucide-react";
 
 function writeLocalStorageValue(key: string, value: string) {
@@ -99,27 +119,28 @@ function loadStoredArray<T>(key: string, fallback: T[], itemGuard: (value: unkno
   return parsed.items;
 }
 
-function loadStoredRole(): UserRole {
+function loadStoredSession(): UserSession | null {
   try {
-    const storedRole = localStorage.getItem(STORAGE_KEYS.userRole);
-    if (storedRole && Object.values(UserRole).includes(storedRole as UserRole)) {
-      return storedRole as UserRole;
-    }
+    const rawSession = localStorage.getItem(STORAGE_KEYS.session);
+    if (!rawSession) return null;
+    const parsed = JSON.parse(rawSession);
+    return isUserSession(parsed) ? parsed : null;
   } catch {
-    // Keep the app usable when browser storage is unavailable.
+    return null;
   }
-  return UserRole.DIRECTEUR_SAV;
 }
 
 export default function App() {
   // Theme state
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
-  // User connected simulation
-  const [activeRole, setActiveRole] = useState<UserRole>(() => loadStoredRole());
+  // Local internal authentication state
+  const [authReady, setAuthReady] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [currentSession, setCurrentSession] = useState<UserSession | null>(null);
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<TabId>(() => getDefaultTabForRole(activeRole));
+  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
 
   // Core Data Source States with LocalStorage fallback
   const [dossiers, setDossiers] = useState<DossierSAV[]>([]);
@@ -138,6 +159,8 @@ export default function App() {
   const [globalSearchTerm, setGlobalSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("Tous");
   const [priorityFilter, setPriorityFilter] = useState<string>("Toutes");
+  const currentUser = currentSession ? users.find(user => user.id === currentSession.userId) ?? null : null;
+  const activeRole = currentUser?.role ?? currentSession?.role ?? UserRole.LECTURE_SEULE;
 
   // Load initial states or restore from local storage
   useEffect(() => {
@@ -145,11 +168,29 @@ export default function App() {
     setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, INITIAL_RECLAMATIONS, isReclamationClient));
     setTechList(loadStoredArray(STORAGE_KEYS.techs, MOCK_TECHNICIENS, isTechnicienResource));
     setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, INITIAL_ACTIVITE_LOGS, isActiviteLog));
-  }, []);
 
-  useEffect(() => {
-    writeLocalStorageValue(STORAGE_KEYS.userRole, activeRole);
-  }, [activeRole]);
+    let mounted = true;
+    const initializeAuth = async () => {
+      const storedUsers = loadStoredArray(STORAGE_KEYS.users, [], isUser);
+      const nextUsers = await ensureDefaultUsers(storedUsers);
+      const storedSession = loadStoredSession();
+      if (!mounted) return;
+      setUsers(nextUsers);
+      writeLocalStorageJSON(STORAGE_KEYS.users, nextUsers);
+      if (isSessionValid(storedSession, nextUsers)) {
+        setCurrentSession(storedSession);
+        setActiveTab(getDefaultTabForRole(storedSession!.role));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.session);
+      }
+      setAuthReady(true);
+    };
+
+    initializeAuth();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!canAccessTab(activeRole, activeTab)) {
@@ -177,7 +218,7 @@ export default function App() {
       const newLog: ActiviteLog = {
         id: createRuntimeId("log"),
         timestamp: new Date().toISOString(),
-        user: activeRole,
+        user: currentUser?.displayName ?? activeRole,
         role: activeRole,
         action: "Changement statut",
         details: `Dossier ${updatedDossier.id} marqué comme ${updatedDossier.statut}`
@@ -199,7 +240,7 @@ export default function App() {
     const newLog: ActiviteLog = {
       id: createRuntimeId("log_create"),
       timestamp: new Date().toISOString(),
-      user: activeRole,
+      user: currentUser?.displayName ?? activeRole,
       role: activeRole,
       action: "Création dossier",
       details: `Création réussite du dossier ${newDossier.id} (${newDossier.vehiculeMarque})`
@@ -293,12 +334,109 @@ export default function App() {
     return matchesSearch && matchesStatus && matchesPriority;
   });
   const selectedDossier = selectedDossierId ? dossiers.find(d => d.id === selectedDossierId) : null;
-  const allowRoleChange = canChangeRole(activeRole);
   const goToTab = (tab: string) => {
     const nextTab = normalizeTabForRole(activeRole, tab);
     setSelectedDossierId(null);
     setActiveTab(nextTab);
   };
+
+  const persistUsers = (nextUsers: User[]) => {
+    setUsers(nextUsers);
+    writeLocalStorageJSON(STORAGE_KEYS.users, nextUsers);
+  };
+
+  const syncSessionWithUsers = (nextUsers: User[]) => {
+    if (!currentSession) return;
+    const nextCurrentUser = nextUsers.find(user => user.id === currentSession.userId);
+    if (!nextCurrentUser || !nextCurrentUser.active) {
+      handleLogout();
+      return;
+    }
+    const nextSession: UserSession = {
+      ...currentSession,
+      displayName: nextCurrentUser.displayName,
+      role: nextCurrentUser.role,
+    };
+    setCurrentSession(nextSession);
+    writeLocalStorageJSON(STORAGE_KEYS.session, nextSession);
+    setActiveTab(normalizeTabForRole(nextCurrentUser.role, activeTab));
+  };
+
+  const handleLogin = async (username: string, pin: string): Promise<LoginResult> => {
+    const result = await loginUser(users, username, pin);
+    if (result.ok) {
+      persistUsers(result.users);
+      setCurrentSession(result.session);
+      writeLocalStorageJSON(STORAGE_KEYS.session, result.session);
+      setSelectedDossierId(null);
+      setActiveTab(getDefaultTabForRole(result.session.role));
+    }
+    return result;
+  };
+
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.session);
+    } catch {
+      // Session removal failure should not keep the UI unlocked in memory.
+    }
+    setCurrentSession(null);
+    setSelectedDossierId(null);
+    setGlobalSearchTerm("");
+    setStatusFilter("Tous");
+    setPriorityFilter("Toutes");
+  };
+
+  const handleCreateUser = async (input: CreateUserInput): Promise<{ ok: boolean; message: string }> => {
+    if (!canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    if (!input.username.trim() || !input.pin.trim()) {
+      return { ok: false, message: "Identifiant et PIN obligatoires." };
+    }
+    if (users.some(user => user.username === input.username.trim().toLowerCase())) {
+      return { ok: false, message: "Identifiant utilisateur déjà existant." };
+    }
+    const nextUser = await createUser(input, users);
+    persistUsers([...users, nextUser]);
+    return { ok: true, message: "Utilisateur créé." };
+  };
+
+  const handleUpdateUser = (userId: string, changes: { displayName: string; role: UserRole }): { ok: boolean; message: string } => {
+    if (!canManageUsers(activeRole) || !currentUser) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    const result = updateUserProfile(users, userId, changes, currentUser.id);
+    if (result.ok === false) return result;
+    persistUsers(result.users);
+    syncSessionWithUsers(result.users);
+    return { ok: true, message: "Utilisateur mis à jour." };
+  };
+
+  const handleToggleUserActive = (userId: string, active: boolean): { ok: boolean; message: string } => {
+    if (!canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    const result = setUserActive(users, userId, active);
+    if (result.ok === false) return result;
+    persistUsers(result.users);
+    syncSessionWithUsers(result.users);
+    return { ok: true, message: active ? "Utilisateur activé." : "Utilisateur désactivé." };
+  };
+
+  const handleResetUserPin = async (userId: string, pin: string): Promise<{ ok: boolean; message: string }> => {
+    if (!canManageUsers(activeRole)) return { ok: false, message: "Accès réservé au Directeur SAV." };
+    const result = await resetUserPin(users, userId, pin);
+    if (result.ok === false) return result;
+    persistUsers(result.users);
+    return { ok: true, message: "PIN réinitialisé." };
+  };
+
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm font-bold text-slate-600">
+        Chargement de la session locale...
+      </div>
+    );
+  }
+
+  if (!currentSession || !currentUser) {
+    return <LoginView onLogin={handleLogin} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 transition duration-150 flex flex-col md:flex-row antialiased">
@@ -318,28 +456,23 @@ export default function App() {
             </div>
           </div>
 
-          {/* Quick simulator info */}
+          {/* Connected user info */}
           <div className="bg-slate-50 rounded-lg p-3 border border-gray-200 text-xs">
-            <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Rôle Connecté (Démo)</span>
-            <div className="flex items-center justify-between">
-              <span data-testid="current-role" className="font-extrabold text-blue-600 font-display">{activeRole}</span>
-              {allowRoleChange ? (
-                <button 
-                  onClick={() => goToTab("parametres")}
-                  data-testid="role-switch-button"
-                  className="text-[10px] text-zinc-500 underline hover:text-zinc-800 cursor-pointer"
-                >
-                  Changer
-                </button>
-              ) : (
-                <span 
-                  data-testid="role-change-blocked-message" 
-                  className="text-[10px] text-rose-600 font-semibold italic"
-                  title="Votre rôle connecté ne permet pas de modifier les habilitations."
-                >
-                  Modification bloquée
-                </span>
-              )}
+            <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block mb-1">Utilisateur connecté</span>
+            <div className="space-y-2">
+              <div>
+                <span data-testid="current-user" className="font-extrabold text-slate-900 font-display block">{currentUser.displayName}</span>
+                <span data-testid="current-role" className="font-extrabold text-blue-600 font-display">{activeRole}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                data-testid="logout-button"
+                className="inline-flex items-center gap-1.5 text-[10px] font-black text-slate-500 underline underline-offset-2 hover:text-rose-700"
+              >
+                <LogOut className="w-3 h-3" />
+                Déconnexion
+              </button>
             </div>
           </div>
 
@@ -347,16 +480,17 @@ export default function App() {
           <nav className="space-y-1">
             <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest block px-2.5 pb-2">Central Opérationnel</span>
             {[
-              { id: "dashboard", label: "Dashboard 360°", icon: Layout },
+              { id: "dashboard", label: "Dashboard KPI", icon: Layout },
               { id: "reception-rapide", label: "Réception Guidée", icon: Users },
-              { id: "dossiers-liste", label: "Dossiers SAV ERP", icon: FileText },
+              { id: "dossiers-liste", label: "Dossiers SAV", icon: FileText },
               { id: "atelier-planning", label: "Planning Atelier", icon: Calendar },
               { id: "atelier-kanban", label: "Kanban Atelier", icon: ClipboardList },
               { id: "chef-atelier", label: "Chef d'atelier", icon: Wrench },
               { id: "tech-view", label: "Mode Technicien", icon: UserCheck },
               { id: "reclamations", label: "Réclamations SAV", icon: ShieldAlert },
               { id: "rendements-sav", label: "Rapport Performances", icon: BarChart3 },
-              { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal }
+              { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal },
+              { id: "users", label: "Gestion utilisateurs", icon: UserCog }
             ].map(item => {
               if (!canAccessTab(activeRole, item.id)) return null;
               
@@ -373,7 +507,8 @@ export default function App() {
                 "parametres": "nav-settings",
                 "atelier-kanban": "nav-kanban",
                 "reclamations": "nav-reclamations",
-                "rendements-sav": "nav-performance"
+                "rendements-sav": "nav-performance",
+                "users": "nav-users"
               };
 
               return (
@@ -470,7 +605,8 @@ export default function App() {
 
             <div className="text-right leading-none hidden md:block">
               <span className="text-[10px] text-zinc-400 block font-bold">CONNECTÉ</span>
-              <span className="text-zinc-800 font-extrabold">{activeRole}</span>
+              <span className="text-zinc-800 font-extrabold">{currentUser.displayName}</span>
+              <span className="block text-[10px] font-bold text-zinc-500">{activeRole}</span>
             </div>
           </div>
 
@@ -656,15 +792,19 @@ export default function App() {
                   onExportData={handleExportDataJSON}
                   onImportData={handleImportDataJSON}
                   activeRole={activeRole}
-                  canChangeRole={allowRoleChange}
-                  onChangeRole={(role) => {
-                    if (!allowRoleChange) return;
-                    setActiveRole(role);
-                    setSelectedDossierId(null);
-                    setActiveTab(getDefaultTabForRole(role));
-                  }}
                   importSuccessMessage={importSuccessMessage}
                   importErrorMessage={importErrorMessage}
+                />
+              )}
+
+              {activeTab === "users" && canManageUsers(activeRole) && (
+                <UserManagementView
+                  users={users}
+                  currentUser={currentUser}
+                  onCreateUser={handleCreateUser}
+                  onUpdateUser={handleUpdateUser}
+                  onToggleUserActive={handleToggleUserActive}
+                  onResetPin={handleResetUserPin}
                 />
               )}
 

@@ -11,7 +11,8 @@ export const STORAGE_KEYS = {
   techs: "nimr-sav-pro-techs-v1",
   logs: "nimr-sav-pro-logs-v1",
   theme: "nimr-sav-pro-theme-v1",
-  userRole: "nimr-sav-pro-user-role-v1",
+  users: "nimr-sav-pro-users",
+  session: "nimr-sav-pro-session",
   backup: "nimr-sav-pro-backup-v1",
   settings: "nimr-sav-pro-settings-v1",
 } as const;

@@ -9,7 +9,27 @@ export enum UserRole {
   RECEPTIONNAIRE = "Réceptionnaire",
   TECHNICIEN = "Technicien",
   CONTROLE_QUALITE = "Contrôle Qualité",
+  LIVRAISON = "Livraison",
   LECTURE_SEULE = "Lecture seule"
+}
+
+export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  pinHash?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+
+export interface UserSession {
+  userId: string;
+  displayName: string;
+  role: UserRole;
+  loginAt: string;
 }
 
 export enum DossierStatus {

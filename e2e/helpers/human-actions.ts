@@ -1,4 +1,5 @@
 import { Page, Locator, expect } from "@playwright/test";
+import { STORAGE_KEYS } from "../../src/storage-keys";
 
 // Deterministic small wait to simulate user pacing without causing flakiness
 export async function humanWait(page: Page, ms = 150) {
@@ -59,21 +60,25 @@ export async function expectOnlyNimrSavProStorage(page: Page) {
 }
 
 export async function changeUserRole(page: Page, roleTestIdOrValue: string) {
-  const TESTID_TO_ROLE: Record<string, string> = {
-    "role-option-directeur": "Directeur SAV",
-    "role-option-receptionnaire": "Réceptionnaire",
-    "role-option-chef-atelier": "Chef d’atelier",
-    "role-option-technicien": "Technicien",
-    "role-option-controle-qualite": "Contrôle Qualité",
-    "role-option-lecture-seule": "Lecture seule"
+  const TESTID_TO_LOGIN: Record<string, { username: string; pin: string; role: string }> = {
+    "role-option-directeur": { username: "directeur", pin: "0000", role: "Directeur SAV" },
+    "role-option-receptionnaire": { username: "reception", pin: "1111", role: "Réceptionnaire" },
+    "role-option-chef-atelier": { username: "chefatelier", pin: "2222", role: "Chef d’atelier" },
+    "role-option-technicien": { username: "technicien", pin: "3333", role: "Technicien" },
+    "role-option-controle-qualite": { username: "qc", pin: "4444", role: "Contrôle Qualité" },
+    "role-option-livraison": { username: "livraison", pin: "5555", role: "Livraison" },
+    "role-option-lecture-seule": { username: "lecture", pin: "9999", role: "Lecture seule" }
   };
 
-  const roleValue = TESTID_TO_ROLE[roleTestIdOrValue] || roleTestIdOrValue;
-  await page.evaluate(({ key, val }) => {
-    localStorage.setItem(key, val);
-  }, { key: "nimr-sav-pro-user-role-v1", val: roleValue });
+  const login = TESTID_TO_LOGIN[roleTestIdOrValue] ?? TESTID_TO_LOGIN["role-option-directeur"];
+  await page.evaluate((sessionKey) => {
+    localStorage.removeItem(sessionKey);
+  }, STORAGE_KEYS.session);
   await page.reload();
-  await page.waitForTimeout(150);
+
+  await page.locator('[data-testid="login-page"]').waitFor({ state: "visible", timeout: 7000 });
+  await humanFill(page, page.locator('[data-testid="login-username"]'), login.username);
+  await humanFill(page, page.locator('[data-testid="login-pin"]'), login.pin);
+  await humanClick(page, page.locator('[data-testid="login-submit"]'));
+  await expect(page.locator('[data-testid="current-role"]')).toHaveText(login.role, { timeout: 7000 });
 }
-
-
