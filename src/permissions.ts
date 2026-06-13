@@ -121,3 +121,11 @@ export function canCancelReservation(role: UserRole): boolean {
 export function canConvertReservationToPlanning(role: UserRole): boolean {
   return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
 }
+
+export function canManageWorkshopAvailability(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
+}
+
+export function canViewWorkshopAvailability(role: UserRole): boolean {
+  return true;
+}

@@ -12,7 +12,8 @@ import {
   WorkshopReservation, 
   WorkshopReservationStatus,
   AtelierZone,
-  DossierStatus
+  DossierStatus,
+  WorkshopAvailabilityConfig
 } from "./types";
 import { 
   detectTechnicianCollision, 
@@ -28,6 +29,10 @@ import {
   normalizeRepairOrderStatus,
   getWorkingWindowsForDate
 } from "./sav-core";
+import { 
+  findNextAvailableWorkingSlot, 
+  validateAvailabilityForSlot 
+} from "./workshop-availability";
 
 function segmentsOverlap(
   segA: Array<{ start: string; end: string }>,
@@ -318,10 +323,11 @@ export function suggestReservationSlot(
     reservations: WorkshopReservation[];
     technicians: TechnicienResource[];
     workshopBays: WorkshopBay[];
+    availabilityConfig?: WorkshopAvailabilityConfig;
   },
   now: Date = new Date()
 ): WorkshopReservation {
-  const { reservation, dossiers, reservations, technicians, workshopBays } = input;
+  const { reservation, dossiers, reservations, technicians, workshopBays, availabilityConfig } = input;
   const durationHours = reservation.totalHours;
   if (durationHours <= 0) {
     throw new Error("Aucune durée MO validée.");
@@ -357,7 +363,6 @@ export function suggestReservationSlot(
   } else {
     startAfter.setHours(8, 0, 0, 0);
   }
-  startAfter = alignToWorkingTime(startAfter);
 
   const usableTechnicians = technicians.filter(t => !["absent", "formation"].includes(t.disponibilite));
   const techsToTry = usableTechnicians.length > 0 ? usableTechnicians : technicians;
@@ -383,33 +388,66 @@ export function suggestReservationSlot(
     return 0;
   });
 
-  for (const tech of sortedTechs) {
-    const compatibleBays = workshopBays.filter(bay => !bay.zone || bay.zone === tech.zoneAffectee);
-    const baysToTry = compatibleBays.length > 0 ? compatibleBays : workshopBays;
-    
-    for (const bay of baysToTry) {
-      const segments = findSegmentsForDuration(
-        tech.id,
-        bay.id,
-        startAfter,
-        durationMinutes,
-        dossiers,
-        reservations,
-        reservation.dossierId
-      );
+  if (availabilityConfig) {
+    for (const tech of sortedTechs) {
+      const compatibleBays = workshopBays.filter(bay => !bay.zone || bay.zone === tech.zoneAffectee);
+      const baysToTry = compatibleBays.length > 0 ? compatibleBays : workshopBays;
       
-      if (segments && segments.length > 0) {
-        const slotStart = new Date(segments[0].start);
-        const slotEnd = new Date(segments[segments.length - 1].end);
+      for (const bay of baysToTry) {
+        const slot = findNextAvailableWorkingSlot({
+          durationMinutes,
+          startDate: startAfter,
+          technicianId: tech.id,
+          bayId: bay.id,
+          dossiers,
+          reservations,
+          excludeDossierId: reservation.dossierId,
+          config: availabilityConfig
+        });
         
-        if (!bestSlot || slotStart.getTime() < bestSlot.startTime.getTime()) {
-          bestSlot = {
-            startTime: slotStart,
-            endTime: slotEnd,
-            segments,
-            techId: tech.id,
-            bayId: bay.id
-          };
+        if (slot) {
+          if (!bestSlot || slot.startTime.getTime() < bestSlot.startTime.getTime()) {
+            bestSlot = {
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              segments: slot.segments,
+              techId: tech.id,
+              bayId: bay.id
+            };
+          }
+        }
+      }
+    }
+  } else {
+    startAfter = alignToWorkingTime(startAfter);
+    for (const tech of sortedTechs) {
+      const compatibleBays = workshopBays.filter(bay => !bay.zone || bay.zone === tech.zoneAffectee);
+      const baysToTry = compatibleBays.length > 0 ? compatibleBays : workshopBays;
+      
+      for (const bay of baysToTry) {
+        const segments = findSegmentsForDuration(
+          tech.id,
+          bay.id,
+          startAfter,
+          durationMinutes,
+          dossiers,
+          reservations,
+          reservation.dossierId
+        );
+        
+        if (segments && segments.length > 0) {
+          const slotStart = new Date(segments[0].start);
+          const slotEnd = new Date(segments[segments.length - 1].end);
+          
+          if (!bestSlot || slotStart.getTime() < bestSlot.startTime.getTime()) {
+            bestSlot = {
+              startTime: slotStart,
+              endTime: slotEnd,
+              segments,
+              techId: tech.id,
+              bayId: bay.id
+            };
+          }
         }
       }
     }
@@ -463,10 +501,11 @@ export function validateReservationSlot(
     reservations: WorkshopReservation[];
     technicians: TechnicienResource[];
     workshopBays: WorkshopBay[];
+    availabilityConfig?: WorkshopAvailabilityConfig;
   },
   now: Date = new Date()
 ): { allowed: boolean; codes: string[]; reasons: string[] } {
-  const { reservation, dossiers, reservations, technicians, workshopBays } = input;
+  const { reservation, dossiers, reservations, technicians, workshopBays, availabilityConfig } = input;
   const codes: string[] = [];
   const reasons: string[] = [];
   
@@ -502,6 +541,29 @@ export function validateReservationSlot(
   
   const expectedSegments = buildPlanningSegments(start, end);
   const submittedSegments = reservation.segments || expectedSegments;
+  
+  if (availabilityConfig) {
+    const avail = validateAvailabilityForSlot({
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+      segments: submittedSegments,
+      technicianId: reservation.technicianId,
+      bayId: reservation.bayId,
+      config: availabilityConfig
+    });
+    if (!avail.allowed) {
+      avail.codes.forEach(code => {
+        if (!codes.includes(code)) {
+          codes.push(code);
+        }
+      });
+      avail.reasons.forEach(reason => {
+        if (!reasons.includes(reason)) {
+          reasons.push(reason);
+        }
+      });
+    }
+  }
   
   // Check if any segment is on a Sunday
   const hasSundaySegment = submittedSegments.some(seg => {

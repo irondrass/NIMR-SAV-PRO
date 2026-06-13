@@ -54,7 +54,9 @@ import {
   TechnicienResource,
   UserRole,
   WorkshopBay,
+  WorkshopAvailabilityConfig,
 } from "../src/types";
+
 
 interface QACheck {
   id: string;
@@ -999,6 +1001,12 @@ import {
   cancelReservation,
   convertReservationToPlanning
 } from "../src/workshop-reservations";
+import {
+  getDefaultWorkshopSchedule,
+  isWorkshopClosed,
+  isTechnicianAbsent,
+  isBayUnavailable
+} from "../src/workshop-availability";
 
 registerCheck("Lot 5F-4A Invariants", "aucune réservation sans durée MO validée", () => {
   const dossier = getMockDossier({
@@ -1250,6 +1258,271 @@ registerCheck("Lot 5F-4A Invariants", "validation d'une réservation multi-jours
   }, new Date("2026-06-15T08:00:00"));
   
   assert.ok(valResult.allowed, `Validation of multi-day slot must be allowed but got: ${valResult.reasons.join(", ")}`);
+});
+
+// -----------------------------------------------------------------
+// Lot 5F-4B Workshop Availability Invariants
+// -----------------------------------------------------------------
+
+registerCheck("Lot 5F-4B Invariants", "aucune réservation sur technicien absent", () => {
+  const dossier = getMockDossier({
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [{ id: "a1", technicianId: "tech_01", startDate: "2026-06-15", endDate: "2026-06-15", reason: "Absent" }],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  const valResult = validateReservationSlot({
+    reservation: {
+      ...need,
+      startTime: "2026-06-15T09:00:00",
+      endTime: "2026-06-15T11:00:00",
+      technicianId: "tech_01",
+      bayId: "bay_01",
+      segments: [{ start: "2026-06-15T09:00:00", end: "2026-06-15T11:00:00" }]
+    },
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    availabilityConfig: config
+  }, new Date("2026-06-13T08:00:00"));
+  assert.equal(valResult.allowed, false);
+  assert.ok(valResult.codes.includes("technician-absent"));
+});
+
+registerCheck("Lot 5F-4B Invariants", "aucune réservation sur pont indisponible", () => {
+  const dossier = getMockDossier({
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [{ id: "u1", bayId: "bay_01", startDate: "2026-06-15", endDate: "2026-06-15", reason: "Maintenance" }],
+    holidays: []
+  };
+  const valResult = validateReservationSlot({
+    reservation: {
+      ...need,
+      startTime: "2026-06-15T09:00:00",
+      endTime: "2026-06-15T11:00:00",
+      technicianId: "tech_01",
+      bayId: "bay_01",
+      segments: [{ start: "2026-06-15T09:00:00", end: "2026-06-15T11:00:00" }]
+    },
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    availabilityConfig: config
+  }, new Date("2026-06-13T08:00:00"));
+  assert.equal(valResult.allowed, false);
+  assert.ok(valResult.codes.includes("bay-unavailable"));
+});
+
+registerCheck("Lot 5F-4B Invariants", "aucune réservation sur jour férié", () => {
+  const dossier = getMockDossier({
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: [{ id: "h1", date: "2026-06-15", name: "Fête" }]
+  };
+  const valResult = validateReservationSlot({
+    reservation: {
+      ...need,
+      startTime: "2026-06-15T09:00:00",
+      endTime: "2026-06-15T11:00:00",
+      technicianId: "tech_01",
+      bayId: "bay_01",
+      segments: [{ start: "2026-06-15T09:00:00", end: "2026-06-15T11:00:00" }]
+    },
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    availabilityConfig: config
+  }, new Date("2026-06-13T08:00:00"));
+  assert.equal(valResult.allowed, false);
+  assert.ok(valResult.codes.includes("workshop-holiday"));
+});
+
+registerCheck("Lot 5F-4B Invariants", "aucun planning sur atelier fermé", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [{ id: "exc1", date: "2026-06-16", isClosed: true, reason: "Maintenance" }],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  const valResult = validatePlanningAssignment({
+    dossiers: [getMockDossier()],
+    dossierId: "NIMR-QA-001",
+    lineId: "task_01",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: "2026-06-16T09:00:00",
+    end: "2026-06-16T11:00:00",
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    reservations: [],
+    availabilityConfig: config
+  }, new Date("2026-06-13T08:00:00"));
+  assert.equal(valResult.allowed, false);
+  assert.ok(valResult.codes.includes("workshop-closed"));
+});
+
+registerCheck("Lot 5F-4B Invariants", "samedi après-midi fermé par défaut", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  const valResult = validatePlanningAssignment({
+    dossiers: [getMockDossier()],
+    dossierId: "NIMR-QA-001",
+    lineId: "task_01",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: "2026-06-20T14:00:00",
+    end: "2026-06-20T16:00:00",
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    reservations: [],
+    availabilityConfig: config
+  }, new Date("2026-06-13T08:00:00"));
+  assert.equal(valResult.allowed, false);
+  assert.ok(valResult.codes.includes("outside-effective-working-hours") || valResult.codes.includes("workshop-closed"));
+});
+
+registerCheck("Lot 5F-4B Invariants", "dimanche fermé par défaut", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  const valResult = validatePlanningAssignment({
+    dossiers: [getMockDossier()],
+    dossierId: "NIMR-QA-001",
+    lineId: "task_01",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: "2026-06-21T09:00:00",
+    end: "2026-06-21T11:00:00",
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    reservations: [],
+    availabilityConfig: config
+  }, new Date("2026-06-13T08:00:00"));
+  assert.equal(valResult.allowed, false);
+  assert.ok(valResult.codes.includes("workshop-closed"));
+});
+
+registerCheck("Lot 5F-4B Invariants", "suppression absence libère la ressource", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  assert.equal(isTechnicianAbsent("tech_01", new Date("2026-06-15T10:00:00"), config), false);
+});
+
+registerCheck("Lot 5F-4B Invariants", "suppression indisponibilité pont libère le pont", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  assert.equal(isBayUnavailable("bay_01", new Date("2026-06-15T10:00:00"), config), false);
+});
+
+registerCheck("Lot 5F-4B Invariants", "réservation longue saute les jours fermés", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [{ id: "exc1", date: "2026-06-16", isClosed: true }], // Mardi fermé
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  const dossier = getMockDossier({
+    id: "NIMR-QA-LONG",
+    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task", tempsEstime: 12.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    availabilityConfig: config
+  }, new Date("2026-06-15T08:00:00"));
+  
+  assert.ok(res.segments);
+  const segmentDays = res.segments.map(seg => seg.start.split("T")[0]);
+  assert.ok(!segmentDays.includes("2026-06-16"), "Must skip closed day");
+});
+
+registerCheck("Lot 5F-4B Invariants", "réservation longue saute les absences", () => {
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [{ id: "a1", technicianId: "tech_01", startDate: "2026-06-16", endDate: "2026-06-16", reason: "Absent" }], // Mardi absent
+    bayUnavailabilities: [],
+    holidays: []
+  };
+  const dossier = getMockDossier({
+    id: "NIMR-QA-LONG2",
+    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task", tempsEstime: 12.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays,
+    availabilityConfig: config
+  }, new Date("2026-06-15T08:00:00"));
+  
+  assert.ok(res.segments);
+  const segmentDays = res.segments.map(seg => seg.start.split("T")[0]);
+  assert.ok(!segmentDays.includes("2026-06-16"), "Must skip technician absence day");
 });
 
 // -----------------------------------------------------------------

@@ -15,7 +15,8 @@ import {
   DossierPriority,
   User,
   UserSession,
-  WorkshopReservation
+  WorkshopReservation,
+  WorkshopAvailabilityConfig
 } from "./types";
 import { 
   INITIAL_DOSSIERS, 
@@ -54,6 +55,7 @@ import {
 import { APP_NAME, APP_VERSION } from "./app-identity";
 import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
+import { getDefaultWorkshopSchedule } from "./workshop-availability";
 
 // Views
 import DirectorDashboard from "./components/DirectorDashboard";
@@ -134,6 +136,27 @@ function loadStoredSession(): UserSession | null {
   }
 }
 
+function loadStoredAvailabilityConfig(key: string, fallback: WorkshopAvailabilityConfig): WorkshopAvailabilityConfig {
+  try {
+    const rawValue = localStorage.getItem(key);
+    if (!rawValue) return fallback;
+    const parsed = JSON.parse(rawValue);
+    if (
+      parsed &&
+      parsed.schedule &&
+      Array.isArray(parsed.exceptions) &&
+      Array.isArray(parsed.absences) &&
+      Array.isArray(parsed.bayUnavailabilities) &&
+      Array.isArray(parsed.holidays)
+    ) {
+      return parsed as WorkshopAvailabilityConfig;
+    }
+  } catch {
+    // Ignore
+  }
+  return fallback;
+}
+
 type DossierOperationalFilter = "active" | "ready_for_billing" | "delivered" | "all";
 
 export default function App() {
@@ -158,6 +181,13 @@ export default function App() {
   const [techList, setTechList] = useState<TechnicienResource[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActiviteLog[]>([]);
   const [reservations, setReservations] = useState<WorkshopReservation[]>([]);
+  const [availabilityConfig, setAvailabilityConfig] = useState<WorkshopAvailabilityConfig>({
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: []
+  });
 
   // Detailed selected folder id
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
@@ -182,6 +212,15 @@ export default function App() {
     setTechList(loadStoredArray(STORAGE_KEYS.techs, MOCK_TECHNICIENS, isTechnicienResource));
     setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, INITIAL_ACTIVITE_LOGS, isActiviteLog));
     setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
+
+    const defaultAvail: WorkshopAvailabilityConfig = {
+      schedule: getDefaultWorkshopSchedule(),
+      exceptions: [],
+      absences: [],
+      bayUnavailabilities: [],
+      holidays: []
+    };
+    setAvailabilityConfig(loadStoredAvailabilityConfig(STORAGE_KEYS.availability, defaultAvail));
 
     let mounted = true;
     const initializeAuth = async () => {
@@ -288,6 +327,12 @@ export default function App() {
     handleTouchSession();
     setReservations(nextRes);
     writeLocalStorageJSON(STORAGE_KEYS.reservations, nextRes);
+  };
+
+  const handleUpdateAvailabilityConfig = (nextConfig: WorkshopAvailabilityConfig) => {
+    handleTouchSession();
+    setAvailabilityConfig(nextConfig);
+    writeLocalStorageJSON(STORAGE_KEYS.availability, nextConfig);
   };
 
   // State Import/Export logic
@@ -854,6 +899,8 @@ export default function App() {
                   onSelectDossier={(id) => setSelectedDossierId(id)}
                   onUpdateDossier={handleUpdateDossier}
                   activeRole={activeRole}
+                  availabilityConfig={availabilityConfig}
+                  onUpdateAvailabilityConfig={handleUpdateAvailabilityConfig}
                 />
               )}
 

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, RepairOrderStatus, UserRole, WorkshopReservation } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, RepairOrderStatus, UserRole, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -17,6 +17,14 @@ import {
   calculateTechnicianDailyLoad,
   validatePlanningAssignment
 } from "../sav-core";
+import { 
+  findNextAvailableWorkingSlot, 
+  validateAvailabilityForSlot,
+  isWorkshopClosed,
+  isTechnicianAbsent,
+  isBayUnavailable,
+  getEffectiveWorkshopWindows
+} from "../workshop-availability";
 import { 
   Calendar, 
   UserCheck, 
@@ -77,6 +85,8 @@ interface WorkshopPlanningProps {
   onSelectDossier: (id: string) => void;
   onUpdateDossier: (updated: DossierSAV) => void;
   activeRole: UserRole;
+  availabilityConfig?: WorkshopAvailabilityConfig;
+  onUpdateAvailabilityConfig?: (updated: WorkshopAvailabilityConfig) => void;
 }
 
 const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
@@ -94,7 +104,9 @@ export default function WorkshopPlanning({
   onUpdateReservations,
   onSelectDossier,
   onUpdateDossier,
-  activeRole
+  activeRole,
+  availabilityConfig,
+  onUpdateAvailabilityConfig
 }: WorkshopPlanningProps) {
   const [filterZone, setFilterZone] = useState<string>("Toutes");
   const [filterBay, setFilterBay] = useState<string>("Toutes");
@@ -131,6 +143,32 @@ export default function WorkshopPlanning({
   const selectedDateStr = getLocalDateStr(selectedDate);
   const isSat = selectedDate.getDay() === 6;
   const isClosedDay = !isWorkingDay(selectedDate);
+
+  const isHoliday = availabilityConfig ? availabilityConfig.holidays.some(h => h.date === selectedDateStr) : false;
+  const isClosed = availabilityConfig ? isWorkshopClosed(selectedDate, availabilityConfig) : isClosedDay;
+  const holidayName = availabilityConfig ? availabilityConfig.holidays.find(h => h.date === selectedDateStr)?.name : null;
+
+  const getDayScheduleDescription = () => {
+    if (availabilityConfig) {
+      if (isHoliday) {
+        return `Jour férié : ${holidayName}`;
+      }
+      const exception = availabilityConfig.exceptions.find(e => e.date === selectedDateStr);
+      if (exception) {
+        if (exception.isClosed) {
+          return `Fermeture exceptionnelle : ${exception.reason || "Fermé"}`;
+        }
+        return `Horaire exceptionnel : ${exception.windows?.map(w => `${w.start}-${w.end}`).join(", ")}`;
+      }
+      const dayOfWeek = selectedDate.getDay();
+      const daySched = availabilityConfig.schedule.days.find(d => d.dayOfWeek === dayOfWeek);
+      if (!daySched || daySched.isClosed) {
+        return "Atelier fermé";
+      }
+      return `Ouvert : ${daySched.windows.map(w => `${w.start}-${w.end}`).join(" / ")}`;
+    }
+    return isClosedDay ? "Dimanche fermé" : isSat ? "Samedi (08h00 - 12h00 uniquement)" : "Lundi-Vendredi (Ouvert 08h-12h / 13h-17h)";
+  };
 
   const getSystemTime = () => {
     if (typeof window !== "undefined" && (window as any).__mockNow) {
@@ -232,6 +270,7 @@ export default function WorkshopPlanning({
         desiredDate: targetDesiredDate,
         dossierId: selectedTargetIdForSuggest,
         reservations,
+        availabilityConfig,
       }, getSystemTime());
 
       setSuggestion(res);
@@ -312,6 +351,7 @@ export default function WorkshopPlanning({
       technicians: techniciens,
       workshopBays: DEFAULT_WORKSHOP_BAYS,
       reservations,
+      availabilityConfig,
     }, getSystemTime()).codes;
   };
 
@@ -333,6 +373,7 @@ export default function WorkshopPlanning({
       technicians: techniciens,
       workshopBays: DEFAULT_WORKSHOP_BAYS,
       reservations,
+      availabilityConfig,
     }, getSystemTime());
 
     if (!validation.allowed) {
@@ -466,7 +507,8 @@ export default function WorkshopPlanning({
         dossiers,
         reservations,
         technicians: techniciens,
-        workshopBays: DEFAULT_WORKSHOP_BAYS
+        workshopBays: DEFAULT_WORKSHOP_BAYS,
+        availabilityConfig
       }, getSystemTime());
 
       const exists = reservations.some(r => r.reservationId === suggested.reservationId);
@@ -627,11 +669,25 @@ export default function WorkshopPlanning({
               }}
             />
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">
-              {isClosedDay ? "Dimanche fermé" : isSat ? "Samedi (08h00 - 12h00 uniquement)" : "Lundi-Vendredi (Ouvert 08h-12h / 13h-17h)"}
+              {getDayScheduleDescription()}
             </span>
           </div>
         </div>
       </div>
+
+      {/* Closed / Holiday Banners */}
+      {isClosed && (
+        <div 
+          data-testid="workshop-closed-banner"
+          className={`p-4 rounded-xl border text-center font-bold text-xs uppercase tracking-wider ${
+            isHoliday 
+              ? "bg-amber-100 text-amber-800 border-amber-200" 
+              : "bg-rose-100 text-rose-800 border-rose-200"
+          }`}
+        >
+          {isHoliday ? `Jour férié : ${holidayName}` : "Atelier fermé"}
+        </div>
+      )}
 
       {/* Auto suggest, manual form & reservations Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -959,7 +1015,8 @@ export default function WorkshopPlanning({
                     dossiers,
                     reservations,
                     technicians: techniciens,
-                    workshopBays: DEFAULT_WORKSHOP_BAYS
+                    workshopBays: DEFAULT_WORKSHOP_BAYS,
+                    availabilityConfig
                   }, getSystemTime());
                   if (!valResult.allowed) {
                     validationErrors = valResult.reasons;
@@ -1253,10 +1310,15 @@ export default function WorkshopPlanning({
 
                 const hasSegmentsToday = todayTechSegments.length > 0;
 
+                const isAbsent = availabilityConfig ? isTechnicianAbsent(tech.id, selectedDate, availabilityConfig) : false;
+
                 let statusLabel = "Disponible";
                 let statusColor = "bg-green-500 text-white";
 
-                if (isNonDisponible) {
+                if (isAbsent) {
+                  statusLabel = "Absent";
+                  statusColor = "bg-red-600 text-white";
+                } else if (isNonDisponible) {
                   statusLabel = "Non disponible";
                   statusColor = "bg-red-500 text-white";
                 } else if (hasInProgressTask || hasSegmentCoveringNow) {
@@ -1276,6 +1338,14 @@ export default function WorkshopPlanning({
                     <div className="col-span-3 space-y-1 pl-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span data-testid={`tech-name-${tech.id}`} className="font-extrabold text-gray-900 text-xs">{tech.nom}</span>
+                        {isAbsent && (
+                          <span 
+                            data-testid="technician-absent-badge" 
+                            className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-red-600 text-white uppercase animate-pulse"
+                          >
+                            Absent
+                          </span>
+                        )}
                         <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase ${statusColor}`}>
                           {statusLabel}
                         </span>
@@ -1481,10 +1551,15 @@ export default function WorkshopPlanning({
 
             const hasBaySegmentsToday = todayBaySegments.length > 0;
 
+            const isBayUnav = availabilityConfig ? isBayUnavailable(bay.id, selectedDate, availabilityConfig) : false;
+
             let bayStatusLabel = "Libre maintenant";
             let bayStatusColor = "bg-green-500 text-white";
 
-            if (hasBaySegmentCoveringNow) {
+            if (isBayUnav) {
+              bayStatusLabel = "Indisponible";
+              bayStatusColor = "bg-red-600 text-white";
+            } else if (hasBaySegmentCoveringNow) {
               bayStatusLabel = "Occupé maintenant";
               bayStatusColor = "bg-orange-500 text-white";
             } else if (hasBaySegmentsToday) {
@@ -1504,6 +1579,14 @@ export default function WorkshopPlanning({
                 <div className="col-span-3 space-y-1 pl-2">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-extrabold text-gray-900 text-xs">{bay.name}</span>
+                    {isBayUnav && (
+                      <span 
+                        data-testid="bay-unavailable-badge" 
+                        className="text-[8px] font-black px-1.5 py-0.5 rounded-lg bg-red-650 text-white uppercase animate-pulse"
+                      >
+                        Indisponible
+                      </span>
+                    )}
                     <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase ${bayStatusColor}`}>
                       {bayStatusLabel}
                     </span>
@@ -1676,6 +1759,414 @@ export default function WorkshopPlanning({
         </div>
 
       </div>
+
+      {/* Workshop Availability Configuration Panel */}
+      {perm.canViewWorkshopAvailability(activeRole) && availabilityConfig && onUpdateAvailabilityConfig && (
+        <div 
+          data-testid="workshop-availability-panel"
+          className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-6"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+            <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-1.5 font-display">
+              <Settings className="w-4.5 h-4.5 text-indigo-650" />
+              Disponibilités de l'Atelier
+            </h3>
+            <span className="text-[10px] text-gray-400 font-bold uppercase">
+              {perm.canManageWorkshopAvailability(activeRole) ? "Gestion administrative" : "Consultation"}
+            </span>
+          </div>
+
+          {/* 1. Default Working Hours */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wider">Horaires de travail par défaut</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-gray-600">
+              <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl">
+                <strong className="text-gray-900 block mb-1">Lundi - Vendredi</strong>
+                08:00 - 12:00 / 13:00 - 17:00
+              </div>
+              <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl">
+                <strong className="text-gray-900 block mb-1">Samedi</strong>
+                08:00 - 12:00
+              </div>
+              <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl">
+                <strong className="text-gray-900 block mb-1">Dimanche</strong>
+                Fermé
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4 border-t border-gray-100">
+            
+            {/* 2. Technician Absences */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-blue-600" />
+                Absences Techniciens
+              </h4>
+              
+              {perm.canManageWorkshopAvailability(activeRole) && (
+                <form 
+                  data-testid="technician-absence-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    const techId = formData.get("techId") as string;
+                    const startDate = formData.get("startDate") as string;
+                    const endDate = formData.get("endDate") as string;
+                    const startTime = formData.get("startTime") as string;
+                    const endTime = formData.get("endTime") as string;
+                    const reason = formData.get("reason") as string;
+
+                    if (!techId || !startDate || !endDate || !reason) return;
+
+                    const newAbsence = {
+                      id: `abs_${Date.now()}`,
+                      technicianId: techId,
+                      startDate,
+                      endDate,
+                      startTime: startTime || undefined,
+                      endTime: endTime || undefined,
+                      reason
+                    };
+
+                    onUpdateAvailabilityConfig({
+                      ...availabilityConfig,
+                      absences: [...availabilityConfig.absences, newAbsence]
+                    });
+                    e.currentTarget.reset();
+                  }}
+                  className="space-y-3 p-3 bg-gray-50 border border-gray-150 rounded-xl text-xs"
+                >
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Technicien</label>
+                    <select name="techId" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required>
+                      {techniciens.map(t => (
+                        <option key={t.id} value={t.id}>{t.nom}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Début</label>
+                      <input type="date" name="startDate" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Fin</label>
+                      <input type="date" name="endDate" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Heure Début (optionnel)</label>
+                      <input type="time" name="startTime" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Heure Fin (optionnel)</label>
+                      <input type="time" name="endTime" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Motif</label>
+                    <input type="text" name="reason" placeholder="Ex: Congés" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                  </div>
+                  <button 
+                    data-testid="technician-absence-add-btn"
+                    type="submit" 
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                  >
+                    Ajouter absence
+                  </button>
+                </form>
+              )}
+
+              <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                {availabilityConfig.absences.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">Aucune absence enregistrée.</p>
+                ) : (
+                  availabilityConfig.absences.map(abs => {
+                    const tech = techniciens.find(t => t.id === abs.technicianId);
+                    return (
+                      <div key={abs.id} className="p-2 border border-gray-150 rounded-lg flex items-center justify-between text-xs hover:bg-gray-50">
+                        <div>
+                          <strong className="text-gray-850 block">{tech?.nom || abs.technicianId}</strong>
+                          <span className="text-[10px] text-gray-500 block">
+                            Du {new Date(abs.startDate).toLocaleDateString("fr-FR")} au {new Date(abs.endDate).toLocaleDateString("fr-FR")}
+                            {abs.startTime && ` (${abs.startTime}-${abs.endTime || ""})`}
+                          </span>
+                          <span className="text-[9px] text-gray-400 block italic">{abs.reason}</span>
+                        </div>
+                        {perm.canManageWorkshopAvailability(activeRole) && (
+                          <button
+                            data-testid="technician-absence-delete-btn"
+                            onClick={() => {
+                              onUpdateAvailabilityConfig({
+                                ...availabilityConfig,
+                                absences: availabilityConfig.absences.filter(a => a.id !== abs.id)
+                              });
+                            }}
+                            className="p-1 hover:bg-rose-50 text-rose-600 rounded transition cursor-pointer"
+                            title="Supprimer"
+                          >
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* 3. Bay Unavailabilities */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Hammer className="w-4 h-4 text-orange-650" />
+                Indisponibilités Ponts
+              </h4>
+              
+              {perm.canManageWorkshopAvailability(activeRole) && (
+                <form 
+                  data-testid="bay-unavailability-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    const bayId = formData.get("bayId") as string;
+                    const startDate = formData.get("startDate") as string;
+                    const endDate = formData.get("endDate") as string;
+                    const startTime = formData.get("startTime") as string;
+                    const endTime = formData.get("endTime") as string;
+                    const reason = formData.get("reason") as string;
+
+                    if (!bayId || !startDate || !endDate || !reason) return;
+
+                    const newUnav = {
+                      id: `unav_${Date.now()}`,
+                      bayId,
+                      startDate,
+                      endDate,
+                      startTime: startTime || undefined,
+                      endTime: endTime || undefined,
+                      reason
+                    };
+
+                    onUpdateAvailabilityConfig({
+                      ...availabilityConfig,
+                      bayUnavailabilities: [...availabilityConfig.bayUnavailabilities, newUnav]
+                    });
+                    e.currentTarget.reset();
+                  }}
+                  className="space-y-3 p-3 bg-gray-50 border border-gray-150 rounded-xl text-xs"
+                >
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Pont</label>
+                    <select name="bayId" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required>
+                      {DEFAULT_WORKSHOP_BAYS.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Début</label>
+                      <input type="date" name="startDate" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Fin</label>
+                      <input type="date" name="endDate" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Heure Début (optionnel)</label>
+                      <input type="time" name="startTime" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Heure Fin (optionnel)</label>
+                      <input type="time" name="endTime" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Raison / Travaux</label>
+                    <input type="text" name="reason" placeholder="Ex: Maintenance" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                  </div>
+                  <button 
+                    data-testid="bay-unavailability-add-btn"
+                    type="submit" 
+                    className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                  >
+                    Ajouter indisponibilité
+                  </button>
+                </form>
+              )}
+
+              <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                {availabilityConfig.bayUnavailabilities.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">Aucune indisponibilité enregistrée.</p>
+                ) : (
+                  availabilityConfig.bayUnavailabilities.map(unav => {
+                    const bay = DEFAULT_WORKSHOP_BAYS.find(b => b.id === unav.bayId);
+                    return (
+                      <div key={unav.id} className="p-2 border border-gray-150 rounded-lg flex items-center justify-between text-xs hover:bg-gray-50">
+                        <div>
+                          <strong className="text-gray-850 block">{bay?.name || unav.bayId}</strong>
+                          <span className="text-[10px] text-gray-500 block">
+                            Du {new Date(unav.startDate).toLocaleDateString("fr-FR")} au {new Date(unav.endDate).toLocaleDateString("fr-FR")}
+                            {unav.startTime && ` (${unav.startTime}-${unav.endTime || ""})`}
+                          </span>
+                          <span className="text-[9px] text-gray-400 block italic">{unav.reason}</span>
+                        </div>
+                        {perm.canManageWorkshopAvailability(activeRole) && (
+                          <button
+                            onClick={() => {
+                              onUpdateAvailabilityConfig({
+                                ...availabilityConfig,
+                                bayUnavailabilities: availabilityConfig.bayUnavailabilities.filter(u => u.id !== unav.id)
+                              });
+                            }}
+                            className="p-1 hover:bg-rose-50 text-rose-600 rounded transition cursor-pointer"
+                            title="Supprimer"
+                          >
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* 4. Holidays / Closed Days */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-rose-650" />
+                Jours Fériés / Fermetures Exceptionnelles
+              </h4>
+              
+              {perm.canManageWorkshopAvailability(activeRole) && (
+                <form 
+                  data-testid="workshop-holiday-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    const date = formData.get("date") as string;
+                    const name = formData.get("name") as string;
+                    const isClosed = formData.get("type") === "closed";
+
+                    if (!date || !name) return;
+
+                    if (isClosed) {
+                      const newException = {
+                        id: `exc_${Date.now()}`,
+                        date,
+                        isClosed: true,
+                        reason: name
+                      };
+                      onUpdateAvailabilityConfig({
+                        ...availabilityConfig,
+                        exceptions: [...availabilityConfig.exceptions, newException]
+                      });
+                    } else {
+                      const newHoliday = {
+                        id: `hol_${Date.now()}`,
+                        date,
+                        name
+                      };
+                      onUpdateAvailabilityConfig({
+                        ...availabilityConfig,
+                        holidays: [...availabilityConfig.holidays, newHoliday]
+                      });
+                    }
+                    e.currentTarget.reset();
+                  }}
+                  className="space-y-3 p-3 bg-gray-50 border border-gray-150 rounded-xl text-xs"
+                >
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Type</label>
+                    <select name="type" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required>
+                      <option value="holiday">Jour Férié</option>
+                      <option value="closed">Fermeture Exceptionnelle</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Date</label>
+                    <input type="date" name="date" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Libellé / Raison</label>
+                    <input type="text" name="name" placeholder="Ex: Jour de l'An" className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs" required />
+                  </div>
+                  <button 
+                    data-testid="workshop-holiday-add-btn"
+                    type="submit" 
+                    className="w-full py-2 bg-rose-650 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                  >
+                    Ajouter
+                  </button>
+                </form>
+              )}
+
+              <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                {availabilityConfig.holidays.length === 0 && availabilityConfig.exceptions.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">Aucune fermeture enregistrée.</p>
+                ) : (
+                  <>
+                    {availabilityConfig.holidays.map(hol => (
+                      <div key={hol.id} className="p-2 border border-gray-150 rounded-lg flex items-center justify-between text-xs hover:bg-gray-50">
+                        <div>
+                          <strong className="text-gray-850 block">{hol.name}</strong>
+                          <span className="text-[10px] text-gray-500 block">
+                            Le {new Date(hol.date).toLocaleDateString("fr-FR")} (Jour Férié)
+                          </span>
+                        </div>
+                        {perm.canManageWorkshopAvailability(activeRole) && (
+                          <button
+                            onClick={() => {
+                              onUpdateAvailabilityConfig({
+                                ...availabilityConfig,
+                                holidays: availabilityConfig.holidays.filter(h => h.id !== hol.id)
+                              });
+                            }}
+                            className="p-1 hover:bg-rose-50 text-rose-600 rounded transition cursor-pointer"
+                            title="Supprimer"
+                          >
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {availabilityConfig.exceptions.map(exc => (
+                      <div key={exc.id} className="p-2 border border-gray-150 rounded-lg flex items-center justify-between text-xs hover:bg-gray-50">
+                        <div>
+                          <strong className="text-gray-850 block">{exc.reason || "Fermeture exceptionnelle"}</strong>
+                          <span className="text-[10px] text-gray-500 block">
+                            Le {new Date(exc.date).toLocaleDateString("fr-FR")}
+                          </span>
+                        </div>
+                        {perm.canManageWorkshopAvailability(activeRole) && (
+                          <button
+                            onClick={() => {
+                              onUpdateAvailabilityConfig({
+                                ...availabilityConfig,
+                                exceptions: availabilityConfig.exceptions.filter(e => e.id !== exc.id)
+                              });
+                            }}
+                            className="p-1 hover:bg-rose-50 text-rose-600 rounded transition cursor-pointer"
+                            title="Supprimer"
+                          >
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

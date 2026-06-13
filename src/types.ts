@@ -364,3 +364,56 @@ export interface WorkshopReservation {
   source: string; // source
   history: string[]; // historique
 }
+
+export interface WorkshopDaySchedule {
+  dayOfWeek: number; // 0 = Dimanche, 1 = Lundi, ..., 6 = Samedi
+  isClosed: boolean;
+  windows: Array<{ start: string; end: string }>;
+}
+
+export interface WorkshopSchedule {
+  days: WorkshopDaySchedule[];
+}
+
+export interface WorkshopExceptionDay {
+  id: string;
+  date: string; // YYYY-MM-DD
+  isClosed: boolean;
+  windows?: Array<{ start: string; end: string }>;
+  reason?: string;
+}
+
+export interface TechnicianAbsence {
+  id: string;
+  technicianId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  startTime?: string;
+  endTime?: string;
+  reason: string;
+}
+
+export interface BayUnavailability {
+  id: string;
+  bayId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  startTime?: string;
+  endTime?: string;
+  reason: string;
+}
+
+export interface WorkshopHoliday {
+  id: string;
+  date: string; // YYYY-MM-DD
+  name: string;
+}
+
+export interface WorkshopAvailabilityConfig {
+  schedule: WorkshopSchedule;
+  exceptions: WorkshopExceptionDay[];
+  absences: TechnicianAbsence[];
+  bayUnavailabilities: BayUnavailability[];
+  holidays: WorkshopHoliday[];
+}
+
