@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-3
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-3B
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2 et 5F-3) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3 et 5F-3B) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -322,6 +322,30 @@ Le Lot 5F-3 intègre proprement l'importation de devis et la gestion de la valid
   - Formulaire d'ajout manuel renforcé (description obligatoire, durée > 0 obligatoire, bouton d'ajout désactivé si invalide).
 - **Zéro CA / Caisse / Paiement / Stock** : Aucune donnée financière, facturation réelle ou gestion de stock n'a été ajoutée, respectant le cahier des charges strict du lot.
 
+### Lot 5F-3B : Import devis PDF multi-pages NIMR
+
+* **Intégration du lecteur PDF texte multi-pages** :
+  - Reprise de la logique legacy `extractPdfTextFallback` de l'ancienne application pour extraire et décompresser les flux `/FlateDecode` en JavaScript pur sans dépendance externe lourde.
+  - Détection dynamique de la disponibilité de l'API standard `DecompressionStream` avec fallback contrôlé pour garantir la stabilité des tests Node.
+  - Lecture complète de toutes les pages dans l'ordre, sans coupure prématurée.
+  - Message clair si le PDF est scanné ou illisible : *“PDF non exploitable automatiquement. Copier-coller le texte complet du devis ou utiliser CSV.”*
+* **Gestion correcte des pages et des sauts de page** :
+  - Les mentions de `Report` et `Montant à reporter` sont ignorées en tant que lignes administratives sans interrompre le parsing.
+  - Les marqueurs `Total DT`, `TVA`, `Timbre fiscal` ferment seulement le segment courant. Le parser reprend l'analyse si un nouveau tableau apparaît plus loin ou sur une page suivante.
+* **Fusion des lignes multi-lignes** :
+  - Fusion automatique des lignes `MO-TOL` coupées sur plusieurs lignes.
+  - Détection correcte des lignes `MO-TOL` réparties sur les pages 1 et 2.
+* **Exclusion stricte des produits de peinture** :
+  - Les consommables/peinture suivants ne deviennent jamais des tâches de main-d'œuvre :
+    - `MO-002067 PRODUIT DE PEINTURE`
+    - `PRODUIT DE PEINTURE`
+    - `PRODUT DE PEINTURE`
+  - Ces lignes restent identifiées comme `paint`, décochées et non importables comme tâches.
+* **Gestion des tâches à durée 0h** :
+  - Visibles en prévisualisation mais décochées par défaut (`selected = false`).
+  - La case à cocher (checkbox) est désactivée tant que la durée est `<= 0` (l'utilisateur doit compléter la durée dans l'UI pour pouvoir l'activer).
+  - Aucune tâche `RepairOrderLine` n'est créée avec une durée nulle (validation bloquante avec le message *“Durée à compléter avant import.”*).
+
 ---
 
 ## 13. Résultats de la Validation Globale
@@ -331,10 +355,10 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Tous les tests unitaires core (y compris permissions, rate-limit, session TTL, et quote-import) sont au vert. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **20 suites unitaires** au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **243 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 46/46 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **252 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 56/56 contrôles validés** |
 
 ---
 
@@ -346,12 +370,13 @@ La suite E2E a été enrichie avec 6 nouveaux fichiers de tests complets :
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
 4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
 5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
-6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel, le classement des pièces et de la main-d'œuvre, le pré-remplissage des heures, la non-sélection par défaut des pièces, la validation de durée pour les tâches preset, et l'absence de CA/prix/paiement/caisse/stock.
+6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel et PDF multi-pages (fixture 1076), la fusion des lignes coupées, la non-sélection par défaut des pièces et produits peinture, le blocage et la validation des tâches à 0h, et l'absence de CA/prix/paiement/caisse/stock.
 
 ---
 
 ## 15. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5F-3 sont validés.
+Les Lots 1 à 5F-3B sont validés.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
+Avant de commencer le Lot 6, poursuivre avec le **Lot 5F-4A : Reprise Planning & Réservation Legacy**.
