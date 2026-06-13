@@ -449,4 +449,164 @@ console.log("▶ Suite 15: aucun prix/paiement/stock dans les RepairOrderLines")
   console.log("  ✅ Aucun champ prix/paiement/stock dans les RepairOrderLines importées");
 }
 
+// ─── Suite 16 : Fixtures NIMR réels ─────────────────────────────────────────
+
+console.log("▶ Suite 16: Fixtures NIMR réels anonymisés");
+
+// 1. Entretien simple
+{
+  const text = `
+Désignation Qté Prix unitaire Montant
+FILTRE À HUILE 1 14,365 14,365
+RONDELLE DE VIDANGE 1 1,795 1,795
+HUILE MOTEUR 4 25,370 101,480
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+remp filtre habitacle 0,3 33,000 9,900
+`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+  const paintLines = lines.filter(l => l.type === "paint");
+
+  assert.equal(laborLines.length, 3, `Expected 3 labor lines, got ${laborLines.length}`);
+  assert.equal(partLines.length, 3, `Expected 3 part lines, got ${partLines.length}`);
+  assert.equal(paintLines.length, 0, `Expected 0 paint lines, got ${paintLines.length}`);
+
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 1.6) < 0.01, `Expected 1.6H, got ${totalHours}H`);
+
+  // Pré-sélection : seulement MO cochée
+  for (const line of lines) {
+    if (line.type === "labor") {
+      assert.equal(line.selected, true, `Labor line should be selected: ${line.description}`);
+    } else {
+      assert.equal(line.selected, false, `Non-labor line should not be selected: ${line.description}`);
+    }
+  }
+
+  console.log("  ✅ Fixture 1: Entretien simple (1.6H labor, 3 pièces) OK");
+}
+
+// 2. Entretien avec bougies
+{
+  const text = `
+Désignation Qté Prix unitaire Montant
+FILTRE À HUILE 1 14,365 14,365
+RONDELLE DE VIDANGE 1 1,795 1,795
+HUILE MOTEUR 4 25,370 101,480
+BOUGIE D'ALLUMAGE 4 12,000 48,000
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+remp filtre habitacle 0,3 33,000 9,900
+remp bougies 0,4 33,000 13,200
+`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+
+  assert.equal(laborLines.length, 4, `Expected 4 labor lines, got ${laborLines.length}`);
+  assert.equal(partLines.length, 4, `Expected 4 part lines, got ${partLines.length}`);
+
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 2.0) < 0.01, `Expected 2.0H, got ${totalHours}H`);
+
+  console.log("  ✅ Fixture 2: Entretien avec bougies (2.0H labor, 4 pièces) OK");
+}
+
+// 3. Entretien lourd 60 000 km
+{
+  const text = `
+Désignation Qté Prix unitaire Montant
+FILTRE À HUILE 1 14,365 14,365
+RONDELLE DE VIDANGE 1 1,795 1,795
+HUILE MOTEUR MOBIL SUPER 4 25,370 101,480
+FILTRE D'HABITACLE 1 47,658 47,658
+FILTRE A AIR 1 46,821 46,821
+BOUGIES 4 15,000 60,000
+COURROIE CLIM 1 25,000 25,000
+HUILE DE BOITE 2 35,000 70,000
+HUILE DE FREIN 1 15,000 15,000
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+remp filtre habitacle 0,3 33,000 9,900
+remp bougies 0,4 33,000 13,200
+remp liquide de refroidissement 1 33,000 33,000
+rempl courroie clim 1,5 33,000 49,500
+vidange boite 1,5 33,000 49,500
+remp huile de frein 0,5 33,000 16,500
+`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+
+  assert.equal(laborLines.length, 8, `Expected 8 labor lines, got ${laborLines.length}`);
+  assert.equal(partLines.length, 9, `Expected 9 part lines, got ${partLines.length}`);
+
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 6.5) < 0.01, `Expected 6.5H, got ${totalHours}H`);
+
+  console.log("  ✅ Fixture 3: Entretien lourd 60 000 km (6.5H labor, 9 pièces) OK");
+}
+
+// 4. Carrosserie MO-TOL
+{
+  const text = `
+Désignation Qté Prix unitaire Montant
+OPTIQUE DE PHARE DROIT LED 1 1 193,576 1 193,576
+AILE AVANT DROIT S50 1 404,267 404,267
+PARE-CHOCS AVANT S50 1 847,990 847,990
+PARE-BOUE AVANT DROIT 1 289,202 289,202
+SUPPORT PARE-CHOCS AVANT DROIT 1 25,895 25,895
+AGRAFE CALANDRE 30 1,860 55,800
+PRODUIT DE PEINTURE 2 180,000 360,000
+MO-002067 PRODUIT DE PEINTURE 2 180,000 360,000
+PRODUT DE PEINTURE 1 180,000 180,000
+CHANG PARE-BOUE AVANT DROIT 1 35,000 35,000
+CHANG SUPPORT PARE CHOC AV DR 0,4 35,000 14,000
+MO-TOL D/P ET PREPARATION PARE-CHOCS AVANT S50 2,5 35,000 87,500
+MO-TOL PEINTURE ET FINITION PARE-CHOCS AVANT S50 4,5 35,000 157,500
+CHANG OPTIQUE DE PHARE DROIT LED 1 35,000 35,000
+D/P ET PREPARATION AILE AVANT DROIT S50 2 35,000 70,000
+PEINTURE ET FINITION AILE AVANT DROIT S50 4 35,000 140,000
+`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const paintLines = lines.filter(l => l.type === "paint");
+  const partLines = lines.filter(l => l.type === "part");
+
+  // Verify that paint supplies (PRODUIT DE PEINTURE, etc.) are paint/part, never labor
+  const hasPaintInLabor = laborLines.some(l => /PRODUIT/i.test(l.description));
+  assert.equal(hasPaintInLabor, false, "Paint supplies should not be classified as labor");
+
+  // Sum labor hours
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 15.4) < 0.01, `Expected 15.4H, got ${totalHours}H`);
+
+  console.log("  ✅ Fixture 4: Carrosserie MO-TOL (15.4H labor, paint supply excluded) OK");
+}
+
+// 5. Carrosserie sans MO-TOL
+{
+  const text = `
+Désignation Qté Prix unitaire Montant
+POIGNEE DE PORTE AV G 1 85,000 85,000
+D/P ET PREPARATION PORTIERRE AV G 1,5 35,000 52,500
+PEINTURE ET FINITION PORTIERRE AV G 3,0 35,000 105,000
+DRESSAGE DELEST ASS 2,0 35,000 70,000
+REMP SERRURE PORTIERRE 0,8 35,000 28,000
+`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+
+  assert.equal(laborLines.length, 4, `Expected 4 labor lines, got ${laborLines.length}`);
+  assert.equal(partLines.length, 1, `Expected 1 part line, got ${partLines.length}`);
+
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 7.3) < 0.01, `Expected 7.3H, got ${totalHours}H`);
+
+  console.log("  ✅ Fixture 5: Carrosserie sans MO-TOL (7.3H labor) OK");
+}
+
 console.log("\n🎉 Tous les tests Lot 5F-3 (quote-import) sont passés !");

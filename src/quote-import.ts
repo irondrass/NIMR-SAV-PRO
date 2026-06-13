@@ -3,74 +3,177 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Lot 5F-3 — Module pur d'import de devis et extraction main-d'œuvre
- * Migré et adapté depuis l'ancienne application NIMR-SAV (estimate-import.js).
+ * Migré et adapté depuis l'ancienne application NIMR-SAV (estimate-import.js et planning.js).
  * Ce module est 100% pur (pas d'état global, pas de localStorage, pas de DOM).
  */
 
-import { QuoteLine, QuoteLineType, QuoteImportPreview, QuoteImportResult, RepairOrderLine } from "./types";
+import { QuoteLine, QuoteLineType, QuoteImportPreview, QuoteImportResult, RepairOrderLine, DossierSAV } from "./types";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Constantes de classification
 // ───────────────────────────────────────────────────────────────────────────────
 
-const LABOR_KEYWORDS_REGEX = /\b(MO|M\.O\.|MAIN[- ]D['']?OEUVRE|MAIN[- ]D['']?ŒUVRE|OPERATION|DIAGNOSTIC|REMPLACEMENT|CONTROLE|CONTRÔLE|ENTRETIEN|REPARATION|RÉPARATION|DEPOSE|DÉPOSE|REPOSE|VIDANGE|PROGRAMMATION|CALIBRAGE|PASSAGE\s+VALISE|ESSAI\s+ROUTIER|D\/P|DRESSAGE|PEINTURE|PREPARATION|PRÉPARATION|FINITION|DEMONTAGE|DÉMONTAGE|REMONTAGE|REMPL|REMP|MECANIQUE|MÉCANIQUE|ELECTRICITE|ÉLECTRICITÉ|DIAGNOSTIC|ALIGNEMENT|GEOMETRIE|GÉOMÉTRIE|SERRAGE|PURGE|GONFLAGE|RODEAGE|RODÉAGE|SOUDURE|AJUSTAGE|POSE)\b/i;
-
-const PART_KEYWORDS_REGEX = /\b(ARTICLE|REFERENCE|RÉFÉRENCE|FILTRE|HUILE|PLAQUETTE|DISQUE|BOUGIE|BATTERIE|PARE[- ]CHOCS|PARECHOCS|PHARE|CAPTEUR|JOINT|COURROIE|AMORTISSEUR|RESSORT|ROULEMENT|ROTULE|BIELLETTE|SILENT[- ]BLOC|SILENTBLOC|PNEUMATIQUE|PNEU|ESSUIE[- ]GLACE|LAMPE|FUSIBLE|RELAIS|SONDE|INJECTEUR|POMPE|VALVE|SEGMENT|CULASSE|JOINT|VIS|BOULON|ECROU|ÉCROU|AGRAFE|CLIP|EMBOUT)\b/i;
-
-const PAINT_SUPPLY_REGEX = /\b(PRODUITS?\s+(?:DE\s+)?PEINTURE|PEINTURE\s+PRODUITS?|FOURNITURES?\s+PEINTURE|MATIERES?\s+PEINTURE|CONSOMMABLES?\s+PEINTURE)\b/i;
-
-const FOOTER_LEGAL_PATTERNS = [
-  /\bCE\s+DEVIS\s+RESTE\s+ESTIMATIF\b/i,
-  /\bDEVIS\s+COMPLEMENTAIRE\b/i,
-  /\bSIGNATURE\s+DU\s+PRESENT\s+DEVIS\b/i,
-  /\bLU\s+ET\s+APPROUVE\b/i,
-  /\bNOM\s+PRENOM\b/i,
-  /\bCACHET\s+ET\s+SIGNATURE\b/i,
-  /\bEN\s+CAS\s+D.{0,4}ANNULATION\b/i,
-  /\bPAYER\s+LES\s+FRAIS\b/i,
-  /\bFRAIS\s+DE\s+DEMONTAGE\b/i,
-  /\bSTATIONNEMENT\b/i,
-  /\bTOTAL\s+GENERAL\b/i,
-];
+const ESTIMATE_LABOR_HOURLY_RATES = [33, 35];
+const ESTIMATE_LABOR_MAX_HOURS = 80;
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Helpers internes
 // ───────────────────────────────────────────────────────────────────────────────
 
-/** Normalise un texte : supprime accents, majuscules, espaces multiples */
-export function normalizeOperationText(text: string): string {
+export function normalizeEstimateOperationText(text: string): string {
   return String(text || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['']/g, " ")
-    .replace(/[^a-zA-Z0-9/ .,-]+/g, " ")
+    .replace(/[’']/g, " ")
+    .replace(/[^a-zA-Z0-9/]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toUpperCase();
 }
 
-function isLegalFooterLine(text: string): boolean {
-  const norm = normalizeOperationText(text);
-  return FOOTER_LEGAL_PATTERNS.some(p => p.test(norm));
+/** Normalise un texte : supprime accents, majuscules, espaces multiples */
+export function normalizeOperationText(text: string): string {
+  return normalizeEstimateOperationText(text);
 }
 
-function isPaintSupplyLine(text: string): boolean {
-  return PAINT_SUPPLY_REGEX.test(normalizeOperationText(text));
+export function isEstimateLegalOrFooterLine(normalized: string): boolean {
+  const text = String(normalized || "").replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  const legalPatterns = [
+    /\bCE\s+DEVIS\s+RESTE\s+ESTIMATIF\b/,
+    /\bDEVIS\s+COMPLEMENTAIRE\b/,
+    /\bCONFIRMATION\s+DE\s+LA\s+PART\s+DU\s+CLIENT\b/,
+    /\bSIGNATURE\s+DU\s+PRESENT\s+DEVIS\b/,
+    /\bENGAGEMENT\s+DES\s+TRAVAUX\b/,
+    /\bEN\s+CAS\s+D\s+ANNULATION\s+DES\s+TRAVAUX\b/,
+    /\bCLIENT\s+EST\s+OBLIGE\b/,
+    /\bSUPERSTRUCTURE\s+DE\s+CHARGE\b/,
+    /\bPNEUMATIQUES\b/,
+    /\bBATTERIES\b/,
+    /\bPAYER\s+LES\s+FRAIS\b/,
+    /\bFRAIS\s+DE\s+DEMONTAGE\b/,
+    /\bFRAIS\s+D\s+ETABLISSEMENT\s+DU\s+DEVIS\b/,
+    /\bRECUPERER\s+LE\s+VEHICULE\b/,
+    /\b48\s*H\b/,
+    /\bSTATIONNEMENT\b/,
+    /\b30\s*DT\b/,
+    /\bSAUF\s+VENTE\s+ENTRE\s+TEMPS\b/,
+    /\bVALABLE\s+SEPT\s+7\s+JOURS\b/,
+    /\bLU\s+ET\s+APPROUVE\b/,
+    /\bNOM\s+PRENOM\b/,
+    /\bIDENTIFIANT\s+CIN\b/,
+    /\bCACHET\s+ET\s+SIGNATURE\b/,
+  ];
+  return legalPatterns.some((pattern) => pattern.test(text));
 }
 
-/**
- * Extrait les heures depuis une ligne texte.
- * Formes supportées : 2.5H, 2,5H, 2.5 h, 2,5 heures, 1H30, 1 h 30, 90 min
- * Retourne 0 si non trouvé.
- */
-export function extractLaborHours(text: string): number {
-  const src = String(text || "").replace(/\u00a0/g, " ").trim();
+export function isPaintSupplyLine(normalized: string): boolean {
+  return /\b(PRODUITS?|FOURNITURES?|MATIERES?|MATERIEL|CONSOMMABLES?|PRODUT)\s+(?:DE\s+)?PEINTURE\b/.test(normalized)
+    || /\bPEINTURE\s+(?:PRODUITS?|FOURNITURES?|MATIERES?|MATERIEL|CONSOMMABLES?)\b/.test(normalized)
+    || /\bMO-002067\b/.test(normalized);
+}
 
+export function isEstimateLaborHourlyRate(value: number): boolean {
+  return ESTIMATE_LABOR_HOURLY_RATES.some((rate) => Math.abs(Number(value || 0) - rate) < 0.01);
+}
+
+export function parseEstimateNumber(value: any): number {
+  let normalized = String(value ?? "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+  if (!normalized) return 0;
+  const comma = normalized.lastIndexOf(",");
+  const dot = normalized.lastIndexOf(".");
+  normalized = normalized.replace(/\s/g, "");
+  if (comma >= 0 && dot >= 0) {
+    normalized = comma > dot ? normalized.replace(/\./g, "").replace(",", ".") : normalized.replace(/,/g, "");
+  } else if (comma >= 0) {
+    normalized = normalized.replace(",", ".");
+  }
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export interface EstimateNumberMatch {
+  raw: string;
+  index: number;
+  hours: number;
+  embeddedInWord: boolean;
+}
+
+export function getEstimateNumberMatches(line: string): EstimateNumberMatch[] {
+  const source = String(line || "");
+  const matches: EstimateNumberMatch[] = [];
+  const regex = /\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?|\d+(?:[,.]\d+)?/g;
+  let m;
+  while ((m = regex.exec(source)) !== null) {
+    const index = m.index;
+    const before = source[index - 1] || "";
+    const after = source[index + m[0].length] || "";
+    const hours = parseEstimateNumber(m[0]);
+    const embeddedInWord = /[A-Za-zÀ-ÿ]/.test(before) || /[A-Za-zÀ-ÿ]/.test(after);
+    matches.push({
+      raw: m[0],
+      index,
+      hours,
+      embeddedInWord,
+    });
+  }
+  return matches.filter((match) => Number.isFinite(match.hours) && !match.embeddedInWord);
+}
+
+export interface EstimatePricingInfo {
+  matches: EstimateNumberMatch[];
+  hasNumericTable: boolean;
+  hasLaborHourlyRate: boolean;
+  hourlyRate: number;
+  hoursInfo: EstimateNumberMatch | null;
+}
+
+export function extractEstimatePricingInfo(line: string): EstimatePricingInfo {
+  const source = String(line || "");
+  const matches = getEstimateNumberMatches(source);
+  const result: EstimatePricingInfo = {
+    matches,
+    hasNumericTable: matches.length >= 3,
+    hasLaborHourlyRate: false,
+    hourlyRate: 0,
+    hoursInfo: null,
+  };
+  for (let index = 1; index < matches.length; index += 1) {
+    if (index === matches.length - 1 && matches.length >= 3) {
+      continue;
+    }
+    const current = matches[index];
+    const previous = matches[index - 1];
+    if (isEstimateLaborHourlyRate(current.hours) && previous.hours > 0 && previous.hours <= ESTIMATE_LABOR_MAX_HOURS) {
+      result.hasLaborHourlyRate = true;
+      result.hourlyRate = current.hours;
+      result.hoursInfo = previous;
+      return result;
+    }
+  }
+  return result;
+}
+
+export function extractLaborHours(line: string): number {
+  const src = String(line || "").replace(/\u00a0/g, " ").trim();
+  const normalized = normalizeEstimateOperationText(line);
+
+  // If it's a part and has no labor keyword, and no confirmed labor rate, we shouldn't extract hours from it.
+  const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+  const pricingInfo = extractEstimatePricingInfo(line);
+
+  if (isPieceKeyword && !hasLaborActionVerb(normalized)) {
+    return 0;
+  }
+
+  // 1. Check for explicit suffix hours first
   // "90 min", "120 min"
   const minMatch = src.match(/(\d+(?:[,.]\d+)?)\s*min(?:utes?)?(?:\b|$)/i);
   if (minMatch) {
     const val = parseFloat(minMatch[1].replace(",", "."));
-    if (Number.isFinite(val) && val > 0) return roundHours(val / 60);
+    if (Number.isFinite(val) && val > 0) return roundPlanningHours(val / 60);
   }
 
   // "1H30", "1 h 30", "1H 30"
@@ -78,48 +181,276 @@ export function extractLaborHours(text: string): number {
   if (hmMatch) {
     const h = parseInt(hmMatch[1], 10);
     const m = parseInt(hmMatch[2], 10);
-    if (Number.isFinite(h) && Number.isFinite(m)) return roundHours(h + m / 60);
+    if (Number.isFinite(h) && Number.isFinite(m)) return roundPlanningHours(h + m / 60);
   }
 
   // "2.5H", "2,5H", "2.5 h", "2,5 heures"
   const hDecMatch = src.match(/(\d+[,.]\d+|\d+)\s*[Hh](?:eures?)?(?:\b|$)/i);
   if (hDecMatch) {
     const val = parseFloat(hDecMatch[1].replace(",", "."));
-    if (Number.isFinite(val) && val > 0 && val <= 80) return roundHours(val);
+    if (Number.isFinite(val) && val > 0 && val <= ESTIMATE_LABOR_MAX_HOURS) return roundPlanningHours(val);
   }
 
-  return 0;
+  // 2. Fallback to legacy pricing-table and token-based extraction
+  if (pricingInfo.hoursInfo) return pricingInfo.hoursInfo.hours;
+
+  const matches = getEstimateNumberMatches(line);
+  if (!matches.length) return 0;
+
+  // Fallback réservé aux saisies manuelles / CSV sans prix unitaire.
+  const found = matches.find((match) => match.hours > 0 && match.hours <= 40);
+  return found ? found.hours : 0;
 }
 
-function roundHours(value: number): number {
-  return Math.round(value * 1000000) / 1000000;
+export function sanitizeEstimateOperation(value: string): string {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[:;\-]+$/g, "")
+    .trim();
 }
 
-function generateId(prefix: string): string {
-  const rand = typeof globalThis.crypto?.randomUUID === "function"
-    ? globalThis.crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}_${rand}`;
+export function removeKnownOperationPrefix(operation: string): string {
+  const withoutPrefix = String(operation || "")
+    .replace(/^\s*D\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\s*/i, "")
+    .replace(/^\s*PEINTURE\s+ET\s+F(?:I)?NITION\s*/i, "")
+    .replace(/^\s*DRESSAGE\s+ET\s+PEINTURE\s*/i, "")
+    .trim();
+  return withoutPrefix || operation;
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Classification d'une ligne
-// ───────────────────────────────────────────────────────────────────────────────
+export function roundPlanningHours(value: number): number {
+  return Math.round(Number(value || 0) * 1000000) / 1000000;
+}
 
-/**
- * Classifie un texte de ligne de devis.
- */
+export function splitPlanningHours(total: number, weights: number[]): number[] {
+  const rounded: number[] = [];
+  let consumed = 0;
+  weights.forEach((weight, index) => {
+    if (index === weights.length - 1) {
+      rounded.push(roundPlanningHours(total - consumed));
+      return;
+    }
+    const value = roundPlanningHours(total * weight);
+    rounded.push(value);
+    consumed += value;
+  });
+  return rounded;
+}
+
+export function hasLaborKeyword(normalized: string): boolean {
+  return /\b(D\s*\/\s*P|CHANG(?:EMENT)?|DEPOSE|POSE|REPOSE|DEMONTAGE|REMONTAGE|PREPARAT(?:ION|IN)|PEINTURE|F(?:I)?NITION|DRESSAGE|MARBRE|REMPLACEMENT|REMPL|REMP|REPARATION|CONTROLE|DIAGNOSTIC|AIRBAGS?|BOITE|VITESSE|VIDANGE|ENTRETIEN|ELECTRIQUE|ELECTRICITE|MECANIQUE|MECAN|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR)\b/.test(normalized);
+}
+
+export function hasLaborActionVerb(normalized: string): boolean {
+  return /\b(D\s*\/\s*P|CHANG(?:EMENT)?|DEPOSE|POSE|REPOSE|DEMONTAGE|REMONTAGE|PREPARAT(?:ION|IN)|PEINTURE|F(?:I)?NITION|DRESSAGE|MARBRE|REMPLACEMENT|REMPL|REMP|REPARATION|CONTROLE|DIAGNOSTIC|VIDANGE|ENTRETIEN|MO[- ]TOL)\b/.test(normalized);
+}
+
+export interface LegacyLaborClassificationResult {
+  type: "ignored" | "labor";
+  reason?: string;
+  text: string;
+  operation: string;
+  hours: number;
+  distributions: LaborDistribution[];
+}
+
+export function classifyLaborLine(line: string, options: any = {}): LegacyLaborClassificationResult | null {
+  const text = String(line || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length < 3) return null;
+  const normalized = normalizeEstimateOperationText(text);
+
+  // 1. Ignorer les lignes administratives : Total, TVA, Timbre, Signature, conditions générales, client, VIN, immatriculation, N° devis, N° OR, etc.
+  if (isEstimateLegalOrFooterLine(normalized)) {
+    return { type: "ignored", reason: "Note client ou pied de page ignoré", text, operation: "", hours: 0, distributions: [] };
+  }
+  if (/\b(DESIGNATION|QTE|PRIX\s+UNITAIRE|MONTANT|TOTAL|TVA|TIMBRE|DEVIS|RECEPTIONNAIRE|PAGE|CODE\s+MOTEUR|TYPE\s+MAIN|N\s*OR|N\s*DEVIS|CLIENT|VIN|IMMATRICULATION|TELEPHONE|CONSEILLER|DATE)\b/.test(normalized)) {
+    return { type: "ignored", reason: "Ligne d'en-tête, administrative ou totale", text, operation: "", hours: 0, distributions: [] };
+  }
+
+  // 2. Produit peinture : paint/part, jamais labor
+  if (isPaintSupplyLine(normalized)) {
+    return { type: "ignored", reason: "Produit de peinture ou consommable ignoré comme main-d'œuvre", text, operation: "", hours: 0, distributions: [] };
+  }
+
+  const pricingInfo = extractEstimatePricingInfo(text);
+  const isConfirmedLabor = pricingInfo.hasLaborHourlyRate;
+
+  // Pièces / articles keywords:
+  const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+
+  const isFiltreOrHuileLabor = isConfirmedLabor && /\b(FILTRE|HUILE)\b/.test(normalized) && hasLaborActionVerb(normalized);
+  const isSuffixLabor = extractLaborHours(text) > 0 && hasLaborActionVerb(normalized);
+  const laborException = isFiltreOrHuileLabor || isSuffixLabor || /\b(REMP|REMPL|REMPLACEMENT)\s+FEU\b/.test(normalized) || /\b(CHANG(?:EMENT)?|REMP|REMPL)\b/.test(normalized);
+
+  const hardIgnored = [
+    "FOURNITURE",
+    "AGRAFE",
+    "EMBLEME",
+    "MONOGRAMME",
+    "HUILE",
+    "FILTRE",
+    "LIQUIDE",
+    "MOUSSE",
+    "RENFORT",
+    "SUPPORT",
+    "FEU ARRIERE",
+    "PARE CHOCS COMPLET",
+    "TOTAL",
+    "TVA",
+    "TIMBRE",
+  ].some((keyword) => normalized.includes(keyword));
+
+  if (hardIgnored && !laborException) {
+    return { type: "ignored", reason: "Pièce, fourniture ou total ignoré", text, operation: "", hours: 0, distributions: [] };
+  }
+
+  // Si c'est un mot-clé de pièce et qu'on n'a pas de tarif horaire MO, c'est une pièce !
+  if (isPieceKeyword && !isConfirmedLabor) {
+    return null; // deviendra "part"
+  }
+
+  if (pricingInfo.hasNumericTable && !pricingInfo.hasLaborHourlyRate) {
+    return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Prix unitaire non MO", text, operation: "", hours: 0, distributions: [] } : null;
+  }
+
+  const hoursInfo = pricingInfo.hoursInfo || getEstimateNumberMatches(text).find((match) => match.hours > 0 && match.hours <= 40);
+  if (!hoursInfo || hoursInfo.hours <= 0) {
+    return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Quantité MO introuvable", text, operation: "", hours: 0, distributions: [] } : null;
+  }
+
+  // Main-d'œuvre explicite ou implicite
+  const isMoTol = /\bMO-TOL\b/.test(normalized);
+  const isImplicitLaborKw = /\b(ENTRETIEN|REMP|VIDANGE|DEPOSE|REPOSE|PEINTURE|FINITION|DRESSAGE|CHANG|D\/P|PREPARATION)\b/.test(normalized);
+
+  // Pour les devis tabulaires, si un tableau numérique est détecté mais sans taux horaire validé, et que ce n'est pas MO-TOL, on l'exclut.
+  if (pricingInfo.hasNumericTable && !isConfirmedLabor && !isMoTol) {
+    return null;
+  }
+
+  const operation = sanitizeEstimateOperation(text.slice(0, hoursInfo.index) || text);
+  let distributions = distributeLaborHours(operation, hoursInfo.hours, options);
+  if (!distributions.length) {
+    if (isConfirmedLabor || isMoTol || isImplicitLaborKw) {
+      const defaultPhase = options.claimType === "vidange" || /\b(VIDANGE|ENTRETIEN|FILTRE)\b/.test(normalized)
+        ? "oilService"
+        : options.claimType === "electrical_client"
+        ? "electrical"
+        : options.claimType === "mechanical_client"
+        ? "mechanical"
+        : "body";
+      distributions = [{ phase: defaultPhase, operation: sanitizeEstimateOperation(operation), laborHours: roundPlanningHours(hoursInfo.hours) }];
+    } else {
+      return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Phase planning non reconnue", text, operation: "", hours: 0, distributions: [] } : null;
+    }
+  }
+
+  return {
+    type: "labor",
+    text,
+    operation,
+    hours: roundPlanningHours(hoursInfo.hours),
+    distributions,
+  };
+}
+
+export function classifyEstimatePartLine(line: string): any {
+  const text = String(line || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length < 3) return null;
+  const normalized = normalizeEstimateOperationText(text);
+  if (isEstimateLegalOrFooterLine(normalized)) return null;
+  if (/\b(TOTAL|TVA|TIMBRE|DEVIS|RECEPTIONNAIRE|PAGE|CODE\s+MOTEUR|TYPE\s+MAIN|N\s*OR|N\s*DEVIS)\b/.test(normalized)) return null;
+  
+  const labor = classifyLaborLine(text);
+  if (labor?.type === "labor") return null;
+
+  // Let's identify pieces/articles based on numbers
+  const pricingInfo = extractEstimatePricingInfo(text);
+  if (!pricingInfo.matches.length) return null;
+  if (pricingInfo.hasLaborHourlyRate) {
+    if (hasLaborActionVerb(normalized)) return null;
+  }
+  
+  const matches = pricingInfo.matches;
+  const qtyMatch = matches[0];
+  const unitMatch = matches.length >= 2 ? matches[matches.length - 2] : null;
+  const amountMatch = matches.length >= 2 ? matches[matches.length - 1] : null;
+  const quantity = qtyMatch?.hours || 0;
+  const unitPrice = unitMatch?.hours || 0;
+  const amount = amountMatch?.hours || 0;
+  
+  if (!quantity || quantity <= 0 || quantity > 999) return null;
+  if (!unitPrice || !amount) return null;
+  
+  const designation = sanitizeEstimateOperation(text.slice(0, qtyMatch.index) || text);
+  if (!designation || designation.length < 2) return null;
+  
+  return {
+    id: `part_${Math.random()}`,
+    designation,
+    quantity: roundPlanningHours(quantity),
+    unitPrice: roundPlanningHours(unitPrice),
+    amount: roundPlanningHours(amount),
+    rawText: text,
+  };
+}
+
 export function classifyQuoteLine(text: string): QuoteLineType {
-  const norm = normalizeOperationText(text);
-  if (!norm || norm.length < 2) return "unknown";
-  if (isLegalFooterLine(text)) return "unknown";
-  if (isPaintSupplyLine(text)) return "part"; // fournitures peinture → pièce
-  if (PAINT_SUPPLY_REGEX.test(norm)) return "paint";
-  if (PART_KEYWORDS_REGEX.test(norm) && !LABOR_KEYWORDS_REGEX.test(norm)) return "part";
-  if (LABOR_KEYWORDS_REGEX.test(norm)) return "labor";
-  // Si des heures sont détectées sans autre classif → labor probable
-  const hrs = extractLaborHours(text);
-  if (hrs > 0 && hrs <= 80) return "labor";
+  // 1. Ignorer les lignes administratives
+  const normalized = normalizeEstimateOperationText(text);
+  if (isEstimateLegalOrFooterLine(normalized)) return "unknown";
+  if (/\b(DESIGNATION|QTE|PRIX\s+UNITAIRE|MONTANT|TOTAL|TVA|TIMBRE|DEVIS|RECEPTIONNAIRE|PAGE|CODE\s+MOTEUR|TYPE\s+MAIN|N\s*OR|N\s*DEVIS|CLIENT|VIN|IMMATRICULATION|TELEPHONE|CONSEILLER|DATE)\b/.test(normalized)) {
+    return "unknown";
+  }
+
+  // 2. Produit peinture
+  if (isPaintSupplyLine(normalized)) {
+    return "paint";
+  }
+
+  // 3. Check legacy labor classification
+  const labor = classifyLaborLine(text);
+  if (labor?.type === "labor") {
+    return "labor";
+  }
+  if (labor?.type === "ignored") {
+    if (labor.reason === "Note client ou pied de page ignoré" ||
+        labor.reason === "Ligne d'en-tête, administrative ou totale" ||
+        labor.reason === "Produit de peinture ou consommable ignoré comme main-d'œuvre" ||
+        labor.reason === "Pièce, fourniture ou total ignoré" ||
+        labor.reason === "Prix unitaire non MO") {
+      const part = classifyEstimatePartLine(text);
+      if (part) return "part";
+      const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+      if (isPieceKeyword || labor.reason === "Pièce, fourniture ou total ignoré") {
+        return "part";
+      }
+      return "unknown";
+    }
+  }
+
+  // 4. Suffix check (for manual entries or specs like "Remplacement plaquettes 2H")
+  const pricingInfo = extractEstimatePricingInfo(text);
+  if (!pricingInfo.hasNumericTable) {
+    const hours = extractLaborHours(text);
+    if (hours > 0 && hours <= ESTIMATE_LABOR_MAX_HOURS) {
+      const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+      if (hasLaborKeyword(normalized) || !isPieceKeyword) {
+        return "labor";
+      }
+    }
+  }
+
+  // 5. Check part classification
+  const part = classifyEstimatePartLine(text);
+  if (part) {
+    return "part";
+  }
+
+  // 6. Keywords fallback
+  if (/\b(ARTICLE|REFERENCE|RÉFÉRENCE|FILTRE|HUILE|PLAQUETTE|DISQUE|BOUGIE|BATTERIE|PARE[- ]CHOCS?|PHARE|CAPTEUR|JOINT|COURROIE|AMORTISSEUR|RESSORT|ROULEMENT|ROTULE|BIELLETTE|SILENT[- ]BLOC|SILENTBLOC|PNEUMATIQUE|PNEU|ESSUIE[- ]GLACE|LAMPE|FUSIBLE|RELAIS|SONDE|INJECTEUR|POMPE|VALVE|SEGMENT|CULASSE|VIS|BOULON|ECROU|AGRAFE|CLIP|EMBOUT)\b/i.test(normalized)) {
+    return "part";
+  }
+
   return "unknown";
 }
 
@@ -138,15 +469,128 @@ export function normalizeQuoteLine(rawText: string): string {
  */
 function computeConfidence(text: string, type: QuoteLineType, hours: number): "high" | "medium" | "low" {
   if (type === "unknown") return "low";
-  const norm = normalizeOperationText(text);
-  if (type === "part" && PART_KEYWORDS_REGEX.test(norm)) return "high";
+  const norm = normalizeEstimateOperationText(text);
+  if (type === "part") return "high";
   if (type === "labor") {
-    const hasKeyword = LABOR_KEYWORDS_REGEX.test(norm);
+    const hasKeyword = hasLaborKeyword(norm);
     if (hasKeyword && hours > 0) return "high";
     if (hasKeyword || hours > 0) return "medium";
     return "low";
   }
   return "medium";
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// PDF & multi-line helpers
+// ───────────────────────────────────────────────────────────────────────────────
+
+export function decodePdfLiteral(value: string): string {
+  return String(value || "")
+    .replace(/\\([()\\])/g, "$1")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n")
+    .replace(/\\t/g, " ")
+    .replace(/\\([0-7]{1,3})/g, (_, octal) => String.fromCharCode(Number.parseInt(octal, 8)));
+}
+
+export function extractPdfContentTableRows(text: string): string[] {
+  const rows: string[] = [];
+  const source = String(text || "");
+  const operationPattern =
+    "\\(((?:D\\s*\\/\\s*P|PEINTURE|DRESSAGE|REMP|REMPL|REMPLACEMENT|DEPOSE|D\u00C9POSE|DEMONTAGE|D\u00C9MONTAGE|REMONTAGE|REPOSE|PETIT FOURNITURE)[^()]*)\\)\\s*Tj" +
+    "[\\s\\S]{0,700}?\\((\\d+(?:[,.]\\d+)?)\\)\\s*Tj" +
+    "[\\s\\S]{0,500}?\\((3[35][,.]000)\\)\\s*Tj" +
+    "[\\s\\S]{0,500}?\\((\\d+(?:[,.]\\d+)?)\\)\\s*Tj";
+  const regex = new RegExp(operationPattern, "gi");
+  let match;
+  while ((match = regex.exec(source))) {
+    const operation = decodePdfLiteral(match[1]).replace(/\s+/g, " ").trim();
+    if (!operation) continue;
+    rows.push(`${operation} ${match[2]} ${match[3]} ${match[4]}`);
+  }
+  return [...new Set(rows)];
+}
+
+export function isEstimateNumberToken(value: string): boolean {
+  const text = String(value || "").replace(/\u00a0/g, " ").trim();
+  return /^\d+(?:\s\d{3})*(?:[,.]\d+)?$/.test(text);
+}
+
+export function extractColumnarEstimateRows(text: string): string[] {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const designationIndex = lines.findIndex((line) => normalizeEstimateOperationText(line) === "DESIGNATION");
+  if (designationIndex < 0) return [];
+
+  const quantityHeaderIndex = lines.findIndex((line, index) => index > designationIndex && normalizeEstimateOperationText(line) === "QTE");
+  const codeModelIndex = lines.findIndex((line, index) => index > designationIndex && normalizeEstimateOperationText(line) === "CODE MODELE");
+  let operationEndIndex = [quantityHeaderIndex, codeModelIndex].filter((index) => index > designationIndex).sort((a, b) => a - b)[0];
+  if (!operationEndIndex) operationEndIndex = quantityHeaderIndex;
+  if (!operationEndIndex || operationEndIndex <= designationIndex) return [];
+
+  const operations = lines
+    .slice(designationIndex + 1, operationEndIndex)
+    .filter((line) => !/^\d+(?:[,.]\d+)?$/.test(line))
+    .filter((line) => !/^(Code modèle|Qté|Prix|unitaire|Montant)$/i.test(line));
+  if (!operations.length) return [];
+
+  const headerIndexes = [quantityHeaderIndex];
+  ["PRIX", "UNITAIRE", "MONTANT"].forEach((header) => {
+    const found = lines.findIndex((line, index) => index > operationEndIndex && normalizeEstimateOperationText(line) === header);
+    if (found >= 0) headerIndexes.push(found);
+  });
+  const qteStart = Math.max(...headerIndexes.filter((index) => index >= 0)) + 1;
+  const numbers = lines.slice(qteStart).filter(isEstimateNumberToken);
+  const quantities = numbers.slice(0, operations.length);
+  if (quantities.length < operations.length) return [];
+
+  const rows: string[] = [];
+  operations.forEach((operation, index) => {
+    const qty = quantities[index];
+    const normalized = normalizeEstimateOperationText(operation);
+    if (!qty || !hasLaborKeyword(normalized)) return;
+    rows.push(`${operation} ${qty} 33,000`);
+  });
+  return rows;
+}
+
+export function dedupeEstimateSourceRows(rows: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  (rows || []).forEach((row) => {
+    const text = String(row || "").replace(/\s+/g, " ").trim();
+    if (!text) return;
+    const labor = classifyLaborLine(text);
+    let key = normalizeEstimateOperationText(text);
+    if (labor?.type === "labor") {
+      key = ["LABOR", normalizeEstimateOperationText(labor.operation), roundPlanningHours(labor.hours)].join("|");
+    }
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(text);
+  });
+  return result;
+}
+
+export function splitEstimateSourceLines(text: string): string[] {
+  const source = String(text || "");
+  const pdfTableRows = extractPdfContentTableRows(source);
+  const columnarRows = extractColumnarEstimateRows(source);
+  const dressageMarker = "DRESSAGE__ET__PEINTURE";
+  const protectedSource = source.replace(/\bDRESSAGE\s+ET\s+PEINTURE\b/gi, dressageMarker);
+  const expanded = protectedSource
+    .replace(/\s+(?=(?:D\/P|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|D\u00C9POSE|DEMONTAGE|D\u00C9MONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE|ENTRETIEN|VIDANGE)\b)/gi, "\n")
+    .split(/\r?\n/)
+    .map((line) => line.replace(new RegExp(dressageMarker, "g"), "DRESSAGE ET PEINTURE"))
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (columnarRows.length) {
+    return dedupeEstimateSourceRows([...pdfTableRows, ...columnarRows, ...expanded]);
+  }
+  if (pdfTableRows.length) return dedupeEstimateSourceRows([...pdfTableRows, ...expanded]);
+  return dedupeEstimateSourceRows(expanded);
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -158,11 +602,7 @@ function computeConfidence(text: string, type: QuoteLineType, hours: number): "h
  * Retourne les QuoteLine détectées.
  */
 export function parseQuoteText(text: string): QuoteLine[] {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map(l => l.replace(/\s+/g, " ").trim())
-    .filter(l => l.length > 2);
-
+  const lines = splitEstimateSourceLines(text);
   return linesToQuoteLines(lines, "text");
 }
 
@@ -171,7 +611,6 @@ export function parseQuoteText(text: string): QuoteLine[] {
  */
 export function parseQuoteCsv(text: string): QuoteLine[] {
   const rows = parseCsvRaw(text);
-  // Pour chaque ligne CSV, on reconstruit un texte plat et on classe
   const lineTexts = rows.map(row => row.join(" ").replace(/\s+/g, " ").trim()).filter(l => l.length > 2);
   return linesToQuoteLines(lineTexts, "csv");
 }
@@ -190,15 +629,15 @@ function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[
 
   for (const rawLine of lineTexts) {
     const cleaned = normalizeQuoteLine(rawLine);
-    if (!cleaned || isLegalFooterLine(cleaned)) continue;
+    if (!cleaned || isEstimateLegalOrFooterLine(normalizeEstimateOperationText(cleaned))) continue;
 
     // Dédup simple
-    const key = normalizeOperationText(cleaned);
+    const key = normalizeEstimateOperationText(cleaned);
     if (seen.has(key)) continue;
     seen.add(key);
 
     const type = classifyQuoteLine(cleaned);
-    const hours = type === "labor" || type === "paint" ? extractLaborHours(cleaned) : 0;
+    const hours = type === "labor" ? extractLaborHours(cleaned) : 0;
     const confidence = computeConfidence(cleaned, type, hours);
 
     result.push({
@@ -225,53 +664,67 @@ export interface LaborDistribution {
   laborHours: number;
 }
 
-export function distributeLaborHours(description: string, hours: number): LaborDistribution[] {
-  const norm = normalizeOperationText(description);
-
-  // Carrosserie : D/P
-  if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(ION|IN)?\b/.test(norm)) {
-    const half = roundHours(hours / 2);
+export function distributeLaborHours(operation: string, hours: number, options: any = {}): LaborDistribution[] {
+  const normalized = normalizeEstimateOperationText(operation);
+  const cleanDetail = removeKnownOperationPrefix(operation);
+  
+  if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
+    const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
     return [
-      { phase: "body", operation: `D/P ${description}`, laborHours: half },
-      { phase: "reassembly", operation: `REMONTAGE ${description}`, laborHours: roundHours(hours - half) },
+      { phase: "body", operation: `D/P ${cleanDetail}`, laborHours: body },
+      { phase: "reassembly", operation: `REMONTAGE ${cleanDetail}`, laborHours: reassembly },
     ];
   }
-  if (/\bPEINTURE\s+ET\s+F(I)?NITION\b/.test(norm)) {
-    const half = roundHours(hours / 2);
+  if (/\bPEINTURE\s+ET\s+F(?:I)?NITION\b/.test(normalized)) {
+    const [prep, paint] = splitPlanningHours(hours, [0.5, 0.5]);
     return [
-      { phase: "prep", operation: `PREPARATION ${description}`, laborHours: half },
-      { phase: "paint", operation: `PEINTURE ${description}`, laborHours: roundHours(hours - half) },
+      { phase: "prep", operation: `PREPARATION ${cleanDetail}`, laborHours: prep },
+      { phase: "paint", operation: `PEINTURE ${cleanDetail}`, laborHours: paint },
     ];
   }
-  if (/\bDRESSAGE\b/.test(norm)) {
-    const third = roundHours(hours / 3);
+  if (/\bDRESSAGE\b/.test(normalized)) {
+    const [body, prep, paint] = splitPlanningHours(hours, [1 / 3, 1 / 3, 1 / 3]);
     return [
-      { phase: "body", operation: `DRESSAGE ${description}`, laborHours: third },
-      { phase: "prep", operation: `PREPARATION ${description}`, laborHours: third },
-      { phase: "paint", operation: `PEINTURE ${description}`, laborHours: roundHours(hours - 2 * third) },
+      { phase: "body", operation: `DRESSAGE ${cleanDetail}`, laborHours: body },
+      { phase: "prep", operation: `PREPARATION ${cleanDetail}`, laborHours: prep },
+      { phase: "paint", operation: `PEINTURE ${cleanDetail}`, laborHours: paint },
     ];
   }
-  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|FILTRE)\b/.test(norm)) return [{ phase: "oilService", operation: description, laborHours: hours }];
-  if (/\b(DIAGNOSTIC|ELECTRICITE|ELECTRICITÉ|ELECTRIQUE|ALTERNATEUR|DEMARREUR|BATTERIE|CAPTEUR)\b/.test(norm)) return [{ phase: "electrical", operation: description, laborHours: hours }];
-  if (/\b(MOTEUR|MECANIQUE|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|BOITE)\b/.test(norm)) return [{ phase: "mechanical", operation: description, laborHours: hours }];
-  if (/\bPEINTURE\b/.test(norm)) return [{ phase: "paint", operation: description, laborHours: hours }];
-  if (/\bPREPARATION\b/.test(norm)) return [{ phase: "prep", operation: description, laborHours: hours }];
-  if (/\bFINITION\b/.test(norm)) return [{ phase: "finish", operation: description, laborHours: hours }];
-  if (/\b(DEMONTAGE|DEPOSE|D\/P)\b/.test(norm)) return [{ phase: "body", operation: description, laborHours: hours }];
-  if (/\b(REMONTAGE|REPOSE|REMPLACEMENT|REMP|REMPL)\b/.test(norm)) return [{ phase: "reassembly", operation: description, laborHours: hours }];
-  if (/\bREPARATION\b/.test(norm)) return [{ phase: "body", operation: description, laborHours: hours }];
-  // fallback
-  return [{ phase: "general", operation: description, laborHours: hours }];
+  if (/\b(PASSAGE\s+SUR\s+MARBRE|MARBRE)\b/.test(normalized)) return [{ phase: "body", operation, laborHours: hours }];
+  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [{ phase: "oilService", operation, laborHours: hours }];
+  
+  const isClientOnly = ["client", "vidange", "mechanical_client", "electrical_client"].includes(options.claimType);
+  const insuranceElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|BATTERIE|HAUTE\s+TENSION|HV|PYROTECHNIQUE)\b/;
+  const clientElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|ELECTRIQUE|ELECTRICITE|ALTERNATEUR|DEMARREUR|BATTERIE|FAISCEAU|CAPTEUR|HAUTE\s+TENSION|HV)\b/;
+  
+  if ((isClientOnly ? clientElectricalPattern : insuranceElectricalPattern).test(normalized)) return [{ phase: "electrical", operation, laborHours: hours }];
+  if (/\b(REMPLACEMENT\s+BOITE|BOITE\s+VITESSE|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR|MECANIQUE|MECAN)\b/.test(normalized)) return [{ phase: "mechanical", operation, laborHours: hours }];
+  if (/\b(CHANG(?:EMENT)?|REMP|REMPL|REMPLACEMENT)\s+(FEU|OPTIQUE|PHARE|PROJECTEUR|LANTERNE|PARE\s+BOUE|SUPPORT|AILE|PARE\s+CHOC|JUPE|MALLE|CAPOT|PORTE|SERRURE)\b/.test(normalized)) {
+    return [{ phase: "reassembly", operation, laborHours: hours }];
+  }
+  if (/\bCHANG(?:EMENT)?\b/.test(normalized)) return [{ phase: "reassembly", operation, laborHours: hours }];
+  if (/\bPREPARATION\b/.test(normalized)) return [{ phase: "prep", operation, laborHours: hours }];
+  if (/\bPEINTURE\b/.test(normalized)) return [{ phase: "paint", operation, laborHours: hours }];
+  if (/\bD\s*\/\s*P\b/.test(normalized)) {
+    const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
+    return [
+      { phase: "body", operation: `D/P ${cleanDetail}`, laborHours: body },
+      { phase: "reassembly", operation: `REMONTAGE ${cleanDetail}`, laborHours: reassembly },
+    ];
+  }
+  if (/\b(DEMONTAGE|DEPOSE)\b/.test(normalized)) return [{ phase: "body", operation, laborHours: hours }];
+  if (/\b(REMONTAGE|REPOSE)\b/.test(normalized)) return [{ phase: "reassembly", operation, laborHours: hours }];
+  if (/\bFINITION\b/.test(normalized)) return [{ phase: "finish", operation, laborHours: hours }];
+  if (/\b(BOITE|VITESSE)\b/.test(normalized)) return [{ phase: "mechanical", operation, laborHours: hours }];
+  if (/\b(REMP|REMPL|REMPLACEMENT)\b/.test(normalized)) return [{ phase: "reassembly", operation, laborHours: hours }];
+  if (/\bREPARATION\b/.test(normalized)) return [{ phase: "body", operation, laborHours: hours }];
+  return [];
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Preview et application
 // ───────────────────────────────────────────────────────────────────────────────
 
-/**
- * Construit la prévisualisation (avant confirmation utilisateur).
- * Les lignes ne sont PAS encore appliquées au dossier.
- */
 export function buildQuoteImportPreview(
   lines: QuoteLine[],
   options: { sourceType?: "text" | "csv" | "xlsx"; fileName?: string } = {}
@@ -287,14 +740,10 @@ export function buildQuoteImportPreview(
     lines,
     laborCount: laborLines.length,
     partCount: partLines.length,
-    totalDetectedHours: roundHours(totalDetectedHours),
+    totalDetectedHours: roundPlanningHours(totalDetectedHours),
   };
 }
 
-/**
- * Valide la preview avant application.
- * Retourne un tableau de messages d'erreur (vide = OK).
- */
 export function validateQuoteImportPreview(preview: QuoteImportPreview): string[] {
   const errors: string[] = [];
   const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor");
@@ -310,17 +759,12 @@ export function validateQuoteImportPreview(preview: QuoteImportPreview): string[
   return errors;
 }
 
-/**
- * Mappe les lignes MO sélectionnées vers des RepairOrderLine.
- * À appeler UNIQUEMENT après confirmation utilisateur.
- * Les lignes obtenues ont estimateSource = "quote-import" et isEstimatedDurationValidated = true.
- */
 export function mapLaborLinesToRepairOrderLines(
   preview: QuoteImportPreview
 ): RepairOrderLine[] {
   const importId = preview.importId;
   return preview.lines
-    .filter(l => l.selected && (l.type === "labor" || l.type === "paint"))
+    .filter(l => l.selected && l.type === "labor")
     .map((line): RepairOrderLine => {
       const hours = line.editedHours !== undefined ? line.editedHours : line.hours;
       const description = line.editedDescription?.trim() || line.description;
@@ -338,24 +782,18 @@ export function mapLaborLinesToRepairOrderLines(
     });
 }
 
-/**
- * Génère l'entrée d'historique après application.
- */
 export function buildQuoteImportHistoryEntry(preview: QuoteImportPreview): string {
   const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor");
   const parts = preview.lines.filter(l => l.type === "part");
-  const totalHours = roundHours(selectedLabor.reduce((s, l) => s + (l.editedHours ?? l.hours), 0));
+  const totalHours = roundPlanningHours(selectedLabor.reduce((s, l) => s + (l.editedHours ?? l.hours), 0));
   const fileName = preview.fileName ? ` depuis ${preview.fileName}` : "";
   return `Import devis${fileName} : ${selectedLabor.length} ligne(s) MO importée(s) (${totalHours}h), ${parts.length} pièce(s) détectée(s) non importées comme tâches.`;
 }
 
-/**
- * Construit le QuoteImportResult complet après confirmation.
- */
 export function applyQuoteImportPreview(preview: QuoteImportPreview): QuoteImportResult {
   const importedLines = mapLaborLinesToRepairOrderLines(preview);
   const parts = preview.lines.filter(l => l.type === "part");
-  const totalHours = roundHours(importedLines.reduce((s, l) => s + l.tempsEstime, 0));
+  const totalHours = roundPlanningHours(importedLines.reduce((s, l) => s + l.tempsEstime, 0));
   return {
     importId: preview.importId,
     importedLines,
@@ -364,4 +802,32 @@ export function applyQuoteImportPreview(preview: QuoteImportPreview): QuoteImpor
     totalHours,
     historyEntry: buildQuoteImportHistoryEntry(preview),
   };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Planning duration helpers
+// ───────────────────────────────────────────────────────────────────────────────
+
+export function repairDurationHours(dossier: DossierSAV): number {
+  return dossier.ordresReparation.reduce((sum, line) => sum + (line.tempsEstime || 0), 0);
+}
+
+export function getBookingDurationMinutes(booking: { segments?: Array<{ start: string; end: string }> | null }): number {
+  const segments = booking?.segments || [];
+  return segments.reduce((sum, segment) => {
+    const start = new Date(segment.start);
+    const end = new Date(segment.end);
+    if (end > start) {
+      const diffMs = end.getTime() - start.getTime();
+      return sum + Math.round(diffMs / 60000);
+    }
+    return sum;
+  }, 0);
+}
+
+function generateId(prefix: string): string {
+  const rand = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}_${rand}`;
 }

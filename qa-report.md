@@ -1,6 +1,6 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 12/06/2026 15:56:36
+- **Date** : 13/06/2026 08:44:33
 - **Version** : v1.1.0 (Lot 5F-3 - Import Devis & Durées Main-d'œuvre)
 - **Contrôles exécutés** : 46
 - **Résultat global** : **OK** (46 OK / 0 KO)
