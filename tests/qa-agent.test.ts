@@ -39,6 +39,9 @@ import {
   mapLaborLinesToRepairOrderLines,
   extractLaborHours,
   classifyQuoteLine,
+  cleanLaborDescription,
+  isAdministrativeQuoteLine,
+  extractTableZoneLines,
 } from "../src/quote-import";
 import {
   AtelierZone,
@@ -826,6 +829,87 @@ registerCheck("Lot 5F-3", "planning autorisé avec quote-import validé", () => 
   }, now);
   assert.ok(!result.codes.includes("planning-duration-missing") && !result.codes.includes("planning-duration-not-validated"),
     `Should not be blocked for duration. Codes: ${result.codes.join(", ")}`);
+});
+
+registerCheck("Lot 5F-3 Strict Parser", "aucun prix dans les libellés de tâches importées", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+remp filtre habitacle 0,3 33,000 9,900
+remp bougies 0,4 33,000 13,200
+Total DT 56,100`;
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  for (const line of laborLines) {
+    const hasPrice = /\b\d+[,.]\d{3}\b/.test(line.description);
+    assert.equal(hasPrice, false, `Description contient un prix: "${line.description}"`);
+  }
+});
+
+registerCheck("Lot 5F-3 Strict Parser", "aucun libellé CLT/VIN/DFM/COMET/LUXURY dans les tâches importées", () => {
+  const adminText = `Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+DFM FICTIF S50 1.5
+CLT-0000
+COMET FICTIF
+LUXURY FICTIF
+VIN FICTIFFICTIF
+Total DT 33,000`;
+  const lines = parseQuoteText(adminText);
+  const forbidden = ["DFM", "CLT", "COMET", "LUXURY", "VIN"];
+  for (const kw of forbidden) {
+    const found = lines.some(l => l.description.toUpperCase().includes(kw));
+    assert.equal(found, false, `Mot interdit "${kw}" trouvé dans les résultats`);
+  }
+});
+
+registerCheck("Lot 5F-3 Strict Parser", "aucune ligne administrative importée comme tâche", () => {
+  const adminCases = [
+    "CLT-0018",
+    "COMET",
+    "LUXURY",
+    "DFM DONGFENG S50 1 5 MT",
+    "RECEPTIONNAIRE",
+    "N DEVIS",
+    "VIN",
+    "TOTAL DT",
+    "TVA",
+    "TIMBRE",
+    "MONTANT A REPORTER",
+    "PAGE 2",
+  ];
+  for (const line of adminCases) {
+    const isAdmin = isAdministrativeQuoteLine(line);
+    assert.equal(isAdmin, true, `Ligne admin non détectée: "${line}"`);
+  }
+});
+
+registerCheck("Lot 5F-3 Strict Parser", "devis multi-pages — lignes MO page 2 conservées", () => {
+  const multiPageText = `Désignation Qté Prix unitaire Montant
+PLAQUETTES FREIN AV 1 120,000 120,000
+entretien 1 33,000 33,000
+Total DT 153,000
+Désignation Qté Prix unitaire Montant
+remp filtre a air 0,3 33,000 9,900
+remp bougies 0,4 33,000 13,200
+Total DT 23,100`;
+  const lines = parseQuoteText(multiPageText);
+  const laborLines = lines.filter(l => l.type === "labor");
+  assert.ok(laborLines.length >= 3, `Expected >= 3 labor lines from 2-page devis, got ${laborLines.length}`);
+});
+
+registerCheck("Lot 5F-3 Strict Parser", "lignes Report et Montant à reporter ignorées", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+Report 33,000
+Montant à reporter 33,000
+Désignation Qté Prix unitaire Montant
+remp filtre a air 0,3 33,000 9,900
+Total DT 42,900`;
+  const lines = parseQuoteText(text);
+  const descriptions = lines.map(l => l.description.toUpperCase());
+  const reportFound = descriptions.some(d => d.includes("REPORT") || d.includes("MONTANT A REPORTER"));
+  assert.equal(reportFound, false, `'Report' ou 'Montant à reporter' trouvé dans les résultats: ${descriptions.filter(d => d.includes("REPORT")).join(", ")}`);
 });
 
 // -----------------------------------------------------------------

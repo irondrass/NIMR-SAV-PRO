@@ -17,6 +17,9 @@ import {
   validateQuoteImportPreview,
   mapLaborLinesToRepairOrderLines,
   applyQuoteImportPreview,
+  cleanLaborDescription,
+  isAdministrativeQuoteLine,
+  extractTableZoneLines,
 } from "../src/quote-import";
 import {
   validatePlanningAssignment,
@@ -24,6 +27,7 @@ import {
 } from "../src/sav-core";
 import { InterventionType, DossierPriority } from "../src/types";
 import { MOCK_TECHNICIENS, INITIAL_DOSSIERS } from "../src/data";
+
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -610,3 +614,272 @@ REMP SERRURE PORTIERRE 0,8 35,000 28,000
 }
 
 console.log("\n🎉 Tous les tests Lot 5F-3 (quote-import) sont passés !");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Suite 17 — cleanLaborDescription
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log("\n── Suite 17 : cleanLaborDescription ──────────────────────────────────────");
+
+{
+  // 17-01 : entretien simple
+  const result = cleanLaborDescription("entretien 1 33,000 33,000");
+  assert.equal(result, "Entretien", `17-01: got "${result}"`);
+  console.log("  ✅ 17-01: 'entretien 1 33,000 33,000' → 'Entretien'");
+}
+
+{
+  // 17-02 : remplacement filtre à air
+  const result = cleanLaborDescription("remp filtre a air 0,3 33,000 9,900");
+  assert.equal(result, "Remplacement filtre a air", `17-02: got "${result}"`);
+  console.log("  ✅ 17-02: 'remp filtre a air 0,3 33,000 9,900' → 'Remplacement filtre a air'");
+}
+
+{
+  // 17-03 : remplacement filtre habitacle
+  const result = cleanLaborDescription("remp filtre habitacle 0,3 33,000 9,900");
+  assert.equal(result, "Remplacement filtre habitacle", `17-03: got "${result}"`);
+  console.log("  ✅ 17-03: 'remp filtre habitacle 0,3 33,000 9,900' → 'Remplacement filtre habitacle'");
+}
+
+{
+  // 17-04 : remplacement bougies
+  const result = cleanLaborDescription("remp bougies 0,4 33,000 13,200");
+  assert.equal(result, "Remplacement bougies", `17-04: got "${result}"`);
+  console.log("  ✅ 17-04: 'remp bougies 0,4 33,000 13,200' → 'Remplacement bougies'");
+}
+
+{
+  // 17-05 : MO-TOL D/P et préparation
+  const result = cleanLaborDescription("MO-TOL D/P ET PREPARATION PARE-CHOCS AR 2,5 35,000 87,500");
+  assert.equal(result, "D/P et préparation PARE-CHOCS AR", `17-05: got "${result}"`);
+  console.log("  ✅ 17-05: 'MO-TOL D/P ET PREPARATION PARE-CHOCS AR 2,5 35,000 87,500' → 'D/P et préparation PARE-CHOCS AR'");
+}
+
+{
+  // 17-06 : MO-TOL Peinture et finition
+  const result = cleanLaborDescription("MO-TOL PEINTURE ET FINITION MALLE AR 6 35,000 210,000");
+  assert.equal(result, "Peinture et finition MALLE AR", `17-06: got "${result}"`);
+  console.log("  ✅ 17-06: 'MO-TOL PEINTURE ET FINITION MALLE AR 6 35,000 210,000' → 'Peinture et finition MALLE AR'");
+}
+
+{
+  // 17-07 : Aucun prix numérique dans la description
+  const cases = [
+    "entretien 1 33,000 33,000",
+    "remp filtre a air 0,3 33,000 9,900",
+    "MO-TOL D/P ET PREPARATION PARE-CHOCS AR 2,5 35,000 87,500",
+    "MO-TOL PEINTURE ET FINITION MALLE AR 6 35,000 210,000",
+  ];
+  for (const c of cases) {
+    const cleaned = cleanLaborDescription(c);
+    // Must not contain a standalone number like 33,000 or 87,500 or 0,3
+    const hasPrice = /\b\d+[,.]\d{3}\b/.test(cleaned);
+    assert.equal(hasPrice, false, `17-07: Description contient un prix: "${cleaned}" (from "${c}")`);
+  }
+  console.log("  ✅ 17-07: Aucun prix numérique dans les descriptions nettoyées");
+}
+
+console.log("  ✅ Suite 17 complète");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Suite 18 — isAdministrativeQuoteLine
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log("\n── Suite 18 : isAdministrativeQuoteLine ──────────────────────────────────");
+
+{
+  // 18-01 : Lignes admin reconnues (doivent retourner true)
+  const adminLines = [
+    "DFM DONGFENG S50 1 5 MT",                 // marque véhicule
+    "CLT-0018",                                  // code client
+    "COMET",                                     // concession
+    "LUXURY",                                    // modèle
+    "MARQUE DESCRIPTION MODELE KILOMETRAGE LIMITE COMMANDE", // en-tête tableau véhicule
+    "VIN",                                       // VIN
+    "N DEVIS",                                   // N° Devis (normalisé sans °)
+    "N OR",                                      // N° OR (normalisé sans °)
+    "RECEPTIONNAIRE",                            // réceptionnaire
+    "REPORT",                                    // Report (normalisé)
+    "TOTAL DT",                                  // total
+    "TVA",                                       // TVA
+    "TIMBRE",                                    // timbre fiscal
+    "MONTANT A REPORTER",                        // montant à reporter
+    "PAGE 2",                                    // numéro de page
+    "IDENTIFIANT FISCAL",                        // identifiant fiscal
+    "TEL",                                       // téléphone
+  ];
+
+  for (const line of adminLines) {
+    const result = isAdministrativeQuoteLine(line);
+    assert.equal(result, true, `18-01: Expected admin for "${line}", got false`);
+  }
+  console.log("  ✅ 18-01: Lignes administratives correctement identifiées");
+}
+
+{
+  // 18-02 : Lignes MO non admin (doivent retourner false)
+  const laborLines = [
+    "ENTRETIEN",
+    "REMP FILTRE A AIR",
+    "D P ET PREPARATION PARE-CHOCS AR",
+    "PEINTURE ET FINITION MALLE AR",
+    "VIDANGE HUILE MOTEUR",
+    "REMPLACEMENT PLAQUETTES FREIN AV",
+  ];
+  for (const line of laborLines) {
+    const result = isAdministrativeQuoteLine(line);
+    assert.equal(result, false, `18-02: Expected non-admin for "${line}", got true`);
+  }
+  console.log("  ✅ 18-02: Lignes MO non identifiées comme administratives");
+}
+
+{
+  // 18-03 : Les lignes admin ne doivent pas se retrouver dans le résultat de parseQuoteText
+  const adminText = `Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+DFM FICTIF S50 1.5
+CLT-0000
+COMET FICTIF
+LUXURY FICTIF
+N° OR: FICTIF-0001
+VIN FICTIFFICTIFFICTIF
+Total DT 43,100`;
+
+  const lines = parseQuoteText(adminText);
+  const descriptions = lines.map(l => l.description.toUpperCase());
+
+  const forbidden = ["DFM", "CLT", "COMET", "LUXURY", "VIN", "TOTAL"];
+  for (const kw of forbidden) {
+    const found = descriptions.some(d => d.includes(kw));
+    assert.equal(found, false, `18-03: Mot interdit "${kw}" trouvé dans: ${descriptions.filter(d => d.includes(kw)).join(", ")}`);
+  }
+  console.log("  ✅ 18-03: Aucun mot administratif dans les résultats de parseQuoteText");
+}
+
+{
+  // 18-04 : Action MO prioritaire sur mot-clé pièce
+  // "remp filtre a air" doit être labor, "FILTRE A AIR" seul doit être part/unknown
+  const laborText = "remp filtre a air 0,3 33,000 9,900";
+  const partText = "FILTRE A AIR";
+  const laborType = classifyQuoteLine(laborText);
+  const partType = classifyQuoteLine(partText);
+  assert.equal(laborType, "labor", `18-04: 'remp filtre a air' should be labor, got ${laborType}`);
+  assert.notEqual(partType, "labor", `18-04: 'FILTRE A AIR' alone should not be labor, got ${partType}`);
+  console.log("  ✅ 18-04: Verbe d'action MO prioritaire sur mot-clé pièce");
+}
+
+{
+  // 18-05 : Les lignes Report/Montant à reporter ignorées mais n'arrêtent pas le parsing
+  const text = `Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+Total DT 33,000
+Désignation Qté Prix unitaire Montant
+remp filtre a air 0,3 33,000 9,900
+remp bougies 0,4 33,000 13,200`;
+
+  const lines = parseQuoteText(text);
+  const laborLines = lines.filter(l => l.type === "labor");
+  assert.ok(laborLines.length >= 2, `18-05: Expected >= 2 labor lines from multi-segment, got ${laborLines.length}`);
+
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 1.7) < 0.01, `18-05: Expected 1.7H total, got ${totalHours}H`);
+  console.log("  ✅ 18-05: Report ignoré mais parsing multi-segments continue");
+}
+
+console.log("  ✅ Suite 18 complète");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Suite 19 — Fixture multi-pages anonymisée
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log("\n── Suite 19 : Fixture multi-pages ────────────────────────────────────────");
+
+{
+  // Fixture: devis 2 pages avec pièces page 1, Report intermédiaire, MO page 2
+  const MULTIPAGE_FIXTURE = `
+Désignation Qté Prix unitaire Montant
+PLAQUETTES FREIN AV 1 120,000 120,000
+HUILE MOTEUR 5W40 5 35,000 175,000
+Contrôle géométrie 1 33,000 33,000
+Report 328,000
+Montant à reporter 328,000
+Désignation Qté Prix unitaire Montant
+remp filtre a air 0,3 33,000 9,900
+remp filtre habitacle 0,3 33,000 9,900
+vidange huile moteur 1 33,000 33,000
+PRODUIT DE PEINTURE 1 85,000 85,000
+Total DT 466,800
+`;
+
+  const lines = parseQuoteText(MULTIPAGE_FIXTURE);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+  const descriptions = lines.map(l => l.description.toUpperCase());
+
+  // 19-01 : Les lignes MO page 2 détectées
+  assert.ok(laborLines.length >= 3, `19-01: Expected >= 3 labor lines from page 2, got ${laborLines.length}`);
+  console.log(`  ✅ 19-01: ${laborLines.length} lignes MO détectées (multi-pages)`);
+
+  // 19-02 : Report ignoré
+  const reportFound = descriptions.some(d => d.includes("REPORT") || d.includes("MONTANT A REPORTER"));
+  assert.equal(reportFound, false, `19-02: 'Report' or 'Montant à reporter' found in output`);
+  console.log("  ✅ 19-02: 'Report' et 'Montant à reporter' ignorés");
+
+  // 19-03 : Produit de peinture non importé comme labor
+  const paintLabor = laborLines.some(l => /PEINTURE/i.test(l.description) && !/FINITION|D\/P|DRESSAGE/.test(l.description.toUpperCase()));
+  // NOTE: produit de peinture devrait être part ou ignored
+  const paintPart = partLines.some(l => /PEINTURE/i.test(l.description));
+  // At least: produit de peinture is NOT in labor
+  const productPaintInLabor = laborLines.some(l => /PRODUIT.*PEINTURE/i.test(l.description) || /PRODUT.*PEINTURE/i.test(l.description));
+  assert.equal(productPaintInLabor, false, `19-03: 'Produit de peinture' ne doit pas être labor`);
+  console.log("  ✅ 19-03: Produit de peinture non importé comme tâche MO");
+
+  // 19-04 : Noms propres des tâches (pas de prix dans les descriptions labor)
+  for (const line of laborLines) {
+    const hasPrice = /\b\d+[,.]\d{3}\b/.test(line.description);
+    assert.equal(hasPrice, false, `19-04: Description contient un prix: "${line.description}"`);
+  }
+  console.log("  ✅ 19-04: Aucun prix dans les noms de tâches MO page 2");
+
+  // 19-05 : Total heures = 2.6H (contrôle géo 1.0 + remp filtre air 0.3 + remp filtre habitacle 0.3 + vidange 1.0)
+  const totalHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  assert.ok(Math.abs(totalHours - 2.6) < 0.01, `19-05: Expected 2.6H total (multi-pages), got ${totalHours}H`);
+  console.log(`  ✅ 19-05: Total MO multi-pages = ${totalHours}H (attendu 2.6H)`);
+
+}
+
+{
+  // 19-06 : extractTableZoneLines — format sans tableau = toutes lignes retournées
+  const noTableLines = [
+    "Vidange + filtre huile 1H",
+    "Remplacement plaquettes frein avant 2H",
+    "Huile moteur 5W40 5L",
+  ];
+  const result = extractTableZoneLines(noTableLines);
+  assert.equal(result.length, noTableLines.length, `19-06: Expected ${noTableLines.length} lines, got ${result.length}`);
+  console.log("  ✅ 19-06: Format texte libre (sans tableau) — toutes lignes conservées");
+}
+
+{
+  // 19-07 : extractTableZoneLines — format tableau multi-segments
+  const tableLines = [
+    "Désignation Qté Prix unitaire Montant",
+    "PLAQUETTES FREIN AV 1 120,000 120,000",
+    "entretien 1 33,000 33,000",
+    "Total DT 153,000",
+    "Désignation Qté Prix unitaire Montant",
+    "remp filtre a air 0,3 33,000 9,900",
+    "remp bougies 0,4 33,000 13,200",
+    "Total DT 23,100",
+  ];
+  const result = extractTableZoneLines(tableLines);
+  // Should contain both segments: 2 + 2 = 4 lines (not the headers or totals)
+  assert.equal(result.length, 4, `19-07: Expected 4 lines in 2 segments, got ${result.length}: ${JSON.stringify(result)}`);
+  console.log("  ✅ 19-07: extractTableZoneLines multi-segments = 4 lignes correctement extraites");
+}
+
+console.log("  ✅ Suite 19 complète");
+
+console.log("\n🎉 Toutes les suites 17-19 (parser strict) sont passées !");

@@ -369,4 +369,108 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
     expect(reactErrors.length, `React errors: ${reactErrors.join("\n")}`).toBe(0);
   });
 
+  // ─── Test 13 : Bloc administratif ignoré dans l'import ────────────────────
+
+  test("19-13 bloc administratif ignoré — DFM/CLT/COMET/LUXURY non cochés", async ({ page }) => {
+    // Fixtures réalistes : les infos admin (N° OR, VIN, client) se trouvent AVANT le tableau
+    // dans un vrai devis PDF NIMR. Le tableau (Désignation...) vient ensuite.
+    const DEVIS_AVEC_ADMIN = `DFM FICTIF S50 1.5
+CLT-0000
+COMET FICTIF SA
+LUXURY FICTIF
+N° OR: OR-FICTIF-0001
+VIN: FICTIFFICTIFFICTIF
+Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+Total DT 42,900`;
+
+    const dossier = makeDossierWithPreset();
+    await seedDossiers(page, [dossier]);
+    await changeUserRole(page, "role-option-chef-atelier");
+    await humanWait(page);
+
+    await navigateToDossierRepairOrders(page, dossier.id);
+
+    await humanClick(page, page.locator('[data-testid="quote-import-button"]'));
+    await expect(page.locator('[data-testid="quote-import-modal"]')).toBeVisible();
+
+    await humanFill(page, page.locator('[data-testid="quote-text-input"]'), DEVIS_AVEC_ADMIN);
+    await humanClick(page, page.locator('[data-testid="quote-import-analyze"]'));
+    await humanWait(page, 500);
+
+    await expect(page.locator('[data-testid="quote-preview-table"]')).toBeVisible({ timeout: 7000 });
+
+    // Les lignes MO doivent être présentes
+    const laborRows = page.locator('[data-testid="quote-line-labor"]');
+    await expect(laborRows.first()).toBeVisible();
+    const laborCount = await laborRows.count();
+    expect(laborCount).toBeGreaterThan(0);
+
+    // Les mots administratifs ne doivent pas apparaître dans les DESCRIPTIONS (input values)
+    // On cible les descriptions via data-testid="quote-line-desc-*"
+    const descInputs = page.locator('[data-testid^="quote-line-desc-"]');
+    const descCount = await descInputs.count();
+    for (let i = 0; i < descCount; i++) {
+      const val = await descInputs.nth(i).inputValue();
+      const forbidden = ["DFM", "CLT", "COMET", "LUXURY", "VIN:", "OR-FICTIF"];
+      for (const kw of forbidden) {
+        expect(val.toUpperCase(), `Desc ${i} contient mot interdit "${kw}": "${val}"`).not.toContain(kw);
+      }
+    }
+
+    // Fermer le modal
+    const closeBtn = page.locator('[data-testid="quote-import-cancel"], [data-testid="quote-import-close"]').first();
+    if (await closeBtn.isVisible()) {
+      await humanClick(page, closeBtn);
+    }
+  });
+
+  // ─── Test 14 : Noms propres des tâches dans la prévisualisation ───────────
+
+  test("19-14 noms propres des tâches — aucun prix ni code admin dans les libellés", async ({ page }) => {
+    const DEVIS_TABLEAU = `Désignation Qté Prix unitaire Montant
+entretien 1 33,000 33,000
+remp filtre a air 0,3 33,000 9,900
+remp filtre habitacle 0,3 33,000 9,900
+Total DT 53,000`;
+
+    const dossier = makeDossierWithPreset();
+    await seedDossiers(page, [dossier]);
+    await changeUserRole(page, "role-option-chef-atelier");
+    await humanWait(page);
+
+    await navigateToDossierRepairOrders(page, dossier.id);
+
+    await humanClick(page, page.locator('[data-testid="quote-import-button"]'));
+    await expect(page.locator('[data-testid="quote-import-modal"]')).toBeVisible();
+
+    await humanFill(page, page.locator('[data-testid="quote-text-input"]'), DEVIS_TABLEAU);
+    await humanClick(page, page.locator('[data-testid="quote-import-analyze"]'));
+    await humanWait(page, 500);
+
+    await expect(page.locator('[data-testid="quote-preview-table"]')).toBeVisible({ timeout: 7000 });
+
+    // Vérifier les descriptions via les inputs éditables (line.description, pas rawText)
+    // Seules les lignes labor sélectionnées ont un input de description
+    const descInputs = page.locator('[data-testid^="quote-line-desc-"]');
+    const descCount = await descInputs.count();
+    expect(descCount).toBeGreaterThan(0);
+
+    for (let i = 0; i < descCount; i++) {
+      const val = await descInputs.nth(i).inputValue();
+      // La description NE doit PAS contenir de prix au format 33,000 ou 9,900
+      const hasPriceFormat = /\b\d+[,.]\d{3}\b/.test(val);
+      expect(hasPriceFormat, `Desc ${i} contient un prix: "${val}"`).toBe(false);
+    }
+
+    // Fermer le modal
+    const closeBtn = page.locator('[data-testid="quote-import-cancel"], [data-testid="quote-import-close"]').first();
+    if (await closeBtn.isVisible()) {
+      await humanClick(page, closeBtn);
+    }
+  });
+
+
 });
+

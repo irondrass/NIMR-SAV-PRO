@@ -73,6 +73,174 @@ export function isPaintSupplyLine(normalized: string): boolean {
     || /\bMO-002067\b/.test(normalized);
 }
 
+/**
+ * Détecte les lignes administratives (en-tête, pied de page, infos client/véhicule/OR).
+ * Ces lignes ne doivent jamais être importées comme main-d'œuvre.
+ * NOTE : Le texte reçu peut être déjà normalisé par normalizeEstimateOperationText
+ *        (accents retirés, symboles spéciaux → espace, MAJUSCULES).
+ *        Les patterns doivent donc fonctionner avec OU sans symboles spéciaux (ex. ° devient espace).
+ */
+export function isAdministrativeQuoteLine(normalized: string): boolean {
+  const text = String(normalized || "").trim();
+  if (!text) return false;
+
+  // Patterns vehicule / marque / société connus
+  const adminPatterns: RegExp[] = [
+    /\bCLT[-\s]?\d/,                                // CLT-0018, CLT 0018
+    /\bCLT\b/,                                       // CLT seul (entête client)
+    /\b(DFM|DFSK|DONGFENG)\b/,                      // Marque constructeur
+    /\bCOMET\b/,                                     // Concession COMET
+    /\bLUXURY\b/,                                    // LUXURY
+    /\bFULL\s+OPTION\b/,                             // Full option
+    /^(ESSENCE|ELECTRIQUE|HYBRIDE|DIESEL)$/,         // Motorisation seule
+    // N° DEVIS / N° OR / N° IMMAT : le ° peut être remplacé par espace ou absent
+    /\bN\s*[°º]?\s*(DEVIS|OR|MOTEUR|IMMAT)\b/i,     // N° Devis, N° OR, N Devis, N OR
+    /\bVIN\b/,                                       // VIN
+    /\bCHASSIS\b/,                                   // N° châssis
+    /\bDATE\s+DEVIS\b/i,
+    /\bRECEPTIONNAIRE\b/,
+    /\bCREE\s+PAR\b/i,
+    /\bCONSEILLER\s+(DE\s+VENTE|CLIENT|COMMERCIAL)/i,
+    /\bMARQUE\s+DESCRIPTION\s+MODELE\b/i,           // En-tête tableau véhicule
+    /\bKILOMETRAGE\b/,
+    /\bLIMITE\s+COMMANDE\b/,
+    /\bPREM\b.*\bIMMAT\b/,                           // Prem. Immat.
+    /\bCODE\s+MOTEUR\b/,
+    /\bTYPE\s+MAIN\b/i,                              // Type main-d'oeuvre
+    /\bCODE\s+MODELE\b/,
+    /\bIDENTIFIANT\s+(FISCAL|CIN)\b/i,
+    /\bTEL\b|\bFAX\b/,
+    /\bREPORT\b/,                                    // Report / Montant à reporter
+    /\bMONTANT\s+A\s+REPORTER\b/,
+    /\bDEVIS\s+ESTIMATIF\s+ATELIER\b/,
+    /\bPAGE\s+\d+/,
+    /\bTOTAL\s*(DT|TTC|HT)?\b/,                     // Totaux
+    /\bTVA\b/,
+    /\bTIMBRE\b/,
+  ];
+
+  return adminPatterns.some((p) => p.test(text));
+}
+
+
+
+/**
+ * Délimite les zones tableau du devis dans un texte brut (supporte multi-pages).
+ * Retourne uniquement les lignes incluses entre les en-têtes de tableau et les lignes de fin de tableau.
+ * Plusieurs segments peuvent exister (PDF multi-pages).
+ */
+export function extractTableZoneLines(rawLines: string[]): string[] {
+  // Marqueurs de début de tableau (insensible à la casse, après normalisation)
+  const isTableHeader = (line: string): boolean => {
+    const n = normalizeEstimateOperationText(line);
+    return /^(?:NO\s+)?DESIGNATION\b/.test(n);
+  };
+
+  // Marqueurs de fin de tableau (arrête le segment courant)
+  const isTableFooter = (line: string): boolean => {
+    const n = normalizeEstimateOperationText(line);
+    return (
+      /^TOTAL\b/.test(n) ||                         // Total DT, Total TTC, Total DT 153,000
+      /^TVA\b/.test(n) ||
+      /^TIMBRE\b/.test(n) ||
+      /^MONTANT\s+A\s+REPORTER\b/.test(n) ||
+      /^REPORT\b/.test(n) ||                        // Report (normalisé de "Report")
+      /^CACHET\s+ET\s+SIGNATURE\b/.test(n) ||
+      /^NOM\s+PRENOM\b/.test(n) ||
+      /^DEVIS\s+ESTIMATIF\s+ATELIER\b/.test(n) ||
+      /^MARQUE\s+DESCRIPTION\s+MODELE\b/.test(n) ||
+      /^N\s*[°º]?\s*IMMAT\b/.test(n) ||            // N° Immat. ou N IMMAT (normalisé)
+      /^VIN\b/.test(n) ||
+      /^CLT[-\s]?\d/.test(n) ||
+      /^COMET\b/.test(n) ||
+      /^N\s*[°º]?\s*(DEVIS|OR)\b/.test(n)          // N° Devis, N° OR, N DEVIS, N OR (normalisé)
+    );
+  };
+
+
+  // Si aucun header trouvé, retourner toutes les lignes (format texte libre sans tableau)
+  const hasAnyHeader = rawLines.some(isTableHeader);
+  if (!hasAnyHeader) return rawLines;
+
+  const result: string[] = [];
+  let inTable = false;
+
+  for (const line of rawLines) {
+    if (isTableHeader(line)) {
+      inTable = true;
+      continue; // Skip the header line itself
+    }
+    if (inTable && isTableFooter(line)) {
+      inTable = false;
+      // Don't break — a new header can re-open a new segment (multi-page)
+      continue;
+    }
+    if (inTable) {
+      result.push(line);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Nettoie la description d'une ligne de main-d'œuvre tabulaire.
+ * Retire les colonnes numériques (qté, prix unitaire, montant) de la fin de la ligne.
+ * Normalise les abréviations courantes (remp → Remplacement, etc.).
+ * Supprime le préfixe "MO-TOL" s'il existe.
+ */
+export function cleanLaborDescription(line: string): string {
+  let text = String(line || "").replace(/\s+/g, " ").trim();
+
+  // 1. Supprimer préfixe MO-TOL (avec ou sans tiret/espace)
+  text = text.replace(/^MO[-\s]TOL\s*/i, "");
+
+  // 2. Retirer les colonnes numériques finales (montant, puis prix unitaire, puis quantité)
+  //    Format : " 35,000 87,500" ou " 2,5 35,000 87,500"
+  //    On retire jusqu'à 3 colonnes numériques depuis la droite
+  const numPattern = /\s+\d[\d\s]*(?:[,.][\d]+)?(?:\s+\d[\d\s]*(?:[,.][\d]+)?)?(?:\s+\d[\d\s]*(?:[,.][\d]+)?)?$/;
+  text = text.replace(numPattern, "").trim();
+
+  // 3. Normaliser les abréviations (en français lisible)
+  const abbreviations: [RegExp, string][] = [
+    [/^REMP(?:L(?:ACEMENT)?)?\s+/i, "Remplacement "],
+    [/^CHANG(?:EMENT)?\s+/i, "Changement "],
+    [/^ENTRETIEN\b/i, "Entretien"],
+    [/^D\/P\s+ET\s+PREPARAT(?:ION|IN)\s*/i, "D/P et préparation "],
+    [/^D\/P\s*/i, "D/P "],
+    [/^PEINTURE\s+ET\s+F(?:I)?NITION\s*/i, "Peinture et finition "],
+    [/^DRESSAGE\s+ET\s+PEINTURE\s*/i, "Dressage et peinture "],
+    [/^DRESSAGE\s*/i, "Dressage "],
+    [/^PREPARAT(?:ION|IN)\s*/i, "Préparation "],
+    [/^PEINTURE\s+(?!ET\s+)/i, "Peinture "],
+    [/^F(?:I)?NITION\s*/i, "Finition "],
+    [/^DEPOSE\s*/i, "Dépose "],
+    [/^REPOSE\s*/i, "Repose "],
+    [/^VIDANGE\s*/i, "Vidange "],
+    [/^CONTROLE\s*/i, "Contrôle "],
+    [/^DIAGNOSTIC\s*/i, "Diagnostic "],
+  ];
+
+  // Try each abbreviation in order
+  let replaced = false;
+  for (const [pattern, replacement] of abbreviations) {
+    if (pattern.test(text)) {
+      text = text.replace(pattern, replacement);
+      replaced = true;
+      break;
+    }
+  }
+
+  // 4. Si aucune abréviation reconnue, garder le texte brut mais capitaliser
+  text = text.trim();
+  if (!text) return "";
+
+  // Capitalise première lettre
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+
+
 export function isEstimateLaborHourlyRate(value: number): boolean {
   return ESTIMATE_LABOR_HOURLY_RATES.some((rate) => Math.abs(Number(value || 0) - rate) < 0.01);
 }
@@ -586,11 +754,15 @@ export function splitEstimateSourceLines(text: string): string[] {
     .map((line) => line.replace(new RegExp(dressageMarker, "g"), "DRESSAGE ET PEINTURE"))
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
+
+  // Appliquer la délimitation multi-segments de tableau
+  const tableFiltered = extractTableZoneLines(expanded);
+
   if (columnarRows.length) {
-    return dedupeEstimateSourceRows([...pdfTableRows, ...columnarRows, ...expanded]);
+    return dedupeEstimateSourceRows([...pdfTableRows, ...columnarRows, ...tableFiltered]);
   }
-  if (pdfTableRows.length) return dedupeEstimateSourceRows([...pdfTableRows, ...expanded]);
-  return dedupeEstimateSourceRows(expanded);
+  if (pdfTableRows.length) return dedupeEstimateSourceRows([...pdfTableRows, ...tableFiltered]);
+  return dedupeEstimateSourceRows(tableFiltered);
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -629,10 +801,18 @@ function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[
 
   for (const rawLine of lineTexts) {
     const cleaned = normalizeQuoteLine(rawLine);
-    if (!cleaned || isEstimateLegalOrFooterLine(normalizeEstimateOperationText(cleaned))) continue;
+    if (!cleaned) continue;
+
+    const normalizedForChecks = normalizeEstimateOperationText(cleaned);
+
+    // Rejeter lignes légales / pied de page
+    if (isEstimateLegalOrFooterLine(normalizedForChecks)) continue;
+
+    // Rejeter lignes administratives (client, VIN, OR, marque, etc.)
+    if (isAdministrativeQuoteLine(normalizedForChecks)) continue;
 
     // Dédup simple
-    const key = normalizeEstimateOperationText(cleaned);
+    const key = normalizedForChecks;
     if (seen.has(key)) continue;
     seen.add(key);
 
@@ -640,14 +820,17 @@ function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[
     const hours = type === "labor" ? extractLaborHours(cleaned) : 0;
     const confidence = computeConfidence(cleaned, type, hours);
 
+    // Pour les lignes labor : utiliser le nom propre nettoyé
+    const description = type === "labor" ? cleanLaborDescription(cleaned) || cleaned : cleaned;
+
     result.push({
       id: generateId("ql"),
       rawText: rawLine,
-      description: cleaned,
+      description,
       type,
       hours,
       confidence,
-      selected: type === "labor", // pré-sélection : seulement MO
+      selected: type === "labor" && hours > 0, // pré-sélection : seulement MO avec durée > 0
     });
   }
 
