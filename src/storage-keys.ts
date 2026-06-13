@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   backup: "nimr-sav-pro-backup-v1",
   settings: "nimr-sav-pro-settings-v1",
   loginAttempts: "nimr-sav-pro-login-attempts",
+  reservations: "nimr-sav-pro-reservations-v1",
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

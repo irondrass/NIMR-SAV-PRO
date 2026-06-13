@@ -14,7 +14,8 @@ import {
   AtelierZone,
   DossierPriority,
   User,
-  UserSession
+  UserSession,
+  WorkshopReservation
 } from "./types";
 import { 
   INITIAL_DOSSIERS, 
@@ -47,7 +48,8 @@ import {
   isOperationalActiveDossier,
   normalizeDossierForRuntime,
   parseStoredArray,
-  validateBackupPayload
+  validateBackupPayload,
+  isWorkshopReservation
 } from "./sav-core";
 import { APP_NAME, APP_VERSION } from "./app-identity";
 import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
@@ -151,11 +153,11 @@ export default function App() {
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
 
-  // Core Data Source States with LocalStorage fallback
   const [dossiers, setDossiers] = useState<DossierSAV[]>([]);
   const [reclamations, setReclamations] = useState<ReclammationClient[]>([]);
   const [techList, setTechList] = useState<TechnicienResource[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActiviteLog[]>([]);
+  const [reservations, setReservations] = useState<WorkshopReservation[]>([]);
 
   // Detailed selected folder id
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
@@ -179,6 +181,7 @@ export default function App() {
     setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, INITIAL_RECLAMATIONS, isReclamationClient));
     setTechList(loadStoredArray(STORAGE_KEYS.techs, MOCK_TECHNICIENS, isTechnicienResource));
     setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, INITIAL_ACTIVITE_LOGS, isActiviteLog));
+    setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
 
     let mounted = true;
     const initializeAuth = async () => {
@@ -281,10 +284,16 @@ export default function App() {
     writeLocalStorageJSON(STORAGE_KEYS.reclamations, nextRecs);
   };
 
+  const handleUpdateReservations = (nextRes: WorkshopReservation[]) => {
+    handleTouchSession();
+    setReservations(nextRes);
+    writeLocalStorageJSON(STORAGE_KEYS.reservations, nextRes);
+  };
+
   // State Import/Export logic
   const handleExportDataJSON = () => {
     handleTouchSession();
-    const fullBackup = createBackupPayload(dossiers, reclamations, techList, activityLogs);
+    const fullBackup = createBackupPayload(dossiers, reclamations, techList, activityLogs, reservations);
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullBackup, null, 2));
     const downloadAnchor = document.createElement("a");
     downloadAnchor.setAttribute("href", dataStr);
@@ -326,6 +335,10 @@ export default function App() {
           if (validation.data.activityLogs) {
             setActivityLogs(validation.data.activityLogs);
             writeLocalStorageJSON(STORAGE_KEYS.logs, validation.data.activityLogs);
+          }
+          if (validation.data.reservations) {
+            setReservations(validation.data.reservations);
+            writeLocalStorageJSON(STORAGE_KEYS.reservations, validation.data.reservations);
           }
           setImportSuccessMessage("Base restaurée avec succès !");
         } catch (err) {
@@ -836,8 +849,11 @@ export default function App() {
                 <WorkshopPlanning 
                   techniciens={techList}
                   dossiers={dossiers}
+                  reservations={reservations}
+                  onUpdateReservations={handleUpdateReservations}
                   onSelectDossier={(id) => setSelectedDossierId(id)}
                   onUpdateDossier={handleUpdateDossier}
+                  activeRole={activeRole}
                 />
               )}
 

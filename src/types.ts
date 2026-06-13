@@ -340,3 +340,27 @@ export interface DossierSAV {
   datePlanningFin?: string;
   historiqueLogs?: string[];
 }
+
+export type WorkshopReservationStatus =
+  | "A_RESERVER"            // À réserver
+  | "CRENEAU_PROPOSE"       // Créneau proposé
+  | "RESERVATION_CONFIRMEE" // Réservation confirmée
+  | "AFFECTEE_ATELIER"      // Affectée atelier
+  | "ANNULEE"               // Annulée
+  | "TRANSFORMEE_PLANNING"; // Transformée en planning
+
+export interface WorkshopReservation {
+  reservationId: string;
+  dossierId: string;
+  taskIds: string[];
+  totalHours: number; // durée totale MO validée
+  desiredDate: string; // date souhaitée
+  startTime?: string; // créneau proposé start
+  endTime?: string; // créneau proposé end
+  segments?: Array<{ start: string; end: string }>; // segments proposés
+  technicianId?: string; // technicien proposé
+  bayId?: string; // pont proposé
+  status: WorkshopReservationStatus; // statut réservation
+  source: string; // source
+  history: string[]; // historique
+}

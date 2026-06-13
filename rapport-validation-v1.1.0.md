@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-3B
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-4A
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3 et 5F-3B) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3, 5F-3B et 5F-4A) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -346,6 +346,30 @@ Le Lot 5F-3 intègre proprement l'importation de devis et la gestion de la valid
   - La case à cocher (checkbox) est désactivée tant que la durée est `<= 0` (l'utilisateur doit compléter la durée dans l'UI pour pouvoir l'activer).
   - Aucune tâche `RepairOrderLine` n'est créée avec une durée nulle (validation bloquante avec le message *“Durée à compléter avant import.”*).
 
+### Lot 5F-4A : Reprise Planning & Réservation Legacy
+
+Le Lot 5F-4A intègre le flux de réservation d'atelier issu de l'application legacy, s'interfaçant avec le planning Gantt sans le remplacer :
+* **Flux de Statuts de Réservation** :
+  - `A_RESERVER` : Indique qu'un dossier nécessite une réservation (aucune plage bloquée).
+  - `CRENEAU_PROPOSE` : Bloque temporairement un créneau pour le dossier afin d'éviter les doubles suggestions.
+  - `RESERVATION_CONFIRMEE` : Bloque réellement le créneau.
+  - `ANNULEE` : Libère le créneau immédiatement.
+  - `TRANSFORMEE_PLANNING` : Remplacée par les segments Gantt opérationnels.
+* **Calculateur de Durée de Réservation** :
+  - Exclut les tâches terminées (`done`), les tâches sans durée, les presets non validés, les dossiers livrés, prêts facturation ou clôturés.
+  - Ne prend en compte que les tâches non terminées/non livrées avec une durée estimée valide et validée.
+* **Calque de Réservation dans le Gantt** :
+  - Les réservations proposées ou confirmées sont affichées dans le Gantt sur un calque distinct (les ressources concernées reçoivent des blocs transparents en pointillés bleus pour `CRENEAU_PROPOSE` et bleus avec bordures nettes pour `RESERVATION_CONFIRMEE`).
+  - Ajout d'une légende claire dans le planning pour distinguer les types de blocs.
+* **Algorithme Anti-Collision et de Placement** :
+  - La suggestion de créneau évite automatiquement les blocs Gantt planifiés, les créneaux proposés et les réservations confirmées. Elle ignore les statuts non-bloquants.
+  - La conversion distribue les tâches séquentiellement en créant des segments par tâche dans l'ordre de leurs IDs, tout en respectant les horaires de l'atelier, la pause déjeuner (12:00 - 13:00) et en affectant le même technicien/pont si la réservation est globale.
+* **Permissions du Workflow** :
+  - Directeur SAV et Chef Atelier : Accès complet.
+  - Réceptionnaire : Consultation et demande de suggestion simple (ne peut pas confirmer/convertir).
+  - Technicien, QC/Livraison, Lecture seule : Consultation uniquement ou accès masqué selon les rôles.
+* **Historique Obligatoire** : Chaque changement de statut de réservation est journalisé avec la date, l'utilisateur, son rôle, l'action, l'ancien/nouveau statut et un commentaire.
+
 ---
 
 ## 13. Résultats de la Validation Globale
@@ -355,22 +379,23 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **20 suites unitaires** au vert. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **11 tests unitaires de réservation** et **20 suites unitaires globales** au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **252 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 56/56 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **255 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 64/64 contrôles validés** |
 
 ---
 
 ## 14. Nouveaux Tests E2E Playwright
 
-La suite E2E a été enrichie avec 6 nouveaux fichiers de tests complets :
+La suite E2E a été enrichie avec 7 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
 2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des réclamations, l'affectation, la criticité, les changements de statut, l'action corrective, la résolution, la clôture, la réouverture, l'historique, les filtres et le lien vers le dossier lié.
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
 4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
 5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
 6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel et PDF multi-pages (fixture 1076), la fusion des lignes coupées, la non-sélection par défaut des pièces et produits peinture, le blocage et la validation des tâches à 0h, et l'absence de CA/prix/paiement/caisse/stock.
+7. `e2e/20-workshop-reservations.spec.ts` : Valide le cycle complet de réservation (À réserver → Proposé → Confirmé → Planning) sous le rôle Chef Atelier, le rendu du calque distinct sur le Gantt, le déblocage du créneau lors de l'annulation et l'exclusion des dossiers non-réservables.
 
 ---
 

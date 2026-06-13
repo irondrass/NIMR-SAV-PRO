@@ -92,3 +92,32 @@ export function canExportData(role: UserRole): boolean {
 export function isReadOnlyRole(role: UserRole): boolean {
   return role === UserRole.LECTURE_SEULE;
 }
+
+// Réservations
+export function canCreateReservation(role: UserRole): boolean {
+  return (
+    role === UserRole.DIRECTEUR_SAV ||
+    role === UserRole.CHEF_ATELIER ||
+    role === UserRole.RECEPTIONNAIRE
+  );
+}
+
+export function canSuggestReservation(role: UserRole): boolean {
+  return (
+    role === UserRole.DIRECTEUR_SAV ||
+    role === UserRole.CHEF_ATELIER ||
+    role === UserRole.RECEPTIONNAIRE
+  );
+}
+
+export function canConfirmReservation(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
+}
+
+export function canCancelReservation(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
+}
+
+export function canConvertReservationToPlanning(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
+}

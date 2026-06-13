@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, RepairOrderStatus } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, RepairOrderStatus, UserRole, WorkshopReservation } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -34,6 +34,16 @@ import {
   Save 
 } from "lucide-react";
 import { LicencePlate, StatusBadge } from "./UIParts";
+import * as perm from "../permissions";
+import {
+  calculateReservationDuration,
+  createReservationNeed,
+  suggestReservationSlot,
+  validateReservationSlot,
+  confirmReservation,
+  cancelReservation,
+  convertReservationToPlanning
+} from "../workshop-reservations";
 
 const getTaskStatusLabel = (status: RepairOrderStatus) => {
   switch (status) {
@@ -62,8 +72,11 @@ const getTaskStatusTestId = (status: RepairOrderStatus) => {
 interface WorkshopPlanningProps {
   techniciens: TechnicienResource[];
   dossiers: DossierSAV[];
+  reservations: WorkshopReservation[];
+  onUpdateReservations: (updated: WorkshopReservation[]) => void;
   onSelectDossier: (id: string) => void;
   onUpdateDossier: (updated: DossierSAV) => void;
+  activeRole: UserRole;
 }
 
 const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
@@ -74,7 +87,15 @@ const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
   { id: "bay_general_01", name: "Pont polyvalent" },
 ];
 
-export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossier, onUpdateDossier }: WorkshopPlanningProps) {
+export default function WorkshopPlanning({
+  techniciens,
+  dossiers,
+  reservations,
+  onUpdateReservations,
+  onSelectDossier,
+  onUpdateDossier,
+  activeRole
+}: WorkshopPlanningProps) {
   const [filterZone, setFilterZone] = useState<string>("Toutes");
   const [filterBay, setFilterBay] = useState<string>("Toutes");
   
@@ -209,6 +230,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         estimatedHours,
         desiredDate: targetDesiredDate,
         dossierId: selectedTargetIdForSuggest,
+        reservations,
       }, getSystemTime());
 
       setSuggestion(res);
@@ -288,6 +310,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
       end,
       technicians: techniciens,
       workshopBays: DEFAULT_WORKSHOP_BAYS,
+      reservations,
     }, getSystemTime()).codes;
   };
 
@@ -308,6 +331,7 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
       end,
       technicians: techniciens,
       workshopBays: DEFAULT_WORKSHOP_BAYS,
+      reservations,
     }, getSystemTime());
 
     if (!validation.allowed) {
@@ -382,6 +406,102 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
   const isTimeInWorkingHoursForLine = nowMinutesSince8ForLine >= 0 && nowMinutesSince8ForLine <= totalGanttMinutes;
   const showNowLine = isSelectedDateTodayForLine && isTimeInWorkingHoursForLine;
   const nowPct = showNowLine ? (nowMinutesSince8ForLine / totalGanttMinutes) * 100 : 0;
+
+  // Find all reservations active on the selected date
+  const activeReservationsStr = reservations.filter(res => {
+    if (res.status === "CRENEAU_PROPOSE" || res.status === "RESERVATION_CONFIRMEE") {
+      if (res.startTime) {
+        const resDateStr = res.startTime.split("T")[0];
+        if (resDateStr === selectedDateStr) {
+          if (ganttSearchQuery.trim()) {
+            const query = ganttSearchQuery.toLowerCase().trim();
+            const dossier = dossiers.find(d => d.id === res.dossierId);
+            if (dossier) {
+              const matchesImmat = dossier.vehiculeImmatriculation?.toLowerCase().includes(query);
+              const matchesVin = dossier.vehiculeVIN?.toLowerCase().includes(query);
+              const matchesDossier = dossier.id?.toLowerCase().includes(query);
+              const matchesClient = dossier.clientNom?.toLowerCase().includes(query);
+              if (!matchesImmat && !matchesVin && !matchesDossier && !matchesClient) {
+                return false;
+              }
+            } else {
+              return false;
+            }
+          }
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+
+  // Construct reservation needs
+  const reservationNeeds = dossiers
+    .filter(dossier => calculateReservationDuration(dossier) > 0)
+    .map(dossier => {
+      const duration = calculateReservationDuration(dossier);
+      const res = reservations
+        .filter(r => r.dossierId === dossier.id)
+        .sort((a, b) => reservations.indexOf(b) - reservations.indexOf(a))[0];
+      
+      return {
+        dossier,
+        duration,
+        reservation: res || null
+      };
+    })
+    .filter(item => !item.reservation || item.reservation.status !== "TRANSFORMEE_PLANNING");
+
+  const handleSuggestReservation = (dossier: DossierSAV, existingRes: WorkshopReservation | null) => {
+    const baseRes = existingRes && existingRes.status !== "ANNULEE" 
+      ? existingRes 
+      : createReservationNeed(dossier, getSystemTime());
+    
+    if (!baseRes) return;
+
+    try {
+      const suggested = suggestReservationSlot({
+        reservation: baseRes,
+        dossiers,
+        reservations,
+        technicians: techniciens,
+        workshopBays: DEFAULT_WORKSHOP_BAYS
+      }, getSystemTime());
+
+      const exists = reservations.some(r => r.reservationId === suggested.reservationId);
+      const nextRes = exists
+        ? reservations.map(r => r.reservationId === suggested.reservationId ? suggested : r)
+        : [...reservations, suggested];
+      
+      onUpdateReservations(nextRes);
+    } catch (err: any) {
+      console.error(err.message || "Erreur de suggestion.");
+    }
+  };
+
+  const handleConfirmReservation = (res: WorkshopReservation) => {
+    const confirmed = confirmReservation(res, getSystemTime());
+    const nextRes = reservations.map(r => r.reservationId === res.reservationId ? confirmed : r);
+    onUpdateReservations(nextRes);
+  };
+
+  const handleCancelReservation = (res: WorkshopReservation) => {
+    const cancelled = cancelReservation(res, getSystemTime());
+    const nextRes = reservations.map(r => r.reservationId === res.reservationId ? cancelled : r);
+    onUpdateReservations(nextRes);
+  };
+
+  const handleConvertReservation = (res: WorkshopReservation) => {
+    const { dossiers: nextDossiers, reservation: nextResObj } = convertReservationToPlanning(res, dossiers, getSystemTime());
+    
+    const updatedDossier = nextDossiers.find(d => d.id === res.dossierId);
+    if (updatedDossier) {
+      onUpdateDossier(updatedDossier);
+    }
+    
+    const nextRes = reservations.map(r => r.reservationId === res.reservationId ? nextResObj : r);
+    onUpdateReservations(nextRes);
+  };
 
   // Find all tasks planned on the selected date
   const activePlannedLines: Array<{ dossier: DossierSAV; line: RepairOrderLine }> = [];
@@ -509,8 +629,8 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
         </div>
       </div>
 
-      {/* Auto suggest & manual form Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Auto suggest, manual form & reservations Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Automatic Slot Suggestion */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
@@ -810,6 +930,141 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
 
         </div>
 
+        {/* Réservations Atelier Panel */}
+        <div 
+          data-testid="workshop-reservations-panel"
+          className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4"
+        >
+          <h3 className="text-xs font-black text-gray-950 uppercase tracking-widest flex items-center gap-1.5 font-display">
+            <Calendar className="w-4.5 h-4.5 text-indigo-650" />
+            RÉSERVATIONS ATELIER
+          </h3>
+
+          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+            {reservationNeeds.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">Aucun dossier en attente de réservation.</p>
+            ) : (
+              reservationNeeds.map(({ dossier, duration, reservation }) => {
+                const status = reservation ? reservation.status : "A_RESERVER";
+                
+                // Check if slot has issues
+                let validationErrors: string[] = [];
+                if (reservation && (status === "CRENEAU_PROPOSE" || status === "RESERVATION_CONFIRMEE")) {
+                  const valResult = validateReservationSlot({
+                    reservation,
+                    dossiers,
+                    reservations,
+                    technicians: techniciens,
+                    workshopBays: DEFAULT_WORKSHOP_BAYS
+                  }, getSystemTime());
+                  if (!valResult.allowed) {
+                    validationErrors = valResult.reasons;
+                  }
+                }
+
+                return (
+                  <div 
+                    key={dossier.id}
+                    data-testid="reservation-need-card"
+                    className="p-3 border border-gray-150 rounded-xl space-y-2 hover:border-gray-300 transition text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <strong className="text-gray-900">{dossier.id}</strong>
+                      {status === "A_RESERVER" && (
+                        <span className="px-1.5 py-0.5 rounded-lg bg-gray-105 text-gray-750 text-[9px] font-black uppercase">À réserver</span>
+                      )}
+                      {status === "CRENEAU_PROPOSE" && (
+                        <span className="px-1.5 py-0.5 rounded-lg bg-blue-105 text-blue-800 text-[9px] font-black uppercase">Créneau proposé</span>
+                      )}
+                      {status === "RESERVATION_CONFIRMEE" && (
+                        <span className="px-1.5 py-0.5 rounded-lg bg-indigo-105 text-indigo-800 text-[9px] font-black uppercase">Réservation confirmée</span>
+                      )}
+                    </div>
+                    
+                    <div className="text-gray-650 space-y-0.5">
+                      <div>Véhicule : <span className="font-extrabold text-gray-805">{dossier.vehiculeMarque} {dossier.vehiculeModele} ({dossier.vehiculeImmatriculation})</span></div>
+                      <div>Durée MO validée : <span className="font-extrabold text-gray-805">{duration}h</span></div>
+                      {reservation && reservation.startTime && (
+                        <div className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mt-1.5 space-y-1">
+                          <div className="font-black text-gray-700 uppercase text-[9px]">Créneau proposé :</div>
+                          <div>Date : <span className="font-bold text-gray-800">{new Date(reservation.startTime).toLocaleDateString("fr-FR")}</span></div>
+                          <div>Heures : <span className="font-bold text-gray-800">{new Date(reservation.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - {new Date(reservation.endTime!).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
+                          <div>Technicien : <span className="font-bold text-gray-800">{techniciens.find(t => t.id === reservation.technicianId)?.nom || reservation.technicianId}</span></div>
+                          <div>Pont : <span className="font-bold text-gray-800">{DEFAULT_WORKSHOP_BAYS.find(b => b.id === reservation.bayId)?.name || reservation.bayId}</span></div>
+                        </div>
+                      )}
+                    </div>
+
+                    {validationErrors.length > 0 && (
+                      <div className="bg-red-50 text-red-800 p-2 rounded-lg text-[10px] space-y-0.5 border border-red-150">
+                        {validationErrors.map((err, i) => (
+                          <div key={i} className="flex items-center gap-1 font-bold">
+                            <AlertTriangle className="w-3 h-3 flex-shrink-0 text-red-650" />
+                            {err}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {/* Suggérer button */}
+                      {(status === "A_RESERVER" || status === "CRENEAU_PROPOSE") && (
+                        <button
+                          onClick={() => handleSuggestReservation(dossier, reservation)}
+                          disabled={!perm.canSuggestReservation(activeRole)}
+                          data-testid="reservation-suggest-btn"
+                          className="px-2 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          Suggérer
+                        </button>
+                      )}
+
+                      {/* Confirmer button */}
+                      {status === "CRENEAU_PROPOSE" && (
+                        <button
+                          onClick={() => handleConfirmReservation(reservation!)}
+                          disabled={!perm.canConfirmReservation(activeRole) || validationErrors.length > 0}
+                          data-testid="reservation-confirm-btn"
+                          className="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Check className="w-3 h-3" />
+                          Confirmer
+                        </button>
+                      )}
+
+                      {/* Transformer button */}
+                      {(status === "CRENEAU_PROPOSE" || status === "RESERVATION_CONFIRMEE") && (
+                        <button
+                          onClick={() => handleConvertReservation(reservation!)}
+                          disabled={!perm.canConvertReservationToPlanning(activeRole) || validationErrors.length > 0}
+                          data-testid="reservation-convert-btn"
+                          className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Clock className="w-3 h-3" />
+                          Planifier
+                        </button>
+                      )}
+
+                      {/* Annuler button */}
+                      {(status === "CRENEAU_PROPOSE" || status === "RESERVATION_CONFIRMEE") && (
+                        <button
+                          onClick={() => handleCancelReservation(reservation!)}
+                          disabled={!perm.canCancelReservation(activeRole)}
+                          data-testid="reservation-cancel-btn"
+                          className="px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          Annuler
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
       </div>
 
       {/* Filters bar */}
@@ -1067,6 +1322,62 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                         });
                       })}
 
+                      {/* Display reservation ghost blocks on this row */}
+                      {activeReservationsStr.filter(res => res.technicianId === tech.id).map(res => {
+                        const segments = res.segments && res.segments.length > 0
+                          ? res.segments
+                          : [{ start: res.startTime!, end: res.endTime! }];
+
+                        const dossier = dossiers.find(d => d.id === res.dossierId);
+                        if (!dossier) return null;
+
+                        return segments.map((seg, sIdx) => {
+                          const s = new Date(seg.start);
+                          const e = new Date(seg.end);
+                          const startMin = (s.getHours() - 8) * 60 + s.getMinutes();
+                          const durMin = Math.round((e.getTime() - s.getTime()) / 60000);
+
+                          const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
+                          const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
+
+                          const isProposed = res.status === "CRENEAU_PROPOSE";
+                          const blockBg = isProposed
+                            ? "bg-blue-50/80 border-dashed border-blue-400 text-blue-800"
+                            : "bg-indigo-100/95 border-indigo-500 text-indigo-900";
+                          
+                          const badgeText = isProposed ? "Réservation proposée" : "Réservation confirmée";
+                          const testId = isProposed ? "gantt-reservation-proposed" : "gantt-reservation-confirmed";
+
+                          return (
+                            <div
+                              key={`${res.reservationId}-seg-${sIdx}`}
+                              data-testid={testId}
+                              data-segment-index={sIdx}
+                              data-start={s.toISOString()}
+                              data-end={e.toISOString()}
+                              onClick={() => onSelectDossier(dossier.id)}
+                              className={`absolute top-1 bottom-1 ${blockBg} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20`}
+                              style={{
+                                  left: `${leftPct}%`,
+                                  width: `${widthPct}%`
+                              }}
+                              title={`${dossier.id} - ${badgeText} (${dossier.vehiculeMarque} ${dossier.vehiculeModele}) ${dossier.vehiculeImmatriculation}`}
+                            >
+                              <div className="flex items-center justify-between gap-1 overflow-hidden">
+                                <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
+                                <span className="px-1 py-0.2 text-[7px] bg-black/10 rounded font-black whitespace-nowrap">
+                                  {badgeText}
+                                </span>
+                              </div>
+                              <span className="truncate block text-[7px] opacity-90 leading-none">{dossier.vehiculeImmatriculation}</span>
+                              <span className="truncate block text-[7px] opacity-80 leading-none font-mono">
+                                {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          );
+                        });
+                      })}
+
                     </div>
                   </div>
                 );
@@ -1225,6 +1536,59 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
                     });
                   })}
 
+                  {/* Display reservation ghost blocks on this row */}
+                  {activeReservationsStr.filter(res => res.bayId === bay.id).map(res => {
+                    const segments = res.segments && res.segments.length > 0
+                      ? res.segments
+                      : [{ start: res.startTime!, end: res.endTime! }];
+
+                    const dossier = dossiers.find(d => d.id === res.dossierId);
+                    if (!dossier) return null;
+
+                    return segments.map((seg, sIdx) => {
+                      const s = new Date(seg.start);
+                      const e = new Date(seg.end);
+                      const startMin = (s.getHours() - 8) * 60 + s.getMinutes();
+                      const durMin = Math.round((e.getTime() - s.getTime()) / 60000);
+
+                      const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
+                      const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
+
+                      const isProposed = res.status === "CRENEAU_PROPOSE";
+                      const blockBg = isProposed
+                        ? "bg-blue-50/80 border-dashed border-blue-400 text-blue-800"
+                        : "bg-indigo-100/95 border-indigo-500 text-indigo-900";
+                      
+                      const badgeText = isProposed ? "Réservation proposée" : "Réservation confirmée";
+                      const testId = isProposed ? "gantt-reservation-proposed" : "gantt-reservation-confirmed";
+
+                      return (
+                        <div
+                          key={`${res.reservationId}-bay-seg-${sIdx}`}
+                          data-testid={testId}
+                          data-segment-index={sIdx}
+                          data-start={s.toISOString()}
+                          data-end={e.toISOString()}
+                          onClick={() => onSelectDossier(dossier.id)}
+                          className={`absolute top-1 bottom-1 ${blockBg} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20`}
+                          style={{
+                            left: `${leftPct}%`,
+                            width: `${widthPct}%`
+                          }}
+                          title={`${dossier.id} - ${badgeText} (${dossier.vehiculeMarque} ${dossier.vehiculeModele})`}
+                        >
+                          <div className="flex items-center justify-between gap-1 overflow-hidden">
+                            <span className="truncate block leading-tight font-extrabold">{dossier.id}</span>
+                            <span className="px-1 py-0.2 text-[7px] bg-black/10 rounded font-black whitespace-nowrap">
+                              {badgeText}
+                            </span>
+                          </div>
+                          <span className="truncate block text-[7px] opacity-80 leading-none">Réservation</span>
+                        </div>
+                      );
+                    });
+                  })}
+
                 </div>
               </div>
             );
@@ -1233,7 +1597,12 @@ export default function WorkshopPlanning({ techniciens, dossiers, onSelectDossie
 
         {/* Legend */}
         <div data-testid="gantt-status-legend" className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-4 text-[10px] text-gray-500">
-          <span className="font-bold">Légende statut tâche :</span>
+          <span className="font-bold">Légende :</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-blue-500"></span> Tâche planifiée</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded border border-dashed border-blue-400 bg-blue-50/70"></span> Réservation proposée</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded border border-indigo-500 bg-indigo-100/90"></span> Réservation confirmée</span>
+
+          <span className="font-bold ml-4">Légende statut tâche :</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-blue-500"></span> À faire</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-orange-500"></span> En cours</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-yellow-500"></span> En pause</span>

@@ -21,6 +21,7 @@ import {
   TechnicienResource,
   UserRole,
   WorkshopBay,
+  WorkshopReservation,
 } from "./types";
 import { createComplaint } from "./complaints-workflow";
 
@@ -38,6 +39,7 @@ export interface BackupPayload {
   reclamations: ReclammationClient[];
   techList: TechnicienResource[];
   activityLogs: ActiviteLog[];
+  reservations?: WorkshopReservation[];
 }
 
 export interface ReceptionPhotoInput {
@@ -102,6 +104,7 @@ export interface WorkshopSlotSuggestionInput {
   estimatedHours: number;
   desiredDate: Date | string;
   dossierId?: string;
+  reservations?: WorkshopReservation[];
 }
 
 export interface WorkshopSlotSuggestion {
@@ -146,6 +149,7 @@ export interface PlanningAssignmentInput {
   technicianDailyCapacityHours?: number;
   technicians?: TechnicienResource[];
   workshopBays?: WorkshopBay[];
+  reservations?: WorkshopReservation[];
 }
 
 export interface PlanningAssignmentValidation {
@@ -586,7 +590,7 @@ function roundToNextSlot(date: Date, granularityMinutes: number = 15): Date {
   return new Date(Math.ceil(date.getTime() / ms) * ms);
 }
 
-function isTechnicianCompatible(tech: TechnicienResource, type?: InterventionType): boolean {
+export function isTechnicianCompatible(tech: TechnicienResource, type?: InterventionType): boolean {
   if (!type) return true;
   switch (type) {
     case InterventionType.ENTRETIEN_RAPIDE:
@@ -604,6 +608,46 @@ function isTechnicianCompatible(tech: TechnicienResource, type?: InterventionTyp
     default:
       return true;
   }
+}
+
+function isSlotOverlappingActiveReservations(
+  reservations: WorkshopReservation[] | undefined,
+  techId: string | undefined,
+  bayId: string | undefined,
+  start: Date,
+  end: Date,
+  ignoreDossierId?: string
+): boolean {
+  if (!reservations || reservations.length === 0) return false;
+  const requestedSegments = buildPlanningSegments(start, end);
+  for (const res of reservations) {
+    if (ignoreDossierId && res.dossierId === ignoreDossierId) continue;
+    if (res.status !== "CRENEAU_PROPOSE" && res.status !== "RESERVATION_CONFIRMEE") continue;
+    if (!res.startTime || !res.endTime) continue;
+
+    const matchTech = techId && res.technicianId === techId;
+    const matchBay = bayId && res.bayId === bayId;
+    if (!matchTech && !matchBay) continue;
+
+    const resSegments = res.segments || buildPlanningSegments(new Date(res.startTime), new Date(res.endTime));
+    
+    let overlap = false;
+    for (const a of requestedSegments) {
+      const aStart = new Date(a.start).getTime();
+      const aEnd = new Date(a.end).getTime();
+      for (const b of resSegments) {
+        const bStart = new Date(b.start).getTime();
+        const bEnd = new Date(b.end).getTime();
+        if (aStart < bEnd && bStart < aEnd) {
+          overlap = true;
+          break;
+        }
+      }
+      if (overlap) break;
+    }
+    if (overlap) return true;
+  }
+  return false;
 }
 
 export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Date = new Date()): WorkshopSlotSuggestion {
@@ -684,6 +728,9 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
         if (detectTechnicianCollision(input.dossiers, tech.id, timeCursor, endTime)) {
           continue;
         }
+        if (isSlotOverlappingActiveReservations(input.reservations, tech.id, undefined, timeCursor, endTime, input.dossierId)) {
+          continue;
+        }
 
         // 2. Capacity check for technician
         const maxCap = candidateDate.getDay() === 6 ? 4 : 8;
@@ -702,7 +749,8 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
         const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays;
 
         for (const bay of baysToTry) {
-          if (!detectBayCollision(input.dossiers, bay.id, timeCursor, endTime)) {
+          if (!detectBayCollision(input.dossiers, bay.id, timeCursor, endTime) && 
+              !isSlotOverlappingActiveReservations(input.reservations, undefined, bay.id, timeCursor, endTime, input.dossierId)) {
             const segments = buildPlanningSegments(timeCursor, endTime);
             
             let reason = `Technicien compatible avec ${formatHours(dailyLoad)}h déjà planifiées et capacité restante suffisante.`;
@@ -833,7 +881,13 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   if (detectTechnicianCollision(input.dossiers, input.technicianId, start, end, input.lineId)) {
     pushIssue("planning-collision-tech");
   }
+  if (isSlotOverlappingActiveReservations(input.reservations, input.technicianId, undefined, start, end, input.dossierId)) {
+    pushIssue("planning-collision-tech");
+  }
   if (detectBayCollision(input.dossiers, input.bayId, start, end, input.lineId)) {
+    pushIssue("planning-collision-bay");
+  }
+  if (isSlotOverlappingActiveReservations(input.reservations, undefined, input.bayId, start, end, input.dossierId)) {
     pushIssue("planning-collision-bay");
   }
 
@@ -1003,9 +1057,10 @@ export function createBackupPayload(
   dossiers: DossierSAV[],
   reclamations: ReclammationClient[],
   techList: TechnicienResource[],
-  activityLogs: ActiviteLog[]
+  activityLogs: ActiviteLog[],
+  reservations?: WorkshopReservation[]
 ): BackupPayload {
-  return { dossiers, reclamations, techList, activityLogs };
+  return { dossiers, reclamations, techList, activityLogs, reservations };
 }
 
 export function parseStoredArray<T>(
@@ -1039,6 +1094,7 @@ export function validateBackupPayload(value: unknown): { ok: true; data: Partial
     ["reclamations", isReclamationClient],
     ["techList", isTechnicienResource],
     ["activityLogs", isActiviteLog],
+    ["reservations", isWorkshopReservation],
   ] as const;
 
   for (const [key, guard] of candidates) {
@@ -1184,6 +1240,20 @@ export function isActiviteLog(value: unknown): value is ActiviteLog {
   );
 }
 
+export function isWorkshopReservation(value: unknown): value is WorkshopReservation {
+  if (!isRecord(value)) return false;
+  return (
+    isString(value.reservationId) &&
+    isString(value.dossierId) &&
+    Array.isArray(value.taskIds) &&
+    isNumber(value.totalHours) &&
+    isString(value.desiredDate) &&
+    ["A_RESERVER", "CRENEAU_PROPOSE", "RESERVATION_CONFIRMEE", "AFFECTEE_ATELIER", "ANNULEE", "TRANSFORMEE_PLANNING"].includes(String(value.status)) &&
+    isString(value.source) &&
+    Array.isArray(value.history)
+  );
+}
+
 function createEmptyChecklist(): ChecklistQualite {
   return {
     essaiEffectue: false,
@@ -1296,7 +1366,7 @@ function getScheduledLoadForTechnician(technicianId: string, dossiers: DossierSA
     ), 0), 0);
 }
 
-function chooseWorkshopBay(workshopBays: WorkshopBay[], technicianZone?: AtelierZone): WorkshopBay {
+export function chooseWorkshopBay(workshopBays: WorkshopBay[], technicianZone?: AtelierZone): WorkshopBay {
   if (workshopBays.length === 0) return { id: "bay_virtual", name: "Pont atelier à confirmer" };
   return workshopBays.find(bay => !bay.zone || bay.zone === technicianZone) ?? workshopBays[0];
 }
@@ -1639,7 +1709,7 @@ function addCalendarDays(date: Date, days: number): Date {
   return next;
 }
 
-function nextWorkingDay(date: Date): Date {
+export function nextWorkingDay(date: Date): Date {
   let next = addCalendarDays(date, 1);
   while (!isWorkingDay(next)) {
     next = addCalendarDays(next, 1);

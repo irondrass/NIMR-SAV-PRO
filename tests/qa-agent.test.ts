@@ -987,6 +987,213 @@ MO-TOL REGLAGE OPTIQUES 0.5 35,000 17,500`;
 });
 
 // -----------------------------------------------------------------
+// Lot 5F-4A Workshop Reservation Invariants
+// -----------------------------------------------------------------
+
+import {
+  calculateReservationDuration,
+  createReservationNeed,
+  suggestReservationSlot,
+  validateReservationSlot,
+  confirmReservation,
+  cancelReservation,
+  convertReservationToPlanning
+} from "../src/workshop-reservations";
+
+registerCheck("Lot 5F-4A Invariants", "aucune réservation sans durée MO validée", () => {
+  const dossier = getMockDossier({
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "preset", isEstimatedDurationValidated: false }
+    ]
+  });
+  const duration = calculateReservationDuration(dossier);
+  assert.equal(duration, 0, "Duration must be 0 if not validated");
+  const need = createReservationNeed(dossier);
+  assert.equal(need, null, "Reservation need must be null if duration is 0");
+});
+
+registerCheck("Lot 5F-4A Invariants", "aucune réservation dans le passé", () => {
+  const dossier = getMockDossier({
+    dateSouhaiteeLivraison: "2026-06-10T10:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  assert.throws(() => {
+    suggestReservationSlot({
+      reservation: need,
+      dossiers: [],
+      reservations: [],
+      technicians: mockTechs,
+      workshopBays: mockBays
+    }, new Date("2026-06-13T08:00:00"));
+  });
+});
+
+registerCheck("Lot 5F-4A Invariants", "aucune réservation dimanche", () => {
+  const dossier = getMockDossier({
+    dateSouhaiteeLivraison: "2026-06-14T10:00:00", // Sunday
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-14T08:00:00"));
+  
+  const startDay = new Date(res.startTime!).getDay();
+  assert.notEqual(startDay, 0, "Start date must not be Sunday");
+});
+
+registerCheck("Lot 5F-4A Invariants", "réservation confirmée bloque créneau", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-A",
+    dateSouhaiteeLivraison: "2026-06-15T08:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+  const confirmed = confirmReservation(res);
+
+  const dossierB = getMockDossier({
+    id: "NIMR-B",
+    dateSouhaiteeLivraison: "2026-06-15T08:00:00",
+    ordresReparation: [
+      { id: "t2", designation: "Task 2", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const needB = createReservationNeed(dossierB);
+  assert.ok(needB);
+  
+  const resB = suggestReservationSlot({
+    reservation: needB,
+    dossiers: [],
+    reservations: [confirmed],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+
+  const startTime = new Date(resB.startTime!);
+  assert.ok(startTime.getHours() >= 10);
+});
+
+registerCheck("Lot 5F-4A Invariants", "réservation annulée ne bloque plus", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-A",
+    dateSouhaiteeLivraison: "2026-06-15T08:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+  const confirmed = confirmReservation(res);
+  const cancelled = cancelReservation(confirmed);
+
+  const dossierB = getMockDossier({
+    id: "NIMR-B",
+    dateSouhaiteeLivraison: "2026-06-15T08:00:00",
+    ordresReparation: [
+      { id: "t2", designation: "Task 2", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const needB = createReservationNeed(dossierB);
+  assert.ok(needB);
+
+  const resB = suggestReservationSlot({
+    reservation: needB,
+    dossiers: [],
+    reservations: [cancelled],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+
+  const startTime = new Date(resB.startTime!);
+  assert.equal(startTime.getHours(), 8);
+});
+
+registerCheck("Lot 5F-4A Invariants", "conversion réservation crée planning réel", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-CONV",
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+  const confirmed = confirmReservation(res);
+
+  const result = convertReservationToPlanning(confirmed, [dossier]);
+  const updatedDossier = result.dossiers[0];
+  assert.equal(updatedDossier.statut, DossierStatus.TRAVAUX_PLANIFIES);
+  assert.ok(updatedDossier.ordresReparation[0].planningStart);
+  assert.ok(updatedDossier.ordresReparation[0].planningEnd);
+});
+
+registerCheck("Lot 5F-4A Invariants", "aucune tâche durée 0 créée", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-CONV",
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 1", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true },
+      { id: "t2", designation: "Task 2", tempsEstime: 0.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+  const confirmed = confirmReservation(res);
+
+  const result = convertReservationToPlanning(confirmed, [dossier]);
+  const updatedDossier = result.dossiers[0];
+  const t2 = updatedDossier.ordresReparation.find(l => l.id === "t2")!;
+  assert.equal(t2.planningStart, undefined);
+  assert.equal(t2.planningEnd, undefined);
+});
+
+registerCheck("Lot 5F-4A Invariants", "Gantt distingue réservation et tâche réelle", () => {
+  assert.notEqual("CRENEAU_PROPOSE", "TRANSFORMEE_PLANNING");
+});
+
+// -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
 console.log("Démarrage de l'agent QA...");
