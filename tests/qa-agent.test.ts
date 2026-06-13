@@ -913,6 +913,80 @@ Total DT 42,900`;
 });
 
 // -----------------------------------------------------------------
+// Lot 5F-3B Multi-pages NIMR Import Invariants
+// -----------------------------------------------------------------
+
+registerCheck("Lot 5F-3B Multi-pages", "devis multi-pages avec MO-TOL en page 2 produit des tâches", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+PLAQUETTES FREIN AV 1 120,000 120,000
+Total DT 120,000
+Désignation Qté Prix unitaire Montant
+MO-TOL PEINTURE ET FINITION AILE AV 4,5 35,000 157,500
+Total DT 157,500`;
+  const lines = parseQuoteText(text);
+  const preview = buildQuoteImportPreview(lines);
+  const roLines = mapLaborLinesToRepairOrderLines(preview);
+  assert.equal(roLines.length, 1);
+  assert.equal(roLines[0].designation, "Peinture et finition AILE AV");
+  assert.equal(roLines[0].tempsEstime, 4.5);
+});
+
+registerCheck("Lot 5F-3B Multi-pages", "import ne doit pas afficher 0 tâche si des lignes MO-TOL valides existent", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+MO-TOL PEINTURE ET FINITION AILE AV 4,5 35,000 157,500`;
+  const lines = parseQuoteText(text);
+  const preview = buildQuoteImportPreview(lines);
+  assert.ok(preview.laborCount > 0, "laborCount should be greater than 0");
+  const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor");
+  assert.ok(selectedLabor.length > 0, "There should be at least one selected labor task");
+});
+
+registerCheck("Lot 5F-3B Multi-pages", "produit peinture ne devient jamais tâche", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+MO-002067 PRODUIT DE PEINTURE 2 180,000 360,000
+PRODUIT DE PEINTURE 2 180,000 360,000
+PRODUT DE PEINTURE 1 180,000 180,000
+MO-TOL DEPOSE ET REPOSE CALANDRE 1,0 35,000 35,000`;
+  const lines = parseQuoteText(text);
+  const preview = buildQuoteImportPreview(lines);
+  const roLines = mapLaborLinesToRepairOrderLines(preview);
+  assert.equal(roLines.length, 1);
+  assert.equal(roLines[0].designation, "Dépose ET REPOSE CALANDRE");
+  const hasPaintTask = roLines.some(l => l.designation.toUpperCase().includes("PEINTURE") || l.designation.toUpperCase().includes("PRODUIT"));
+  assert.equal(hasPaintTask, false, "Paint supplies must not be imported as tasks");
+});
+
+registerCheck("Lot 5F-3B Multi-pages", "Report / Total / TVA ne deviennent jamais tâche", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+Report 328,000
+Montant à reporter 328,000
+Total DT 466,800
+TVA 19% 88,000
+Timbre fiscal 1,000
+Total TTC 555,800`;
+  const lines = parseQuoteText(text);
+  const preview = buildQuoteImportPreview(lines);
+  const roLines = mapLaborLinesToRepairOrderLines(preview);
+  assert.equal(roLines.length, 0, "No tasks should be created from administrative/totals lines");
+});
+
+registerCheck("Lot 5F-3B Multi-pages", "aucune tâche importée avec durée 0", () => {
+  const text = `Désignation Qté Prix unitaire Montant
+MO-TOL REDRESSAGE CAPOT 0 35,000 0
+MO-TOL REGLAGE OPTIQUES 0.5 35,000 17,500`;
+  const lines = parseQuoteText(text);
+  const capotLine = lines.find(l => l.description.toUpperCase().includes("REDRESSAGE"));
+  assert.ok(capotLine);
+  assert.equal(capotLine.selected, false, "Zero-hour task must not be selected by default");
+
+  const preview = buildQuoteImportPreview(lines);
+  const roLines = mapLaborLinesToRepairOrderLines(preview);
+  assert.equal(roLines.length, 1);
+  assert.equal(roLines[0].designation, "REGLAGE OPTIQUES");
+  assert.equal(roLines[0].tempsEstime, 0.5);
+});
+
+// -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
 console.log("Démarrage de l'agent QA...");

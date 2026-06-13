@@ -471,6 +471,115 @@ Total DT 53,000`;
     }
   });
 
+  // ─── Test 15 : Devis multi-pages anonymisé 1076 & validation durée 0h ───────
+
+  test("19-15 devis multi-pages 1076 & validation duree 0h", async ({ page }) => {
+    const FIXTURE_1076_ANONYMIZED = `
+NIMR SAV
+Concession COMET
+CLT-0018 CLIENT TEST
+DATE DEVIS 12/06/2026
+MARQUE DFSK MODELE GLORY
+VIN GLORYFICTIF1076
+Désignation Qté Prix unitaire Montant
+ART-10020 FILTRE A AIR 1 45,000 45,000
+ART-10021 HUILE MOTEUR 4 25,000 100,000
+MO-002067 PRODUIT DE PEINTURE 2 180,000 360,000
+MO-TOL DEPOSE ET REPOSE
+PARE-CHOCS AV 1 35,000 35,000
+MO-TOL PEINTURE ET FINITION
+AILE AV DR 4,5 35,000 157,500
+MO-TOL REDRESSAGE CAPOT 0 35,000 0
+Report 697,500
+Page 1 / 3
+Report 697,500
+Désignation Qté Prix unitaire Montant
+ART-10022 LIQUIDE FREIN 1 15,000 15,000
+MO-TOL D/P ET PREPARATION
+PORTE AVD 2,5 35,000 87,500
+MO-TOL PEINTURE ET FINITION
+PORTE AVD 4,0 35,000 140,000
+Montant à reporter 940,000
+Page 2 / 3
+Montant à reporter 940,000
+Total DT 940,000
+TVA 19% 178,600
+Timbre fiscal 1,000
+Total TTC 1119,600
+Signature du client
+Page 3 / 3
+    `.trim();
+
+    const dossier = makeDossierWithPreset();
+    await seedDossiers(page, [dossier]);
+    await changeUserRole(page, "role-option-chef-atelier");
+    await humanWait(page);
+
+    await navigateToDossierRepairOrders(page, dossier.id);
+    await humanClick(page, page.locator('[data-testid="quote-import-button"]'));
+    await expect(page.locator('[data-testid="quote-import-modal"]')).toBeVisible();
+
+    await humanFill(page, page.locator('[data-testid="quote-text-input"]'), FIXTURE_1076_ANONYMIZED);
+    await humanClick(page, page.locator('[data-testid="quote-import-analyze"]'));
+    await humanWait(page, 500);
+
+    await expect(page.locator('[data-testid="quote-preview-table"]')).toBeVisible({ timeout: 7000 });
+
+    // Les lignes MO valides sur les pages 1 et 2 doivent être présentes
+    // total 5 lignes MO (DEPOSE ET REPOSE PARE-CHOCS AV, PEINTURE ET FINITION AILE AV DR, REDRESSAGE CAPOT, D/P ET PREPARATION PORTE AVD, PEINTURE ET FINITION PORTE AVD)
+    const laborRows = page.locator('[data-testid="quote-line-labor"]');
+    await expect(laborRows).toHaveCount(5);
+
+    // Le produit de peinture (MO-002067) ne doit pas être dans les lignes MO
+    const paintRows = page.locator('[data-testid="quote-line-paint"]');
+    await expect(paintRows.first()).toBeVisible();
+    const paintCheckboxes = paintRows.locator('input[type="checkbox"]');
+    await expect(paintCheckboxes).toHaveCount(0); // paint has no checkbox
+
+    // Vérifier la ligne de durée 0 (REDRESSAGE CAPOT)
+    // Elle doit avoir le checkbox désactivé
+    const capotRow = laborRows.filter({ hasText: "REDRESSAGE CAPOT" });
+    const capotCheckbox = capotRow.locator('input[type="checkbox"]');
+    await expect(capotCheckbox).toBeDisabled();
+
+    // Et elle ne doit pas être sélectionnée par défaut
+    await expect(capotCheckbox).not.toBeChecked();
+
+    // Si on change sa durée à 1.5, le checkbox doit s'activer
+    const capotHoursInput = capotRow.locator('input[type="number"]');
+    await capotHoursInput.fill("1.5");
+    await humanWait(page, 200);
+    await expect(capotCheckbox).toBeEnabled();
+
+    // On coche la ligne
+    await humanClick(page, capotCheckbox);
+    await expect(capotCheckbox).toBeChecked();
+
+    // On confirme l'importation
+    const confirmBtn = page.locator('[data-testid="quote-import-confirm"]');
+    await expect(confirmBtn).toBeEnabled();
+    await humanClick(page, confirmBtn);
+    await humanWait(page, 500);
+
+    const doneBtn = page.locator('[data-testid="quote-import-done"]');
+    if (await doneBtn.isVisible()) {
+      await humanClick(page, doneBtn);
+    }
+    await humanWait(page, 300);
+
+    // Vérifier que 5 nouvelles tâches sont créées (en plus de celle de preset)
+    const taskCards = page.locator("[data-testid^=\"task-card-\"]");
+    await expect(taskCards).toHaveCount(6); // 1 preset + 5 imported
+
+    // Vérifier que le produit peinture, Report, Total, TVA ne sont pas des tâches
+    const taskTexts = await taskCards.allTextContents();
+    for (const text of taskTexts) {
+      const upper = text.toUpperCase();
+      expect(upper).not.toContain("PRODUIT DE PEINTURE");
+      expect(upper).not.toContain("REPORT");
+      expect(upper).not.toContain("TVA");
+    }
+  });
 
 });
 

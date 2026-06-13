@@ -122,7 +122,129 @@ export function isAdministrativeQuoteLine(normalized: string): boolean {
   return adminPatterns.some((p) => p.test(text));
 }
 
+export function endsWithThreeColumns(line: string): boolean {
+  const matches = getEstimateNumberMatches(line);
+  if (matches.length < 3) return false;
+  const lastThree = matches.slice(-3);
+  const firstOfLastThree = lastThree[0];
+  const tail = line.slice(firstOfLastThree.index);
+  return /^[0-9\s,.\u00a0]+$/.test(tail);
+}
 
+export function mergeMultiLineQuoteRows(lines: string[]): string[] {
+  const result: string[] = [];
+  let buffer: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const normalized = normalizeEstimateOperationText(trimmed);
+    if (isAdministrativeQuoteLine(normalized) || isEstimateLegalOrFooterLine(normalized)) {
+      if (buffer.length > 0) {
+        result.push(buffer.join(" "));
+        buffer = [];
+      }
+      result.push(trimmed);
+      continue;
+    }
+
+    buffer.push(trimmed);
+    const joined = buffer.join(" ");
+
+    if (endsWithThreeColumns(joined)) {
+      result.push(joined);
+      buffer = [];
+    }
+  }
+
+  // If there's any leftover in buffer, flush it
+  if (buffer.length > 0) {
+    result.push(buffer.join(" "));
+  }
+
+  return result;
+}
+
+export async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  return extractPdfTextFallback(buffer);
+}
+
+export async function extractPdfTextFallback(buffer: ArrayBuffer): Promise<string> {
+  const bytes = new Uint8Array(buffer);
+  const raw = new TextDecoder("latin1").decode(bytes);
+  const chunks: string[] = [raw];
+  const streamRegex = /stream\r?\n/g;
+  let match;
+  while ((match = streamRegex.exec(raw)) !== null) {
+    const start = match.index + match[0].length;
+    const end = raw.indexOf("endstream", start);
+    if (end < 0) break;
+    const dictionary = raw.slice(Math.max(0, match.index - 1200), match.index);
+    const streamBytes = bytes.slice(start, raw[end - 1] === "\r" || raw[end - 1] === "\n" ? end - 1 : end);
+    if (/\/FlateDecode\b/.test(dictionary) && typeof globalThis.DecompressionStream !== "undefined") {
+      const inflated = await inflatePdfStream(streamBytes).catch(() => "");
+      if (inflated) chunks.push(inflated);
+    } else {
+      chunks.push(new TextDecoder("latin1").decode(streamBytes));
+    }
+  }
+  const decoded = decodePdfTextFragments(chunks.join("\n"));
+  return decoded;
+}
+
+async function inflatePdfStream(bytes: Uint8Array): Promise<string> {
+  if (typeof globalThis.DecompressionStream === "undefined") {
+    return "";
+  }
+  for (const mode of ["deflate", "deflate-raw"] as const) {
+    try {
+      const stream = new Blob([bytes]).stream().pipeThrough(new globalThis.DecompressionStream(mode));
+      const arrayBuffer = await new Response(stream).arrayBuffer();
+      return new TextDecoder("latin1").decode(new Uint8Array(arrayBuffer));
+    } catch (error) {
+      // Try next decompression flavor
+    }
+  }
+  return "";
+}
+
+export function decodePdfTextFragments(text: string): string {
+  const pieces: string[] = [];
+  
+  // Literal strings like (some text)
+  const literalMatches = [...text.matchAll(/\((?:\\.|[^\\)])*\)/g)];
+  for (const match of literalMatches) {
+    const decoded = decodePdfLiteral(match[0].slice(1, -1));
+    if (decoded.trim().length > 1) pieces.push(decoded);
+  }
+  
+  // Hex strings like <0A1B2C>
+  const hexMatches = [...text.matchAll(/<([0-9A-Fa-f\s]{4,})>/g)];
+  for (const match of hexMatches) {
+    const decoded = decodePdfHex(match[1]);
+    if (decoded.trim().length > 1) pieces.push(decoded);
+  }
+  
+  const fallback = text
+    .replace(/[^\x20-\x7EÀ-ÿ\r\n]/g, " ")
+    .replace(/\s+/g, " ");
+  return [...pieces, fallback].join("\n").replace(/\s+\n/g, "\n");
+}
+
+export function decodePdfHex(value: string): string {
+  const hex = value.replace(/\s/g, "");
+  const bytes: number[] = [];
+  for (let index = 0; index < hex.length - 1; index += 2) {
+    bytes.push(parseInt(hex.slice(index, index + 2), 16));
+  }
+  return new TextDecoder("latin1").decode(new Uint8Array(bytes));
+}
+
+export function isUsableEstimatePdfText(text: string): boolean {
+  const normalized = normalizeEstimateOperationText(text);
+  return /\b(CLIENT|DEVIS|D\s*\/\s*P|PEINTURE|DRESSAGE|REMPLACEMENT|REMP|IMMATRICULATION|VIN|VEHICULE)\b/.test(normalized);
+}
 
 /**
  * Délimite les zones tableau du devis dans un texte brut (supporte multi-pages).
@@ -143,8 +265,6 @@ export function extractTableZoneLines(rawLines: string[]): string[] {
       /^TOTAL\b/.test(n) ||                         // Total DT, Total TTC, Total DT 153,000
       /^TVA\b/.test(n) ||
       /^TIMBRE\b/.test(n) ||
-      /^MONTANT\s+A\s+REPORTER\b/.test(n) ||
-      /^REPORT\b/.test(n) ||                        // Report (normalisé de "Report")
       /^CACHET\s+ET\s+SIGNATURE\b/.test(n) ||
       /^NOM\s+PRENOM\b/.test(n) ||
       /^DEVIS\s+ESTIMATIF\s+ATELIER\b/.test(n) ||
@@ -156,7 +276,6 @@ export function extractTableZoneLines(rawLines: string[]): string[] {
       /^N\s*[°º]?\s*(DEVIS|OR)\b/.test(n)          // N° Devis, N° OR, N DEVIS, N OR (normalisé)
     );
   };
-
 
   // Si aucun header trouvé, retourner toutes les lignes (format texte libre sans tableau)
   const hasAnyHeader = rawLines.some(isTableHeader);
@@ -182,6 +301,7 @@ export function extractTableZoneLines(rawLines: string[]): string[] {
 
   return result;
 }
+
 
 /**
  * Nettoie la description d'une ligne de main-d'œuvre tabulaire.
@@ -269,25 +389,74 @@ export interface EstimateNumberMatch {
   embeddedInWord: boolean;
 }
 
-export function getEstimateNumberMatches(line: string): EstimateNumberMatch[] {
+export function getBaseMatches(line: string): EstimateNumberMatch[] {
   const source = String(line || "");
   const matches: EstimateNumberMatch[] = [];
-  const regex = /\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?|\d+(?:[,.]\d+)?/g;
+  const regex = /\d+(?:[,.]\d+)?/g;
   let m;
   while ((m = regex.exec(source)) !== null) {
     const index = m.index;
     const before = source[index - 1] || "";
     const after = source[index + m[0].length] || "";
-    const hours = parseEstimateNumber(m[0]);
     const embeddedInWord = /[A-Za-zÀ-ÿ]/.test(before) || /[A-Za-zÀ-ÿ]/.test(after);
-    matches.push({
-      raw: m[0],
-      index,
-      hours,
-      embeddedInWord,
-    });
+    if (!embeddedInWord) {
+      matches.push({
+        raw: m[0],
+        index,
+        hours: parseEstimateNumber(m[0]),
+        embeddedInWord: false,
+      });
+    }
   }
-  return matches.filter((match) => Number.isFinite(match.hours) && !match.embeddedInWord);
+  return matches;
+}
+
+export function getEstimateNumberMatches(line: string): EstimateNumberMatch[] {
+  const base = getBaseMatches(line);
+  
+  // Try to merge adjacent matches that look like thousands separator (e.g. "1" and "193,576" separated by a single space)
+  const merged: EstimateNumberMatch[] = [];
+  let i = 0;
+  while (i < base.length) {
+    const current = base[i];
+    const next = base[i + 1];
+    if (next) {
+      const spaceBetween = line.slice(current.index + current.raw.length, next.index);
+      const isSingleSpace = spaceBetween === " " || spaceBetween === "\u00a0";
+      const nextStartsThreeDigits = /^\d{3}\b/.test(next.raw);
+      if (isSingleSpace && nextStartsThreeDigits && current.hours < 1000) {
+        const raw = line.slice(current.index, next.index + next.raw.length);
+        merged.push({
+          raw,
+          index: current.index,
+          hours: parseEstimateNumber(raw),
+          embeddedInWord: false,
+        });
+        i += 2;
+        continue;
+      }
+    }
+    merged.push(current);
+    i++;
+  }
+  
+  const checkValidation = (list: EstimateNumberMatch[]) => {
+    if (list.length < 3) return false;
+    const last3 = list.slice(-3);
+    const qty = last3[0].hours;
+    const price = last3[1].hours;
+    const amount = last3[2].hours;
+    return Math.abs(qty * price - amount) < 1.0;
+  };
+  
+  const mergedValid = checkValidation(merged);
+  const baseValid = checkValidation(base);
+  
+  if (mergedValid) return merged; // Prefer merged if Candidate B is mathematically valid
+  if (baseValid) return base;
+  
+  // Fallback: prefer merged if it has at least 3 matches, otherwise base
+  return merged.length >= 3 ? merged : base;
 }
 
 export interface EstimatePricingInfo {
@@ -314,7 +483,7 @@ export function extractEstimatePricingInfo(line: string): EstimatePricingInfo {
     }
     const current = matches[index];
     const previous = matches[index - 1];
-    if (isEstimateLaborHourlyRate(current.hours) && previous.hours > 0 && previous.hours <= ESTIMATE_LABOR_MAX_HOURS) {
+    if (isEstimateLaborHourlyRate(current.hours) && previous.hours >= 0 && previous.hours <= ESTIMATE_LABOR_MAX_HOURS) {
       result.hasLaborHourlyRate = true;
       result.hourlyRate = current.hours;
       result.hoursInfo = previous;
@@ -329,7 +498,7 @@ export function extractLaborHours(line: string): number {
   const normalized = normalizeEstimateOperationText(line);
 
   // If it's a part and has no labor keyword, and no confirmed labor rate, we shouldn't extract hours from it.
-  const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+  const isPieceKeyword = /\b(ART\w*|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
   const pricingInfo = extractEstimatePricingInfo(line);
 
   if (isPieceKeyword && !hasLaborActionVerb(normalized)) {
@@ -444,7 +613,7 @@ export function classifyLaborLine(line: string, options: any = {}): LegacyLaborC
   const isConfirmedLabor = pricingInfo.hasLaborHourlyRate;
 
   // Pièces / articles keywords:
-  const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+  const isPieceKeyword = /\b(ART\w*|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
 
   const isFiltreOrHuileLabor = isConfirmedLabor && /\b(FILTRE|HUILE)\b/.test(normalized) && hasLaborActionVerb(normalized);
   const isSuffixLabor = extractLaborHours(text) > 0 && hasLaborActionVerb(normalized);
@@ -481,14 +650,24 @@ export function classifyLaborLine(line: string, options: any = {}): LegacyLaborC
     return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Prix unitaire non MO", text, operation: "", hours: 0, distributions: [] } : null;
   }
 
+  // Main-d'œuvre explicite ou implicite
+  const isMoTol = /\bMO[- ]TOL\b/.test(normalized);
+  const isImplicitLaborKw = /\b(ENTRETIEN|REMP|VIDANGE|DEPOSE|REPOSE|PEINTURE|FINITION|DRESSAGE|CHANG|D\/P|PREPARATION)\b/.test(normalized);
+
   const hoursInfo = pricingInfo.hoursInfo || getEstimateNumberMatches(text).find((match) => match.hours > 0 && match.hours <= 40);
   if (!hoursInfo || hoursInfo.hours <= 0) {
+    if (isMoTol || isImplicitLaborKw) {
+      const operation = sanitizeEstimateOperation(text);
+      return {
+        type: "labor",
+        text,
+        operation,
+        hours: 0,
+        distributions: [{ phase: "body", operation, laborHours: 0 }]
+      };
+    }
     return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Quantité MO introuvable", text, operation: "", hours: 0, distributions: [] } : null;
   }
-
-  // Main-d'œuvre explicite ou implicite
-  const isMoTol = /\bMO-TOL\b/.test(normalized);
-  const isImplicitLaborKw = /\b(ENTRETIEN|REMP|VIDANGE|DEPOSE|REPOSE|PEINTURE|FINITION|DRESSAGE|CHANG|D\/P|PREPARATION)\b/.test(normalized);
 
   // Pour les devis tabulaires, si un tableau numérique est détecté mais sans taux horaire validé, et que ce n'est pas MO-TOL, on l'exclut.
   if (pricingInfo.hasNumericTable && !isConfirmedLabor && !isMoTol) {
@@ -588,7 +767,7 @@ export function classifyQuoteLine(text: string): QuoteLineType {
         labor.reason === "Prix unitaire non MO") {
       const part = classifyEstimatePartLine(text);
       if (part) return "part";
-      const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+      const isPieceKeyword = /\b(ART\w*|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
       if (isPieceKeyword || labor.reason === "Pièce, fourniture ou total ignoré") {
         return "part";
       }
@@ -601,7 +780,7 @@ export function classifyQuoteLine(text: string): QuoteLineType {
   if (!pricingInfo.hasNumericTable) {
     const hours = extractLaborHours(text);
     if (hours > 0 && hours <= ESTIMATE_LABOR_MAX_HOURS) {
-      const isPieceKeyword = /\b(ART|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
+      const isPieceKeyword = /\b(ART\w*|FILTRE|HUILE|RONDELLE|BOUGIE|PARE[- ]CHOCS?|AILE|PORTE|CAPTEUR|JOINT|COURROIE|AGRAFE|SUPPORT|PHARE|FEU|LIQUIDE|MOUSSE|RENFORT|EMBLEME|MONOGRAMME|BOUCHON|COLLIER|TUBE|KIT)\b/.test(normalized);
       if (hasLaborKeyword(normalized) || !isPieceKeyword) {
         return "labor";
       }
@@ -756,13 +935,18 @@ export function splitEstimateSourceLines(text: string): string[] {
     .filter(Boolean);
 
   // Appliquer la délimitation multi-segments de tableau
+  const hasTableHeaders = expanded.some((line) => {
+    const n = normalizeEstimateOperationText(line);
+    return /^(?:NO\s+)?DESIGNATION\b/.test(n);
+  });
   const tableFiltered = extractTableZoneLines(expanded);
+  const mergedTableLines = hasTableHeaders ? mergeMultiLineQuoteRows(tableFiltered) : tableFiltered;
 
   if (columnarRows.length) {
-    return dedupeEstimateSourceRows([...pdfTableRows, ...columnarRows, ...tableFiltered]);
+    return dedupeEstimateSourceRows([...pdfTableRows, ...columnarRows, ...mergedTableLines]);
   }
-  if (pdfTableRows.length) return dedupeEstimateSourceRows([...pdfTableRows, ...tableFiltered]);
-  return dedupeEstimateSourceRows(tableFiltered);
+  if (pdfTableRows.length) return dedupeEstimateSourceRows([...pdfTableRows, ...mergedTableLines]);
+  return dedupeEstimateSourceRows(mergedTableLines);
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -910,7 +1094,7 @@ export function distributeLaborHours(operation: string, hours: number, options: 
 
 export function buildQuoteImportPreview(
   lines: QuoteLine[],
-  options: { sourceType?: "text" | "csv" | "xlsx"; fileName?: string } = {}
+  options: { sourceType?: "text" | "csv" | "xlsx"; fileName?: string; ignoredCount?: number } = {}
 ): QuoteImportPreview {
   const laborLines = lines.filter(l => l.type === "labor");
   const partLines = lines.filter(l => l.type === "part");
@@ -924,6 +1108,7 @@ export function buildQuoteImportPreview(
     laborCount: laborLines.length,
     partCount: partLines.length,
     totalDetectedHours: roundPlanningHours(totalDetectedHours),
+    ignoredCount: options.ignoredCount ?? 0,
   };
 }
 
@@ -936,7 +1121,7 @@ export function validateQuoteImportPreview(preview: QuoteImportPreview): string[
   for (const line of selectedLabor) {
     const hrs = line.editedHours !== undefined ? line.editedHours : line.hours;
     if (hrs <= 0) {
-      errors.push(`La ligne "${line.description}" a une durée à 0. Corrigez la durée avant d'importer.`);
+      errors.push("Durée à compléter avant import.");
     }
   }
   return errors;

@@ -882,4 +882,105 @@ Total DT 466,800
 
 console.log("  ✅ Suite 19 complète");
 
-console.log("\n🎉 Toutes les suites 17-19 (parser strict) sont passées !");
+// ─────────────────────────────────────────────────────────────────────────────
+// Suite 20 — Suite de validation multi-pages type 1076 (anonymisé)
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log("\n── Suite 20 : Fixture multi-pages type 1076 ───────────────────────────────");
+
+{
+  const FIXTURE_1076_ANONYMIZED = `
+NIMR SAV
+Concession COMET
+CLT-0018 CLIENT TEST
+DATE DEVIS 12/06/2026
+MARQUE DFSK MODELE GLORY
+VIN GLORYFICTIF1076
+Désignation Qté Prix unitaire Montant
+ART-10020 FILTRE A AIR 1 45,000 45,000
+ART-10021 HUILE MOTEUR 4 25,000 100,000
+MO-002067 PRODUIT DE PEINTURE 2 180,000 360,000
+MO-TOL DEPOSE ET REPOSE
+PARE-CHOCS AV 1 35,000 35,000
+MO-TOL PEINTURE ET FINITION
+AILE AV DR 4,5 35,000 157,500
+MO-TOL REDRESSAGE CAPOT 0 35,000 0
+Report 697,500
+Page 1 / 3
+Report 697,500
+Désignation Qté Prix unitaire Montant
+ART-10022 LIQUIDE FREIN 1 15,000 15,000
+MO-TOL D/P ET PREPARATION
+PORTE AVD 2,5 35,000 87,500
+MO-TOL PEINTURE ET FINITION
+PORTE AVD 4,0 35,000 140,000
+Montant à reporter 940,000
+Page 2 / 3
+Montant à reporter 940,000
+Total DT 940,000
+TVA 19% 178,600
+Timbre fiscal 1,000
+Total TTC 1119,600
+Signature du client
+Page 3 / 3
+  `.trim();
+
+  const lines = parseQuoteText(FIXTURE_1076_ANONYMIZED);
+  const laborLines = lines.filter(l => l.type === "labor");
+  const partLines = lines.filter(l => l.type === "part");
+  const paintLines = lines.filter(l => l.type === "paint");
+
+  // 1. All valid MO-TOL lines on page 1 and page 2 are detected
+  // Valid labor lines:
+  // - DEPOSE ET REPOSE PARE-CHOCS AV
+  // - PEINTURE ET FINITION AILE AV DR
+  // - REDRESSAGE CAPOT (0h)
+  // - D/P ET PREPARATION PORTE AVD
+  // - PEINTURE ET FINITION PORTE AVD
+  assert.equal(laborLines.length, 5, `Expected 5 labor lines, got ${laborLines.length}: ${JSON.stringify(laborLines.map(l => l.description))}`);
+  console.log("  ✅ 20-01: 5 lignes MO détectées sur les pages 1 et 2");
+
+  // 2. Report and Montant à reporter are ignored
+  const hasReport = lines.some(l => l.description.toUpperCase().includes("REPORT") || l.description.toUpperCase().includes("MONTANT A REPORTER"));
+  assert.equal(hasReport, false, "Report and Montant à reporter must be ignored");
+  console.log("  ✅ 20-02: Lignes Report / Montant à reporter ignorées");
+
+  // 3. Paint products are NOT checked/labor
+  const hasPaintInLabor = laborLines.some(l => l.description.toUpperCase().includes("PRODUIT DE PEINTURE") || l.description.toUpperCase().includes("MO-002067"));
+  assert.equal(hasPaintInLabor, false, "Paint supplies should not be classified as labor tasks");
+  console.log("  ✅ 20-03: Produits de peinture exclus de la main-d'œuvre");
+
+  // 4. Page 3 (totals, administrative) is ignored
+  const hasPage3 = lines.some(l => l.description.toUpperCase().includes("TVA") || l.description.toUpperCase().includes("TIMBRE") || l.description.toUpperCase().includes("TTC"));
+  assert.equal(hasPage3, false, "Administrative and totals lines on Page 3 must be ignored");
+  console.log("  ✅ 20-04: Pieds de page et totaux de la page 3 ignorés");
+
+  // 5. No task with 0h duration is selected by default or imported
+  const zeroHrLabor = laborLines.find(l => l.hours === 0);
+  assert.ok(zeroHrLabor, "A zero-hour labor line should be detected");
+  assert.equal(zeroHrLabor.selected, false, "Zero-hour labor line must not be pre-selected");
+  console.log("  ✅ 20-05: Tâche à 0h détectée mais non pré-sélectionnée");
+
+  // 6. Preview and validation
+  const preview = buildQuoteImportPreview(lines);
+  assert.equal(preview.laborCount, 5, "Preview laborCount should be 5");
+  assert.equal(preview.partCount, 3, "Preview partCount should be 3");
+
+  const errors = validateQuoteImportPreview(preview);
+  // Errors should be empty because zero-hour labor line is not selected by default.
+  assert.equal(errors.length, 0, `Expected 0 validation errors with default pre-selection, got: ${errors.join(", ")}`);
+  
+  // If we select the zero-hour labor line, validation should fail
+  const previewWithZeroSelected = {
+    ...preview,
+    lines: preview.lines.map(l => l.id === zeroHrLabor.id ? { ...l, selected: true } : l)
+  };
+  const errorsWithZeroSelected = validateQuoteImportPreview(previewWithZeroSelected);
+  assert.ok(errorsWithZeroSelected.length > 0, "Validation should fail if a zero-hour line is selected");
+  assert.ok(errorsWithZeroSelected.includes("Durée à compléter avant import."), "Should require completing the duration");
+  console.log("  ✅ 20-06: Prévisualisation et validation à 0h OK");
+}
+
+console.log("  ✅ Suite 20 complète");
+
+console.log("\n🎉 Toutes les suites 17-20 (parser strict) sont passées !");

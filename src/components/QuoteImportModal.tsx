@@ -16,6 +16,7 @@ import {
   buildQuoteImportPreview,
   validateQuoteImportPreview,
   applyQuoteImportPreview,
+  extractPdfText,
 } from "../quote-import";
 import { FileText, Upload, Check, X, AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -117,10 +118,15 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
   const handleEditHours = (lineId: string, value: string) => {
     if (!preview) return;
     const hrs = parseFloat(value.replace(",", "."));
+    const validHrs = Number.isFinite(hrs) ? hrs : 0;
     setPreview({
       ...preview,
       lines: preview.lines.map(l =>
-        l.id === lineId ? { ...l, editedHours: Number.isFinite(hrs) ? hrs : 0 } : l
+        l.id === lineId ? { 
+          ...l, 
+          editedHours: validHrs,
+          selected: validHrs <= 0 ? false : l.selected
+        } : l
       ),
     });
     setValidationErrors([]);
@@ -164,7 +170,26 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
       return;
     }
     if (ext === "pdf") {
-      setParseError("L'import PDF sera traité plus tard. Veuillez utiliser CSV, XLSX ou copier-coller le texte du devis.");
+      setParseError("");
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        const buffer = ev.target?.result as ArrayBuffer;
+        try {
+          const text = await extractPdfText(buffer);
+          const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+          const hasKeywords = /\b(CLIENT|DEVIS|D\s*\/\s*P|PEINTURE|DRESSAGE|REMPLACEMENT|REMP|IMMATRICULATION|VIN|VEHICULE)\b/.test(normalized);
+          if (!text || text.trim().length < 20 || !hasKeywords) {
+            setParseError("PDF non exploitable automatiquement. Copier-coller le texte complet du devis ou utiliser CSV.");
+            return;
+          }
+          setRawInput(text);
+          setSourceType("text");
+          setParseError("");
+        } catch (err) {
+          setParseError("PDF non exploitable automatiquement. Copier-coller le texte complet du devis ou utiliser CSV.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
       return;
     }
     if (ext !== "csv" && ext !== "txt") {
@@ -220,14 +245,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
 
-          {/* Notice PDF */}
-          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>PDF non supporté actuellement.</strong> Veuillez utiliser CSV/XLSX ou copier-coller le texte du devis.
-              Import XLSX sera complété dans une mise à jour ultérieure.
-            </span>
-          </div>
+
 
           {/* Step 1 : Input */}
           {step === "input" && (
@@ -318,15 +336,26 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
               {/* Summary */}
               <div className="flex flex-wrap gap-3">
                 <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 font-semibold">
-                  {preview.laborCount} ligne(s) MO détectée(s)
+                  {preview.laborCount} lignes main-d’œuvre détectées
                 </div>
                 <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 font-semibold">
-                  {preview.partCount} pièce(s) détectée(s) — non importées
+                  {preview.partCount} pièces / consommables détectés
+                </div>
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-700 font-semibold">
+                  {(preview as any).ignoredCount ?? 0} lignes ignorées
                 </div>
                 <div className="px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 font-semibold">
                   {selectedLaborCount} ligne(s) sélectionnée(s)
                 </div>
               </div>
+
+              {/* Alerte si MO-TOL présent mais 0 tâche détectée */}
+              {rawInput.toUpperCase().includes("MO-TOL") && preview.laborCount === 0 && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800" data-testid="mo-tol-warning">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  Des lignes MO semblent présentes mais non détectées. Vérifier le format d’import.
+                </div>
+              )}
 
               {/* Notice pièces */}
               {partCount > 0 && (
@@ -350,23 +379,24 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {preview.lines.map(line => {
-                      const isLaborOrPaint = line.type === "labor" || line.type === "paint";
+                      const isLabor = line.type === "labor";
                       const currentHours = line.editedHours !== undefined ? line.editedHours : line.hours;
                       return (
                         <tr
                           key={line.id}
                           data-testid={`quote-line-${line.type}`}
-                          className={`transition ${line.selected && isLaborOrPaint ? "bg-blue-50/40" : "bg-white"} ${!isLaborOrPaint ? "opacity-60" : ""}`}
+                          className={`transition ${line.selected && isLabor ? "bg-blue-50/40" : "bg-white"} ${!isLabor ? "opacity-60" : ""}`}
                         >
-                          {/* Checkbox — seulement pour MO/peinture */}
+                          {/* Checkbox — seulement pour MO */}
                           <td className="px-3 py-2">
-                            {isLaborOrPaint ? (
+                            {isLabor ? (
                               <input
                                 type="checkbox"
                                 checked={line.selected}
                                 onChange={() => handleToggleLine(line.id)}
+                                disabled={currentHours <= 0}
                                 data-testid={`quote-line-check-${line.id}`}
-                                className="w-4 h-4 accent-blue-600 cursor-pointer"
+                                className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                               />
                             ) : (
                               <span className="text-gray-300 text-base">—</span>
@@ -375,7 +405,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
 
                           {/* Description */}
                           <td className="px-3 py-2">
-                            {isLaborOrPaint && line.selected ? (
+                            {isLabor && line.selected ? (
                               <input
                                 type="text"
                                 value={line.editedDescription ?? line.description}
@@ -398,7 +428,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
 
                           {/* Durée */}
                           <td className="px-3 py-2">
-                            {isLaborOrPaint ? (
+                            {isLabor ? (
                               <input
                                 type="number"
                                 step="0.5"

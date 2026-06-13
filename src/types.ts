@@ -131,6 +131,7 @@ export interface QuoteImportPreview {
   laborCount: number;
   partCount: number;
   totalDetectedHours: number;
+  ignoredCount?: number;
 }
 
 export interface QuoteImportResult {
