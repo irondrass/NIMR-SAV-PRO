@@ -1656,8 +1656,11 @@ export function calculateTechnicianDailyLoad(techId: string, dateStr: string, do
     if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
-      if (line.plannedTechnicianId === techId && line.planningDate === dateStr) {
-        total += calculateSegmentHoursForDate(getLinePlanningSegments(line), dateStr);
+      if (line.plannedTechnicianId === techId) {
+        const segments = getLinePlanningSegments(line);
+        if (segments.some(seg => seg.start.startsWith(dateStr)) || line.planningDate === dateStr) {
+          total += calculateSegmentHoursForDate(segments, dateStr);
+        }
       }
     }
   }

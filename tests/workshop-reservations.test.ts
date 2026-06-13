@@ -404,4 +404,62 @@ console.log("▶ Running tests/workshop-reservations.test.ts...");
   console.log("✔ Conversion ne crée aucune tâche durée 0 OK");
 }
 
+// 12. Réservation multi-jours de 52 heures
+{
+  const dossier52 = mockDossier({
+    id: "NIMR-2026-52H",
+    dateSouhaiteeLivraison: "2026-06-15T18:00:00", // Start suggesting from Monday 15 June 2026
+    ordresReparation: [
+      { id: "task_52", designation: "Task 52 Hours", tempsEstime: 52.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+
+  const need52 = createReservationNeed(dossier52);
+  assert.ok(need52);
+  assert.equal(need52.totalHours, 52.0);
+
+  const resProposed = suggestReservationSlot({
+    reservation: need52,
+    dossiers: [],
+    reservations: [],
+    technicians: [mockTech],
+    workshopBays: [mockBay]
+  }, new Date("2026-06-15T08:00:00"));
+
+  assert.ok(resProposed.startTime);
+  assert.ok(resProposed.endTime);
+  assert.ok(resProposed.segments);
+  
+  // Total duration of all segments should sum to exactly 52.0 hours
+  const totalDuration = resProposed.segments.reduce((sum, seg) => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    return sum + (e.getTime() - s.getTime()) / (3600000);
+  }, 0);
+  assert.equal(totalDuration, 52.0);
+
+  // Validate should pass with no errors/warnings (allowed: true)
+  const valResult = validateReservationSlot({
+    reservation: resProposed,
+    dossiers: [],
+    reservations: [],
+    technicians: [mockTech],
+    workshopBays: [mockBay]
+  }, new Date("2026-06-15T08:00:00"));
+  assert.ok(valResult.allowed, `Validation failed: ${valResult.reasons.join(", ")}`);
+
+  // Ensure no segment overlaps lunch break (12h-13h) on weekdays
+  resProposed.segments.forEach(seg => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    if (s.getDay() !== 6) { // Not Saturday
+      const sMin = s.getHours() * 60 + s.getMinutes();
+      const eMin = e.getHours() * 60 + e.getMinutes();
+      assert.ok(sMin >= 13 * 60 || eMin <= 12 * 60, `Segment overlaps lunch break: ${seg.start} to ${seg.end}`);
+    }
+  });
+
+  console.log("✔ Réservation de 52h (multi-jours) OK");
+}
+
 console.log("✔ All workshop-reservations tests completed successfully!");

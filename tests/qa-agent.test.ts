@@ -1193,6 +1193,65 @@ registerCheck("Lot 5F-4A Invariants", "Gantt distingue réservation et tâche r�
   assert.notEqual("CRENEAU_PROPOSE", "TRANSFORMEE_PLANNING");
 });
 
+registerCheck("Lot 5F-4A Invariants", "réservation multi-jours (52h) répartie sur plusieurs jours", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-QA-52H",
+    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 52H", tempsEstime: 52.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+
+  assert.ok(res.segments);
+  const uniqueDays = new Set(res.segments.map(seg => seg.start.split("T")[0])).size;
+  assert.ok(uniqueDays > 1, "A 52h reservation must span multiple days");
+  
+  const totalHours = res.segments.reduce((sum, seg) => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    return sum + (e.getTime() - s.getTime()) / 3600000;
+  }, 0);
+  assert.equal(totalHours, 52.0, "Total hours must be exactly 52");
+});
+
+registerCheck("Lot 5F-4A Invariants", "validation d'une réservation multi-jours de 52h autorisée", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-QA-52H",
+    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    ordresReparation: [
+      { id: "t1", designation: "Task 52H", tempsEstime: 52.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+  const need = createReservationNeed(dossier);
+  assert.ok(need);
+  const res = suggestReservationSlot({
+    reservation: need,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+
+  const valResult = validateReservationSlot({
+    reservation: res,
+    dossiers: [],
+    reservations: [],
+    technicians: mockTechs,
+    workshopBays: mockBays
+  }, new Date("2026-06-15T08:00:00"));
+  
+  assert.ok(valResult.allowed, `Validation of multi-day slot must be allowed but got: ${valResult.reasons.join(", ")}`);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------

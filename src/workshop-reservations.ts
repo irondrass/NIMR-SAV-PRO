@@ -25,7 +25,8 @@ import {
   isTechnicianCompatible,
   chooseWorkshopBay,
   nextWorkingDay,
-  normalizeRepairOrderStatus
+  normalizeRepairOrderStatus,
+  getWorkingWindowsForDate
 } from "./sav-core";
 
 function segmentsOverlap(
@@ -173,6 +174,143 @@ export function createReservationNeed(dossier: DossierSAV, now: Date = new Date(
   };
 }
 
+interface CollisionInterval {
+  start: Date;
+  end: Date;
+}
+
+function findFirstCollisionInInterval(
+  techId: string,
+  bayId: string,
+  start: Date,
+  end: Date,
+  dossiers: DossierSAV[],
+  reservations: WorkshopReservation[],
+  ignoreDossierId?: string
+): CollisionInterval | null {
+  let firstCollision: CollisionInterval | null = null;
+
+  const checkOverlap = (busyStart: Date, busyEnd: Date) => {
+    if (start.getTime() < busyEnd.getTime() && busyStart.getTime() < end.getTime()) {
+      const overlapStart = start.getTime() > busyStart.getTime() ? start : busyStart;
+      if (!firstCollision || overlapStart.getTime() < firstCollision.start.getTime()) {
+        firstCollision = { start: overlapStart, end: busyEnd };
+      }
+    }
+  };
+
+  // 1. Check planning lines
+  for (const dossier of dossiers) {
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    for (const line of dossier.ordresReparation) {
+      if (line.planningStart && line.planningEnd && (line.plannedTechnicianId === techId || line.plannedBayId === bayId)) {
+        const lineSegs = line.planningSegments || buildPlanningSegments(new Date(line.planningStart), new Date(line.planningEnd));
+        for (const seg of lineSegs) {
+          checkOverlap(new Date(seg.start), new Date(seg.end));
+        }
+      }
+    }
+  }
+
+  // 2. Check active reservations
+  for (const res of reservations) {
+    if (res.dossierId === ignoreDossierId) continue;
+    if (
+      (res.status === "CRENEAU_PROPOSE" || res.status === "RESERVATION_CONFIRMEE") &&
+      res.startTime &&
+      res.endTime
+    ) {
+      if (res.technicianId === techId || res.bayId === bayId) {
+        const resSegs = res.segments || buildPlanningSegments(new Date(res.startTime), new Date(res.endTime));
+        for (const seg of resSegs) {
+          checkOverlap(new Date(seg.start), new Date(seg.end));
+        }
+      }
+    }
+  }
+
+  return firstCollision;
+}
+
+function findSegmentsForDuration(
+  techId: string,
+  bayId: string,
+  startAfter: Date,
+  durationMinutes: number,
+  dossiers: DossierSAV[],
+  reservations: WorkshopReservation[],
+  ignoreDossierId: string
+): Array<{ start: string; end: string }> | null {
+  let cursor = alignToWorkingTime(startAfter);
+  const segments: Array<{ start: string; end: string }> = [];
+  let remainingMinutes = durationMinutes;
+
+  const horizon = new Date(cursor);
+  horizon.setDate(horizon.getDate() + 90);
+
+  let iterations = 0;
+  const maxIterations = 5000;
+
+  while (remainingMinutes > 0 && cursor.getTime() < horizon.getTime() && iterations < maxIterations) {
+    iterations += 1;
+
+    const windows = getWorkingWindowsForDate(cursor);
+    let progressed = false;
+
+    for (const win of windows) {
+      if (cursor.getTime() >= win.end.getTime()) continue;
+
+      const segStart = cursor.getTime() > win.start.getTime() ? cursor : win.start;
+      if (segStart.getTime() >= win.end.getTime()) continue;
+
+      const collision = findFirstCollisionInInterval(
+        techId,
+        bayId,
+        segStart,
+        win.end,
+        dossiers,
+        reservations,
+        ignoreDossierId
+      );
+
+      if (collision) {
+        const freeMinutesBefore = Math.max(0, Math.round((collision.start.getTime() - segStart.getTime()) / 60000));
+        if (freeMinutesBefore > 0) {
+          const taken = Math.min(freeMinutesBefore, remainingMinutes);
+          const segEnd = new Date(segStart.getTime() + taken * 60000);
+          segments.push({ start: segStart.toISOString(), end: segEnd.toISOString() });
+          remainingMinutes -= taken;
+          if (remainingMinutes <= 0) {
+            return segments;
+          }
+        }
+        cursor = alignToWorkingTime(collision.end);
+        progressed = true;
+        break; // break the windows loop to re-evaluate at new cursor
+      } else {
+        const available = Math.max(0, Math.round((win.end.getTime() - segStart.getTime()) / 60000));
+        const taken = Math.min(available, remainingMinutes);
+        const segEnd = new Date(segStart.getTime() + taken * 60000);
+        segments.push({ start: segStart.toISOString(), end: segEnd.toISOString() });
+        remainingMinutes -= taken;
+        cursor = segEnd;
+        progressed = true;
+        if (remainingMinutes <= 0) {
+          return segments;
+        }
+      }
+    }
+
+    if (!progressed) {
+      const nextDay = nextWorkingDay(cursor);
+      nextDay.setHours(8, 0, 0, 0);
+      cursor = alignToWorkingTime(nextDay);
+    }
+  }
+
+  return remainingMinutes <= 0 ? segments : null;
+}
+
 export function suggestReservationSlot(
   input: {
     reservation: WorkshopReservation;
@@ -198,129 +336,98 @@ export function suggestReservationSlot(
   if (desiredDateStr < nowDateStr) {
     throw new Error("Impossible de planifier dans le passé.");
   }
-  
+
+  // Align startAfter to working time
+  let startAfter = new Date(desiredDate);
+  if (desiredDateStr === nowDateStr) {
+    const startOfToday = new Date(desiredDate);
+    startOfToday.setHours(8, 0, 0, 0);
+    const alignedNow = new Date(now);
+    alignedNow.setSeconds(0, 0);
+    
+    const mins = alignedNow.getMinutes();
+    const roundedMins = Math.ceil(mins / 15) * 15;
+    alignedNow.setMinutes(roundedMins);
+    
+    if (alignedNow.getTime() > startOfToday.getTime()) {
+      startAfter = alignedNow;
+    } else {
+      startAfter = startOfToday;
+    }
+  } else {
+    startAfter.setHours(8, 0, 0, 0);
+  }
+  startAfter = alignToWorkingTime(startAfter);
+
   const usableTechnicians = technicians.filter(t => !["absent", "formation"].includes(t.disponibilite));
   const techsToTry = usableTechnicians.length > 0 ? usableTechnicians : technicians;
-  
-  let timeCursor: Date | null = null;
-  let startTimeStr = "";
-  let endTimeStr = "";
-  let proposedTechId = "";
-  let proposedBayId = "";
-  let proposedSegments: Array<{ start: string; end: string }> = [];
-  
-  let found = false;
-  
-  for (let dayOffset = 0; dayOffset < 30; dayOffset += 1) {
-    const candidateDate = new Date(desiredDate);
-    candidateDate.setDate(candidateDate.getDate() + dayOffset);
+
+  // Find the earliest slot across all technician/bay combinations
+  let bestSlot: {
+    startTime: Date;
+    endTime: Date;
+    segments: Array<{ start: string; end: string }>;
+    techId: string;
+    bayId: string;
+  } | null = null;
+
+  const dossier = dossiers.find(d => d.id === reservation.dossierId);
+  const typeDossier = dossier?.typeDossier;
+
+  // Sort the technicians first so that compatible ones are preferred
+  const sortedTechs = [...techsToTry].sort((left, right) => {
+    const compLeft = typeDossier ? isTechnicianCompatible(left, typeDossier) : true;
+    const compRight = typeDossier ? isTechnicianCompatible(right, typeDossier) : true;
+    if (compLeft && !compRight) return -1;
+    if (!compLeft && compRight) return 1;
+    return 0;
+  });
+
+  for (const tech of sortedTechs) {
+    const compatibleBays = workshopBays.filter(bay => !bay.zone || bay.zone === tech.zoneAffectee);
+    const baysToTry = compatibleBays.length > 0 ? compatibleBays : workshopBays;
     
-    if (!isWorkingDay(candidateDate)) continue;
-    const dateStr = getLocalDateKey(candidateDate);
-    
-    let dayTimeCursor: Date;
-    if (dayOffset === 0 && desiredDateStr === nowDateStr) {
-      const startOfToday = new Date(candidateDate);
-      startOfToday.setHours(8, 0, 0, 0);
-      const alignedNow = new Date(now);
-      alignedNow.setSeconds(0, 0);
+    for (const bay of baysToTry) {
+      const segments = findSegmentsForDuration(
+        tech.id,
+        bay.id,
+        startAfter,
+        durationMinutes,
+        dossiers,
+        reservations,
+        reservation.dossierId
+      );
       
-      const mins = alignedNow.getMinutes();
-      const roundedMins = Math.ceil(mins / 15) * 15;
-      alignedNow.setMinutes(roundedMins);
-      
-      const earliestStart = alignedNow.getTime() > startOfToday.getTime() ? alignedNow : startOfToday;
-      dayTimeCursor = alignToWorkingTime(earliestStart);
-    } else {
-      dayTimeCursor = new Date(candidateDate);
-      dayTimeCursor.setHours(8, 0, 0, 0);
-    }
-    
-    const endOfDayLimit = candidateDate.getDay() === 6
-      ? new Date(candidateDate).setHours(12, 0, 0, 0)
-      : new Date(candidateDate).setHours(17, 0, 0, 0);
-      
-    const endLimitDate = new Date(endOfDayLimit);
-    
-    while (dayTimeCursor.getTime() < endLimitDate.getTime()) {
-      const endTime = addWorkingMinutes(dayTimeCursor, durationMinutes);
-      
-      const sameDay = dayTimeCursor.getFullYear() === endTime.getFullYear() &&
-                      dayTimeCursor.getMonth() === endTime.getMonth() &&
-                      dayTimeCursor.getDate() === endTime.getDate();
-                      
-      if (!sameDay || endTime.getTime() > endLimitDate.getTime()) {
-        dayTimeCursor = new Date(dayTimeCursor.getTime() + 30 * 60 * 1000);
-        continue;
+      if (segments && segments.length > 0) {
+        const slotStart = new Date(segments[0].start);
+        const slotEnd = new Date(segments[segments.length - 1].end);
+        
+        if (!bestSlot || slotStart.getTime() < bestSlot.startTime.getTime()) {
+          bestSlot = {
+            startTime: slotStart,
+            endTime: slotEnd,
+            segments,
+            techId: tech.id,
+            bayId: bay.id
+          };
+        }
       }
-      
-      const sortedTechs = [...techsToTry].sort((left, right) => {
-        const dossier = dossiers.find(d => d.id === reservation.dossierId);
-        if (dossier) {
-          const compLeft = isTechnicianCompatible(left, dossier.typeDossier);
-          const compRight = isTechnicianCompatible(right, dossier.typeDossier);
-          if (compLeft && !compRight) return -1;
-          if (!compLeft && compRight) return 1;
-        }
-        
-        let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, dossiers);
-        let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, dossiers);
-        if (dayOffset === 0) {
-          loadLeft = Math.max(loadLeft, left.chargeActuelle || 0);
-          loadRight = Math.max(loadRight, right.chargeActuelle || 0);
-        }
-        return loadLeft - loadRight;
-      });
-      
-      for (const tech of sortedTechs) {
-        if (detectTechnicianCollisionWithReservations(dossiers, reservations, tech.id, dayTimeCursor, endTime, reservation.dossierId)) {
-          continue;
-        }
-        
-        const maxCap = candidateDate.getDay() === 6 ? 4 : 8;
-        let dailyLoad = calculateTechnicianDailyLoad(tech.id, dateStr, dossiers);
-        if (dayOffset === 0) {
-          dailyLoad = Math.max(dailyLoad, tech.chargeActuelle || 0);
-        }
-        if (dailyLoad + durationHours > maxCap) {
-          continue;
-        }
-        
-        const compatibleBays = workshopBays.filter(bay => !bay.zone || bay.zone === tech.zoneAffectee);
-        const baysToTry = compatibleBays.length > 0 ? compatibleBays : workshopBays;
-        
-        for (const bay of baysToTry) {
-          if (!detectBayCollisionWithReservations(dossiers, reservations, bay.id, dayTimeCursor, endTime, reservation.dossierId)) {
-            timeCursor = dayTimeCursor;
-            startTimeStr = dayTimeCursor.toISOString();
-            endTimeStr = endTime.toISOString();
-            proposedTechId = tech.id;
-            proposedBayId = bay.id;
-            proposedSegments = buildPlanningSegments(dayTimeCursor, endTime);
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
-      }
-      if (found) break;
-      dayTimeCursor = new Date(dayTimeCursor.getTime() + 30 * 60 * 1000);
     }
-    if (found) break;
   }
-  
-  if (!found) {
-    const fallbackDate = new Date(nextWorkingDay(desiredDate));
+
+  if (!bestSlot) {
+    const fallbackDate = new Date(nextWorkingDay(startAfter));
     fallbackDate.setHours(8, 0, 0, 0);
-    const fallbackTech = techsToTry[0] || technicians[0];
+    const fallbackTech = sortedTechs[0] || technicians[0];
     const fallbackBay = chooseWorkshopBay(workshopBays, fallbackTech?.zoneAffectee);
     const fallbackEndTime = addWorkingMinutes(fallbackDate, durationMinutes);
+    const fallbackSegments = buildPlanningSegments(fallbackDate, fallbackEndTime);
     
     return {
       ...reservation,
       startTime: fallbackDate.toISOString(),
       endTime: fallbackEndTime.toISOString(),
-      segments: buildPlanningSegments(fallbackDate, fallbackEndTime),
+      segments: fallbackSegments,
       technicianId: fallbackTech?.id ?? "tech_virtual",
       bayId: fallbackBay.id,
       status: "CRENEAU_PROPOSE",
@@ -330,21 +437,21 @@ export function suggestReservationSlot(
       ]
     };
   }
-  
-  const techName = technicians.find(t => t.id === proposedTechId)?.nom || proposedTechId;
-  const bayName = workshopBays.find(b => b.id === proposedBayId)?.name || proposedBayId;
-  
+
+  const techName = technicians.find(t => t.id === bestSlot!.techId)?.nom || bestSlot.techId;
+  const bayName = workshopBays.find(b => b.id === bestSlot!.bayId)?.name || bestSlot.bayId;
+
   return {
     ...reservation,
-    startTime: startTimeStr,
-    endTime: endTimeStr,
-    segments: proposedSegments,
-    technicianId: proposedTechId,
-    bayId: proposedBayId,
+    startTime: bestSlot.startTime.toISOString(),
+    endTime: bestSlot.endTime.toISOString(),
+    segments: bestSlot.segments,
+    technicianId: bestSlot.techId,
+    bayId: bestSlot.bayId,
     status: "CRENEAU_PROPOSE",
     history: [
       ...reservation.history,
-      `${now.toISOString()} - Créneau proposé : ${startTimeStr} à ${endTimeStr} avec le technicien ${techName} sur le pont ${bayName}`
+      `${now.toISOString()} - Créneau proposé : ${bestSlot.startTime.toISOString()} à ${bestSlot.endTime.toISOString()} avec le technicien ${techName} sur le pont ${bayName}`
     ]
   };
 }
@@ -393,64 +500,137 @@ export function validateReservationSlot(
     reasons.push("Dimanche fermé.");
   }
   
-  // Saturday afternoon check
-  const startMin = start.getHours() * 60 + start.getMinutes();
-  const endMin = end.getHours() * 60 + end.getMinutes();
-  const isSaturday = start.getDay() === 6;
+  const expectedSegments = buildPlanningSegments(start, end);
+  const submittedSegments = reservation.segments || expectedSegments;
   
-  if (isSaturday && (startMin >= 12 * 60 || endMin > 12 * 60)) {
+  // Check if any segment is on a Sunday
+  const hasSundaySegment = submittedSegments.some(seg => {
+    const s = new Date(seg.start);
+    return !isWorkingDay(s);
+  });
+  if (hasSundaySegment) {
+    codes.push("planning-collision-sunday");
+    reasons.push("Dimanche fermé.");
+  }
+  
+  // Check Saturday afternoon for each segment
+  const hasSaturdayAfternoonSegment = submittedSegments.some(seg => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    if (s.getDay() !== 6) return false;
+    const startMin = s.getHours() * 60 + s.getMinutes();
+    const endMin = e.getHours() * 60 + e.getMinutes();
+    return startMin >= 12 * 60 || endMin > 12 * 60;
+  });
+  if (hasSaturdayAfternoonSegment) {
     codes.push("planning-collision-saturday-afternoon");
     reasons.push("Samedi après-midi fermé.");
   }
   
-  // Working hours check
-  if (start.getHours() < 8 || end.getHours() > 17 || (end.getHours() === 17 && end.getMinutes() > 0)) {
-    if (!isSaturday) {
-      codes.push("planning-collision-hours");
-      reasons.push("Horaires d'ouverture non respectés (08h-17h).");
+  // Check if all segments are within working hours (08h-17h on weekdays, 08h-12h on Sat)
+  const hasOutOfHoursSegment = submittedSegments.some(seg => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    const isSat = s.getDay() === 6;
+    const startMin = s.getHours() * 60 + s.getMinutes();
+    const endMin = e.getHours() * 60 + e.getMinutes();
+    if (isSat) {
+      return startMin < 8 * 60 || endMin > 12 * 60;
+    } else {
+      return startMin < 8 * 60 || endMin > 17 * 60;
     }
+  });
+  if (hasOutOfHoursSegment) {
+    codes.push("planning-collision-hours");
+    reasons.push("Horaires d'ouverture non respectés (08h-17h).");
   }
   
-  // Lunch break check
-  const expectedSegments = buildPlanningSegments(start, end);
-  const submittedSegments = reservation.segments || expectedSegments;
-  
+  // Check if any segment overlaps the lunch break (12h-13h) on weekdays
   const overlapsLunch = submittedSegments.some(seg => {
     const s = new Date(seg.start);
     const e = new Date(seg.end);
+    if (s.getDay() === 6) return false;
     const sMin = s.getHours() * 60 + s.getMinutes();
     const eMin = e.getHours() * 60 + e.getMinutes();
     return sMin < 13 * 60 && eMin > 12 * 60;
   });
-  
   if (overlapsLunch) {
     codes.push("planning-collision-lunch");
     reasons.push("Le créneau chevauche la pause déjeuner (12h-13h).");
   }
-  
-  // Technician collision
-  if (reservation.technicianId) {
-    if (detectTechnicianCollisionWithReservations(dossiers, reservations, reservation.technicianId, start, end, reservation.dossierId)) {
-      codes.push("planning-collision-tech");
-      reasons.push("Le technicien est déjà affecté ou réservé sur cette période.");
-    }
-    
-    // Daily overload
-    const planningDate = start.toISOString().split("T")[0];
-    const maxCapacity = isSaturday ? 4 : 8;
-    const requestedHours = reservation.totalHours;
-    const currentDailyLoad = calculateTechnicianDailyLoad(reservation.technicianId, planningDate, dossiers);
-    if (currentDailyLoad + requestedHours > maxCapacity) {
-      codes.push("planning-collision-overload");
-      reasons.push("La réservation dépasse la capacité journalière du technicien.");
-    }
+
+  // - interdit seulement si un segment individuel dépasse une fenêtre ouvrée
+  const segmentExceedsWindow = submittedSegments.some(seg => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    const durationMin = Math.round((e.getTime() - s.getTime()) / 60000);
+    return durationMin > 240;
+  });
+  if (segmentExceedsWindow) {
+    codes.push("planning-segment-too-long");
+    reasons.push("Un segment individuel dépasse la durée d'une fenêtre ouvrée.");
   }
   
-  // Bay collision
+  // - interdit si la somme des segments est inférieure à la durée demandée
+  const totalSegmentsDuration = submittedSegments.reduce((sum, seg) => {
+    const s = new Date(seg.start);
+    const e = new Date(seg.end);
+    return sum + (e.getTime() - s.getTime()) / (3600 * 1000);
+  }, 0);
+  if (totalSegmentsDuration < reservation.totalHours - 0.01) {
+    codes.push("planning-insufficient-duration");
+    reasons.push("La somme des segments est inférieure à la durée demandée.");
+  }
+
+  // Check collision on any segment for technician
+  if (reservation.technicianId) {
+    const techObj = technicians.find(t => t.id === reservation.technicianId);
+    if (!techObj) {
+      codes.push("planning-tech-not-found");
+      reasons.push("Technicien inexistant.");
+    } else {
+      const hasTechColl = submittedSegments.some(seg => {
+        const s = new Date(seg.start);
+        const e = new Date(seg.end);
+        return detectTechnicianCollisionWithReservations(
+          dossiers,
+          reservations,
+          reservation.technicianId!,
+          s,
+          e,
+          reservation.dossierId
+        );
+      });
+      if (hasTechColl) {
+        codes.push("planning-collision-tech");
+        reasons.push("Le technicien est déjà affecté ou réservé sur cette période.");
+      }
+    }
+  }
+
+  // Check collision on any segment for bay
   if (reservation.bayId) {
-    if (detectBayCollisionWithReservations(dossiers, reservations, reservation.bayId, start, end, reservation.dossierId)) {
-      codes.push("planning-collision-bay");
-      reasons.push("Le pont d'atelier sélectionné est déjà occupé.");
+    const bayObj = workshopBays.find(b => b.id === reservation.bayId);
+    if (!bayObj) {
+      codes.push("planning-bay-not-found");
+      reasons.push("Pont inexistant.");
+    } else {
+      const hasBayColl = submittedSegments.some(seg => {
+        const s = new Date(seg.start);
+        const e = new Date(seg.end);
+        return detectBayCollisionWithReservations(
+          dossiers,
+          reservations,
+          reservation.bayId!,
+          s,
+          e,
+          reservation.dossierId
+        );
+      });
+      if (hasBayColl) {
+        codes.push("planning-collision-bay");
+        reasons.push("Le pont d'atelier sélectionné est déjà occupé.");
+      }
     }
   }
   
@@ -497,8 +677,8 @@ export function convertReservationToPlanning(
   if (reservation.status !== "RESERVATION_CONFIRMEE" && reservation.status !== "CRENEAU_PROPOSE") {
     throw new Error("Seule une réservation confirmée ou proposée peut être transformée en planning.");
   }
-  if (!reservation.startTime || !reservation.technicianId || !reservation.bayId) {
-    throw new Error("Créneau, technicien ou pont manquant.");
+  if (!reservation.startTime || !reservation.technicianId || !reservation.bayId || !reservation.segments || reservation.segments.length === 0) {
+    throw new Error("Créneau, technicien, pont ou segments manquants.");
   }
   
   const dossierId = reservation.dossierId;
@@ -508,7 +688,10 @@ export function convertReservationToPlanning(
   }
   
   const dossier = dossiers[dossierIndex];
-  let currentCursor = new Date(reservation.startTime);
+  
+  // We distribute the tasks sequentially inside the reservation.segments
+  let segmentIndex = 0;
+  let segmentCursor = new Date(reservation.segments[0].start);
   
   const updatedLines = dossier.ordresReparation.map(line => {
     if (reservation.taskIds.includes(line.id)) {
@@ -517,12 +700,47 @@ export function convertReservationToPlanning(
         return line;
       }
       
-      const taskStart = new Date(currentCursor);
-      const taskEnd = addWorkingMinutes(taskStart, taskDurationMinutes);
-      const taskSegments = buildPlanningSegments(taskStart, taskEnd);
-      const planningDate = taskStart.toISOString().split("T")[0];
+      const taskSegments: Array<{ start: string; end: string }> = [];
+      let taskRemainingMinutes = taskDurationMinutes;
+      const taskStart = new Date(segmentCursor);
       
-      currentCursor = new Date(taskEnd);
+      while (taskRemainingMinutes > 0) {
+        if (segmentIndex >= reservation.segments!.length) {
+          const fallbackEnd = addWorkingMinutes(segmentCursor, taskRemainingMinutes);
+          taskSegments.push(...buildPlanningSegments(segmentCursor, fallbackEnd));
+          segmentCursor = fallbackEnd;
+          break;
+        }
+        
+        const currentSegment = reservation.segments![segmentIndex];
+        const segEnd = new Date(currentSegment.end);
+        
+        if (segmentCursor.getTime() >= segEnd.getTime()) {
+          segmentIndex += 1;
+          if (segmentIndex < reservation.segments!.length) {
+            segmentCursor = new Date(reservation.segments![segmentIndex].start);
+          }
+          continue;
+        }
+        
+        const availableMinutes = Math.max(0, Math.round((segEnd.getTime() - segmentCursor.getTime()) / 60000));
+        if (availableMinutes <= 0) {
+          segmentIndex += 1;
+          if (segmentIndex < reservation.segments!.length) {
+            segmentCursor = new Date(reservation.segments![segmentIndex].start);
+          }
+          continue;
+        }
+        
+        const taken = Math.min(availableMinutes, taskRemainingMinutes);
+        const nextCursor = new Date(segmentCursor.getTime() + taken * 60000);
+        taskSegments.push({ start: segmentCursor.toISOString(), end: nextCursor.toISOString() });
+        taskRemainingMinutes -= taken;
+        segmentCursor = nextCursor;
+      }
+      
+      const taskEnd = segmentCursor;
+      const planningDate = taskStart.toISOString().split("T")[0];
       
       return {
         ...line,
@@ -543,7 +761,7 @@ export function convertReservationToPlanning(
     technicienId: reservation.technicianId,
     workshopBayId: reservation.bayId,
     datePlanningDebut: reservation.startTime,
-    datePlanningFin: currentCursor.toISOString(),
+    datePlanningFin: segmentCursor.toISOString(),
     statut: DossierStatus.TRAVAUX_PLANIFIES,
     dateDernierStatut: now.toISOString(),
     historiqueLogs: [

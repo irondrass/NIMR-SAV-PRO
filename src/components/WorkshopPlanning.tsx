@@ -118,6 +118,7 @@ export default function WorkshopPlanning({
   // Visual saved feedback indicator
   const [showSavedIndicator, setShowSavedIndicator] = useState(false);
   const [ganttSearchQuery, setGanttSearchQuery] = useState("");
+  const [expandedResId, setExpandedResId] = useState<string | null>(null);
 
   // Local helper to format Date to YYYY-MM-DD
   const getLocalDateStr = (d: Date) => {
@@ -410,9 +411,10 @@ export default function WorkshopPlanning({
   // Find all reservations active on the selected date
   const activeReservationsStr = reservations.filter(res => {
     if (res.status === "CRENEAU_PROPOSE" || res.status === "RESERVATION_CONFIRMEE") {
-      if (res.startTime) {
-        const resDateStr = res.startTime.split("T")[0];
-        if (resDateStr === selectedDateStr) {
+      const hasSegmentOnDate = res.segments && res.segments.length > 0
+        ? res.segments.some(seg => seg.start.split("T")[0] === selectedDateStr)
+        : res.startTime && res.startTime.split("T")[0] === selectedDateStr;
+      if (hasSegmentOnDate) {
           if (ganttSearchQuery.trim()) {
             const query = ganttSearchQuery.toLowerCase().trim();
             const dossier = dossiers.find(d => d.id === res.dossierId);
@@ -431,9 +433,8 @@ export default function WorkshopPlanning({
           return true;
         }
       }
-    }
-    return false;
-  });
+      return false;
+    });
 
   // Construct reservation needs
   const reservationNeeds = dossiers
@@ -508,7 +509,10 @@ export default function WorkshopPlanning({
   dossiers.forEach(dossier => {
     if (dossier.statut !== DossierStatus.LIVRE && dossier.statut !== DossierStatus.CLOTURE) {
       dossier.ordresReparation.forEach(line => {
-        if (line.planningDate === selectedDateStr && line.planningStart && line.planningEnd) {
+        const hasSegmentOnDate = line.planningSegments && line.planningSegments.length > 0
+          ? line.planningSegments.some(seg => seg.start.split("T")[0] === selectedDateStr)
+          : line.planningDate === selectedDateStr;
+        if (hasSegmentOnDate && line.planningStart && line.planningEnd) {
           if (ganttSearchQuery.trim()) {
             const query = ganttSearchQuery.toLowerCase().trim();
             const matchesImmat = dossier.vehiculeImmatriculation?.toLowerCase().includes(query);
@@ -984,15 +988,67 @@ export default function WorkshopPlanning({
                     <div className="text-gray-650 space-y-0.5">
                       <div>Véhicule : <span className="font-extrabold text-gray-805">{dossier.vehiculeMarque} {dossier.vehiculeModele} ({dossier.vehiculeImmatriculation})</span></div>
                       <div>Durée MO validée : <span className="font-extrabold text-gray-805">{duration}h</span></div>
-                      {reservation && reservation.startTime && (
-                        <div className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mt-1.5 space-y-1">
-                          <div className="font-black text-gray-700 uppercase text-[9px]">Créneau proposé :</div>
-                          <div>Date : <span className="font-bold text-gray-800">{new Date(reservation.startTime).toLocaleDateString("fr-FR")}</span></div>
-                          <div>Heures : <span className="font-bold text-gray-800">{new Date(reservation.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - {new Date(reservation.endTime!).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
-                          <div>Technicien : <span className="font-bold text-gray-800">{techniciens.find(t => t.id === reservation.technicianId)?.nom || reservation.technicianId}</span></div>
-                          <div>Pont : <span className="font-bold text-gray-800">{DEFAULT_WORKSHOP_BAYS.find(b => b.id === reservation.bayId)?.name || reservation.bayId}</span></div>
-                        </div>
-                      )}
+                      {reservation && reservation.startTime && (() => {
+                        const uniqueDays = reservation.segments && reservation.segments.length > 0
+                          ? new Set(reservation.segments.map(seg => seg.start.split("T")[0])).size
+                          : 1;
+                        const numSegments = reservation.segments?.length || 1;
+                        const isExpanded = expandedResId === reservation.reservationId;
+
+                        return (
+                          <div className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mt-1.5 space-y-1">
+                            <div className="font-black text-gray-700 uppercase text-[9px]">Créneau proposé :</div>
+                            <div>
+                              Début : <span data-testid="res-start" className="font-bold text-gray-800">
+                                {new Date(reservation.startTime).toLocaleDateString("fr-FR")} à {new Date(reservation.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                            <div>
+                              Fin estimée : <span data-testid="res-end" className="font-bold text-gray-800">
+                                {reservation.endTime ? `${new Date(reservation.endTime).toLocaleDateString("fr-FR")} à ${new Date(reservation.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "-"}
+                              </span>
+                            </div>
+                            <div>
+                              Charge répartie sur : <span data-testid="res-days" className="font-bold text-gray-800">
+                                {uniqueDays} {uniqueDays > 1 ? "jours" : "jour"}
+                              </span>
+                            </div>
+                            <div>
+                              Segments : <span data-testid="res-segments-count" className="font-bold text-gray-800">
+                                {numSegments} {numSegments > 1 ? "segments" : "segment"}
+                              </span>
+                            </div>
+                            <div>Technicien : <span className="font-bold text-gray-800">{techniciens.find(t => t.id === reservation.technicianId)?.nom || reservation.technicianId}</span></div>
+                            <div>Pont : <span className="font-bold text-gray-800">{DEFAULT_WORKSHOP_BAYS.find(b => b.id === reservation.bayId)?.name || reservation.bayId}</span></div>
+                            
+                            {reservation.segments && reservation.segments.length > 0 && (
+                              <div className="mt-1 pt-1 border-t border-gray-200">
+                                <button
+                                  type="button"
+                                  data-testid="res-toggle-segments-btn"
+                                  onClick={() => setExpandedResId(isExpanded ? null : reservation.reservationId)}
+                                  className="text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer flex items-center gap-1 text-[9px]"
+                                >
+                                  {isExpanded ? "Masquer les segments" : "Voir les segments"}
+                                </button>
+                                {isExpanded && (
+                                  <div data-testid="reservation-segments-list" className="mt-1 pl-2 space-y-0.5 border-l-2 border-gray-200 text-[10px] text-gray-650 max-h-[150px] overflow-y-auto">
+                                    {reservation.segments.map((seg, idx) => {
+                                      const s = new Date(seg.start);
+                                      const e = new Date(seg.end);
+                                      return (
+                                        <div key={idx} data-testid={`res-segment-item-${idx}`} className="font-mono">
+                                          {s.toLocaleDateString("fr-FR")} : {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - {e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {validationErrors.length > 0 && (
@@ -1175,13 +1231,15 @@ export default function WorkshopPlanning({
                 dossiers.forEach(d => {
                   if (d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE) {
                     d.ordresReparation.forEach(l => {
-                      if (l.plannedTechnicianId === tech.id && l.planningDate === todayStr && l.planningStart && l.planningEnd) {
+                      if (l.plannedTechnicianId === tech.id && l.planningStart && l.planningEnd) {
                         const segments = l.planningSegments || [{ start: l.planningStart, end: l.planningEnd }];
                         segments.forEach(seg => {
-                          todayTechSegments.push({
-                            start: new Date(seg.start),
-                            end: new Date(seg.end)
-                          });
+                          if (seg.start.split("T")[0] === todayStr) {
+                            todayTechSegments.push({
+                              start: new Date(seg.start),
+                              end: new Date(seg.end)
+                            });
+                          }
                         });
                       }
                     });
@@ -1266,9 +1324,10 @@ export default function WorkshopPlanning({
 
                       {/* Display task blocks on this row */}
                       {techPlannedLines.map(({ dossier, line }) => {
-                        const segments = line.planningSegments && line.planningSegments.length > 0
+                        const segments = (line.planningSegments && line.planningSegments.length > 0
                           ? line.planningSegments
-                          : [{ start: line.planningStart!, end: line.planningEnd! }];
+                          : [{ start: line.planningStart!, end: line.planningEnd! }]
+                        ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
 
                         return segments.map((seg, sIdx) => {
                           const s = new Date(seg.start);
@@ -1324,9 +1383,10 @@ export default function WorkshopPlanning({
 
                       {/* Display reservation ghost blocks on this row */}
                       {activeReservationsStr.filter(res => res.technicianId === tech.id).map(res => {
-                        const segments = res.segments && res.segments.length > 0
+                        const segments = (res.segments && res.segments.length > 0
                           ? res.segments
-                          : [{ start: res.startTime!, end: res.endTime! }];
+                          : [{ start: res.startTime!, end: res.endTime! }]
+                        ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
 
                         const dossier = dossiers.find(d => d.id === res.dossierId);
                         if (!dossier) return null;
@@ -1399,13 +1459,15 @@ export default function WorkshopPlanning({
             dossiers.forEach(d => {
               if (d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE) {
                 d.ordresReparation.forEach(l => {
-                  if (l.plannedBayId === bay.id && l.planningDate === todayStr && l.planningStart && l.planningEnd) {
+                  if (l.plannedBayId === bay.id && l.planningStart && l.planningEnd) {
                     const segments = l.planningSegments || [{ start: l.planningStart, end: l.planningEnd }];
                     segments.forEach(seg => {
-                      todayBaySegments.push({
-                        start: new Date(seg.start),
-                        end: new Date(seg.end)
-                      });
+                      if (seg.start.split("T")[0] === todayStr) {
+                        todayBaySegments.push({
+                          start: new Date(seg.start),
+                          end: new Date(seg.end)
+                        });
+                      }
                     });
                   }
                 });
@@ -1483,9 +1545,10 @@ export default function WorkshopPlanning({
 
                   {/* Display task blocks on this row */}
                   {bayPlannedLines.map(({ dossier, line }) => {
-                    const segments = line.planningSegments && line.planningSegments.length > 0
+                    const segments = (line.planningSegments && line.planningSegments.length > 0
                       ? line.planningSegments
-                      : [{ start: line.planningStart!, end: line.planningEnd! }];
+                      : [{ start: line.planningStart!, end: line.planningEnd! }]
+                    ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
 
                     return segments.map((seg, sIdx) => {
                       const s = new Date(seg.start);
@@ -1538,9 +1601,10 @@ export default function WorkshopPlanning({
 
                   {/* Display reservation ghost blocks on this row */}
                   {activeReservationsStr.filter(res => res.bayId === bay.id).map(res => {
-                    const segments = res.segments && res.segments.length > 0
+                    const segments = (res.segments && res.segments.length > 0
                       ? res.segments
-                      : [{ start: res.startTime!, end: res.endTime! }];
+                      : [{ start: res.startTime!, end: res.endTime! }]
+                    ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
 
                     const dossier = dossiers.find(d => d.id === res.dossierId);
                     if (!dossier) return null;

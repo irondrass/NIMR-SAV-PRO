@@ -177,4 +177,101 @@ test.describe("Workshop Reservations Flow", () => {
     // Verify it disappears from Gantt (not blocking anymore)
     await expect(page.locator('[data-testid="gantt-reservation-confirmed"]')).toHaveCount(0);
   });
+
+  test("Chef Atelier multi-day 52h reservation workflow", async ({ page }) => {
+    const dossier52 = createMockDossier({
+      id: "NIMR-RES-52H",
+      clientNom: "Client 52H",
+      vehiculeMarque: "DFSK",
+      vehiculeModele: "Glory",
+      vehiculeImmatriculation: "123 TU 520",
+      statut: DossierStatus.NOUVEAU,
+      dateSouhaiteeLivraison: "2026-06-15T17:00:00",
+      ordresReparation: [
+        {
+          id: "task_52h",
+          designation: "Tâche 52H",
+          tempsEstime: 52.0,
+          tempsPasse: 0,
+          status: "pending",
+          estimateSource: "manual",
+          isEstimatedDurationValidated: true
+        }
+      ]
+    });
+
+    await page.goto("/");
+    await page.evaluate(({ keys, data }) => {
+      localStorage.clear();
+      localStorage.setItem(keys.dossiers, JSON.stringify(data.dossiers));
+      localStorage.setItem(keys.techs, JSON.stringify(data.techs));
+      localStorage.setItem(keys.reservations, JSON.stringify([]));
+    }, {
+      keys: STORAGE_KEYS,
+      data: {
+        dossiers: [dossier52],
+        techs: [tech]
+      }
+    });
+
+    await changeUserRole(page, "role-option-chef-atelier");
+
+    const tabSelector = '[data-testid="nav-planning"]';
+    await page.waitForSelector(tabSelector, { state: "visible" });
+    await humanClick(page, page.locator(tabSelector));
+
+    const dateInput = page.locator('[data-testid="planning-date-input"]');
+    await dateInput.fill("2026-06-15");
+    await page.keyboard.press("Enter");
+
+    const card52 = page.locator('[data-testid="workshop-reservations-panel"] [data-testid="reservation-need-card"]').filter({ hasText: "NIMR-RES-52H" });
+    await expect(card52).toBeVisible();
+    await expect(card52).toContainText("À réserver");
+
+    // Click suggest
+    const suggestBtn = card52.locator('[data-testid="reservation-suggest-btn"]');
+    await humanClick(page, suggestBtn);
+
+    // Verify fields
+    await expect(card52.locator('[data-testid="res-start"]')).toContainText("15/06/2026 à 08:00");
+    await expect(card52.locator('[data-testid="res-end"]')).toContainText("22/06/2026 à 17:00");
+    await expect(card52.locator('[data-testid="res-days"]')).toContainText("7 jours");
+    await expect(card52.locator('[data-testid="res-segments-count"]')).toContainText("13 segments");
+
+    // Toggle segments list
+    const toggleSegmentsBtn = card52.locator('[data-testid="res-toggle-segments-btn"]');
+    await expect(toggleSegmentsBtn).toBeVisible();
+    await humanClick(page, toggleSegmentsBtn);
+
+    const segmentsList = card52.locator('[data-testid="reservation-segments-list"]');
+    await expect(segmentsList).toBeVisible();
+    await expect(segmentsList.locator('[data-testid^="res-segment-item-"]')).toHaveCount(13);
+
+    // See proposed block on day 1 (Monday 15 June)
+    await expect(page.locator('[data-testid="gantt-reservation-proposed"]').first()).toBeVisible();
+
+    // Navigate to day 2 (Tuesday 16 June)
+    await dateInput.fill("2026-06-16");
+    await page.keyboard.press("Enter");
+
+    // See proposed block on day 2 too
+    await expect(page.locator('[data-testid="gantt-reservation-proposed"]').first()).toBeVisible();
+
+    // Click confirm
+    const confirmBtn = card52.locator('[data-testid="reservation-confirm-btn"]');
+    await humanClick(page, confirmBtn);
+
+    // See confirmed block on day 2
+    await expect(page.locator('[data-testid="gantt-reservation-confirmed"]').first()).toBeVisible();
+
+    // Convert to planning
+    const convertBtn = card52.locator('[data-testid="reservation-convert-btn"]');
+    await humanClick(page, convertBtn);
+
+    // Card should disappear
+    await expect(card52).toHaveCount(0);
+
+    // Gantt block for task_52h should be visible on day 2
+    await expect(page.locator('[data-testid="gantt-block-task_52h"]').first()).toBeVisible();
+  });
 });

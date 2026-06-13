@@ -370,6 +370,18 @@ Le Lot 5F-4A intègre le flux de réservation d'atelier issu de l'application le
   - Technicien, QC/Livraison, Lecture seule : Consultation uniquement ou accès masqué selon les rôles.
 * **Historique Obligatoire** : Chaque changement de statut de réservation est journalisé avec la date, l'utilisateur, son rôle, l'action, l'ancien/nouveau statut et un commentaire.
 
+### Lot 5F-4A.1 : Réservation multi-jours façon legacy
+
+Le Lot 5F-4A.1 fiabilise la gestion des réservations importantes (ex. 52 heures) en implémentant une répartition automatique multi-jours de type legacy :
+* **Répartition automatique sur jours ouvrés** : Les durées importantes ne sont plus rejetées pour surcharge journalière, mais scindées automatiquement en créneaux successifs respectant :
+  - Les horaires d'ouverture de l'atelier (08:00 - 12:00 et 13:00 - 17:00).
+  - La pause déjeuner (12:00 - 13:00) sur les jours de semaine.
+  - Le samedi matin (08:00 - 12:00 uniquement).
+  - La fermeture le dimanche et le samedi après-midi.
+  - Les collisions avec d'autres plannings ou réservations actives.
+* **Affichage détaillé des segments** : L'interface utilisateur (`WorkshopPlanning.tsx`) affiche le début et la fin estimée de la charge globale, le nombre de jours sur lesquels la charge est répartie, et propose une vue détaillée collapsible de chaque segment individuel (date, heure de début, heure de fin) via le bouton "Voir les segments".
+* **Rendu Gantt ciblé par jour** : Pour éviter toute accumulation visuelle ou superposition, le Gantt filtre les segments de réservations ou tâches planifiées pour n'afficher que ceux qui tombent exactement sur la date sélectionnée.
+
 ---
 
 ## 13. Résultats de la Validation Globale
@@ -379,10 +391,10 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **11 tests unitaires de réservation** et **20 suites unitaires globales** au vert. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **12 tests unitaires de réservation** et **20 suites unitaires globales** au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **255 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 64/64 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **258 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 66/66 contrôles validés** |
 
 ---
 
@@ -395,13 +407,13 @@ La suite E2E a été enrichie avec 7 nouveaux fichiers de tests complets :
 4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
 5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
 6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel et PDF multi-pages (fixture 1076), la fusion des lignes coupées, la non-sélection par défaut des pièces et produits peinture, le blocage et la validation des tâches à 0h, et l'absence de CA/prix/paiement/caisse/stock.
-7. `e2e/20-workshop-reservations.spec.ts` : Valide le cycle complet de réservation (À réserver → Proposé → Confirmé → Planning) sous le rôle Chef Atelier, le rendu du calque distinct sur le Gantt, le déblocage du créneau lors de l'annulation et l'exclusion des dossiers non-réservables.
+7. `e2e/20-workshop-reservations.spec.ts` : Valide le cycle complet de réservation (À réserver → Proposé → Confirmé → Planning) sous le rôle Chef Atelier, le rendu du calque distinct sur le Gantt, le déblocage du créneau lors de l'annulation, l'exclusion des dossiers non-réservables, ainsi que le scénario de réservation de 52h (affichage des segments détaillés, répartition, et Gantt dynamique).
 
 ---
 
 ## 15. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5F-3B sont validés.
+Les Lots 1 à 5F-4A.1 sont validés.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
-Avant de commencer le Lot 6, poursuivre avec le **Lot 5F-4A : Reprise Planning & Réservation Legacy**.
+Le Lot 5F-4A (Reprise Planning & Réservation Legacy) et son correctif multi-jours (Lot 5F-4A.1) sont entièrement validés et intégrés.
