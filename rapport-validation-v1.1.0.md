@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-4A
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-5
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3, 5F-3B et 5F-4A) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3, 5F-3B, 5F-4A, 5F-4B et 5F-5) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -382,6 +382,25 @@ Le Lot 5F-4A.1 fiabilise la gestion des réservations importantes (ex. 52 heures
 * **Affichage détaillé des segments** : L'interface utilisateur (`WorkshopPlanning.tsx`) affiche le début et la fin estimée de la charge globale, le nombre de jours sur lesquels la charge est répartie, et propose une vue détaillée collapsible de chaque segment individuel (date, heure de début, heure de fin) via le bouton "Voir les segments".
 * **Rendu Gantt ciblé par jour** : Pour éviter toute accumulation visuelle ou superposition, le Gantt filtre les segments de réservations ou tâches planifiées pour n'afficher que ceux qui tombent exactement sur la date sélectionnée.
 
+### Lot 5F-4B : Horaires, absences, indisponibilités et jours fériés
+
+Le Lot 5F-4B gère de façon fine et dynamique la disponibilité globale de l'atelier pour la réservation et la planification de tâches :
+* **Horaires hebdomadaires par défaut** : Du lundi au vendredi (08:00 - 12:00 et 13:00 - 17:00), le samedi matin (08:00 - 12:00 uniquement) et fermeture le dimanche.
+* **Absences et Indisponibilités** : Formulaire de gestion permettant au Directeur SAV et au Chef d'Atelier de configurer les absences de techniciens (avec horaires optionnels) et les indisponibilités de ponts (avec horaires optionnels). Ces ressources sont alors marquées visuellement et exclues des suggestions intelligentes.
+* **Jours Fériés et Fermetures Exceptionnelles** : Possibilité de déclarer des fermetures exceptionnelles d'atelier, affichées sous forme de bannières grises dans le Gantt et bloquant toute affectation.
+* **Algorithme d'affectation préservé** : Les réservations de longue durée sautent automatiquement les jours ou tranches d'indisponibilité pour reprendre sur les prochains créneaux disponibles.
+
+### Lot 5F-5 : Base véhicules vendus NIMR + aide réception
+
+Le Lot 5F-5 implémente une base de données locale des véhicules vendus par NIMR pour aider à la saisie lors de la réception :
+* **Importation CSV flexible** : Permet au Réceptionnaire et au Directeur SAV d'importer la liste des véhicules vendus via un fichier CSV (support des séparateurs virgule `,` et point-virgule `;`, des guillemets et du mapping intelligent des colonnes françaises ou anglaises).
+* **Détection des doublons et erreurs** : Le parseur retourne un rapport d'importation précis détaillant le nombre de lignes importées, ignorées, ainsi que les doublons de VIN ou d'immatriculation.
+* **Recherche instantanée** : Champ de recherche multi-critères à l'étape 1 de la réception guidée (recherche par VIN, immatriculation, nom client, modèle ou téléphone).
+* **Statut de Garantie dynamique** : Calcul automatique à partir de la date courante (Garantie active, Garantie expirée, Garantie inconnue) avec affichage de notes détaillées sur les dates de fin de garantie pièces et main-d'œuvre.
+* **Aide au pré-remplissage sécurisé** : Un clic sur le bouton "Utiliser ce véhicule" remplit automatiquement la marque, le modèle, la version, le VIN et l'immatriculation. En cas de champs déjà renseignés, un modal de confirmation évite tout écrasement accidentel.
+* **Confidentialité par rôle (RGPD)** : Le numéro de téléphone client est un champ sensible uniquement visible pour le Directeur SAV et le Réceptionnaire. Il est masqué par des astérisques pour le Chef Atelier, le Technicien, le Contrôle Qualité, la Livraison et la Lecture seule.
+* **Vidage sécurisé** : Possibilité de vider entièrement la base locale (localStorage) avec demande de confirmation obligatoire.
+
 ---
 
 ## 13. Résultats de la Validation Globale
@@ -391,16 +410,16 @@ Le pipeline complet de validation locale a été exécuté et validé avec succ�
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **12 tests unitaires de réservation** et **20 suites unitaires globales** au vert. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **12 tests unitaires de réservation**, tests unitaires de disponibilité et de base véhicules au vert. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **258 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 66/66 contrôles validés** |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **264 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 85/85 contrôles validés** |
 
 ---
 
 ## 14. Nouveaux Tests E2E Playwright
 
-La suite E2E a été enrichie avec 7 nouveaux fichiers de tests complets :
+La suite E2E a été enrichie avec 9 nouveaux fichiers de tests complets :
 1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
 2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des réclamations, l'affectation, la criticité, les changements de statut, l'action corrective, la résolution, la clôture, la réouverture, l'historique, les filtres et le lien vers le dossier lié.
 3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
@@ -408,12 +427,14 @@ La suite E2E a été enrichie avec 7 nouveaux fichiers de tests complets :
 5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
 6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel et PDF multi-pages (fixture 1076), la fusion des lignes coupées, la non-sélection par défaut des pièces et produits peinture, le blocage et la validation des tâches à 0h, et l'absence de CA/prix/paiement/caisse/stock.
 7. `e2e/20-workshop-reservations.spec.ts` : Valide le cycle complet de réservation (À réserver → Proposé → Confirmé → Planning) sous le rôle Chef Atelier, le rendu du calque distinct sur le Gantt, le déblocage du créneau lors de l'annulation, l'exclusion des dossiers non-réservables, ainsi que le scénario de réservation de 52h (affichage des segments détaillés, répartition, et Gantt dynamique).
+8. `e2e/21-workshop-availability.spec.ts` : Valide la configuration des indisponibilités de ponts, des absences techniciens et des jours fériés/fermetures exceptionnelles, ainsi que l'impact sur les suggestions de planification.
+9. `e2e/22-vehicle-master-reception.spec.ts` : Valide l'importation de la base de véhicules via un CSV fictif, la recherche de véhicule (VIN, immatriculation, client, modèle), le pré-remplissage sur clic et confirmation, le masquage par rôle du numéro de téléphone client, l'avertissement en cas de véhicule inexistant, et la suppression complète de la base locale.
 
 ---
 
 ## 15. Décision avant Lot 6
 
 **Décision :**
-Les Lots 1 à 5F-4A.1 sont validés.
+Les Lots 1 à 5F-5 sont validés.
 Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
-Le Lot 5F-4A (Reprise Planning & Réservation Legacy) et son correctif multi-jours (Lot 5F-4A.1) sont entièrement validés et intégrés.
+Le Lot 5F-5 (Base véhicules vendus NIMR + aide réception) et le Lot 5F-4B (Disponibilités atelier) sont entièrement validés et intégrés.
