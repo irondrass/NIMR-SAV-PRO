@@ -17,7 +17,18 @@ import {
   canManageUsers,
   isReadOnlyRole,
   canViewVehicleSensitiveFields,
+  canViewSavReports,
+  canViewSensitiveReportFields,
+  canExportSavReports,
 } from "../src/permissions";
+import {
+  buildDossierHistory,
+  buildVehicleHistory,
+  maskPhone,
+  buildReceptionReport,
+  buildComplaintsReport,
+  buildPlanningReport,
+} from "../src/sav-reports";
 import {
   parseVehicleMasterCsv,
   searchVehicleMaster,
@@ -61,6 +72,7 @@ import {
   UserRole,
   WorkshopBay,
   WorkshopAvailabilityConfig,
+  WorkshopReservation,
 } from "../src/types";
 
 
@@ -1578,6 +1590,240 @@ registerCheck("Lot 5F-5 Invariants", "téléphone client non visible pour rôles
   assert.strictEqual(canViewVehicleSensitiveFields(UserRole.TECHNICIEN), false);
 });
 
+registerCheck("Lot 6 Invariants", "aucun rapport ne contient CA, marge, paiement, caisse, stock réel", () => {
+  const forbidden = ["ca", "marge", "paiement", "caisse", "facture", "stock réel", "disponibilité pièce", "prix", "cout", "coût"];
+  const sampleDossier: DossierSAV = {
+    id: "TEST-001",
+    clientNom: "Salah",
+    clientTelephone: "55111001",
+    deposantNom: "Salah",
+    deposantTelephone: "55111001",
+    vehiculeMarque: "DFSK",
+    vehiculeModele: "Glory 580",
+    vehiculeImmatriculation: "111 TU 111",
+    vehiculeVIN: "VIN1",
+    vehiculeKilometrage: 12000,
+    vehiculeCouleur: "Blanc",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Vidange",
+    observationsReception: "",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, Blackberry: false, autresNotes: "" } as any,
+    objetsLaisses: [],
+    dateReception: "2026-06-14T08:00:00Z",
+    dateSouhaiteeLivraison: "2026-06-14T17:00:00Z",
+    statut: DossierStatus.LIVRE,
+    ordresReparation: [],
+    complements: [],
+    accords: [],
+    checklistQC: {
+      essaiEffectue: true,
+      defautRepare: true,
+      aucunVoyantAllume: true,
+      niveauxVerifies: true,
+      serrageSecurite: true,
+      propreteVehicule: true,
+      documentsPrets: true,
+      photosApresOk: true,
+      validationGlobale: "valide",
+      dateValidation: "2026-06-14T11:00:00Z"
+    },
+    livraison: {
+      controleQualiteOk: true,
+      clientInforme: true,
+      dateLivraisonPrevue: "2026-06-14T17:00:00Z",
+      dateLivraisonReelle: "2026-06-14T17:00:00Z",
+      remarquesLivraison: "",
+      confirmationReceptionClient: true,
+      clotureInterne: true
+    },
+    dateDernierStatut: "2026-06-14T17:00:00Z",
+    avancementGlobal: 100,
+    prochaineActionRecommended: "",
+    historiqueLogs: ["2026-06-14T08:00:00Z - Dossier créé"]
+  };
+  const rep = buildReceptionReport([sampleDossier], { period: "tous" });
+  const json = JSON.stringify(rep).toLowerCase();
+  forbidden.forEach(word => {
+    assert.ok(!json.includes(`"${word}"`), `Reception report contains forbidden financial word ${word}`);
+  });
+});
+
+registerCheck("Lot 6 Invariants", "technicien ne voit pas rapports globaux", () => {
+  assert.strictEqual(canViewSavReports(UserRole.TECHNICIEN), false);
+});
+
+registerCheck("Lot 6 Invariants", "téléphone masqué pour rôles non autorisés", () => {
+  const masked = maskPhone("+216 55 111 001");
+  assert.strictEqual(masked, "+216 ** *** 001");
+  assert.strictEqual(canViewSensitiveReportFields(UserRole.CHEF_ATELIER), false);
+  assert.strictEqual(canViewSensitiveReportFields(UserRole.TECHNICIEN), false);
+  assert.strictEqual(canViewSensitiveReportFields(UserRole.LECTURE_SEULE), false);
+  assert.strictEqual(canViewSensitiveReportFields(UserRole.DIRECTEUR_SAV), true);
+  assert.strictEqual(canViewSensitiveReportFields(UserRole.RECEPTIONNAIRE), true);
+});
+
+registerCheck("Lot 6 Invariants", "export respecte les permissions", () => {
+  assert.strictEqual(canExportSavReports(UserRole.DIRECTEUR_SAV), true);
+  assert.strictEqual(canExportSavReports(UserRole.CHEF_ATELIER), true);
+  assert.strictEqual(canExportSavReports(UserRole.LECTURE_SEULE), false);
+  assert.strictEqual(canExportSavReports(UserRole.TECHNICIEN), false);
+});
+
+registerCheck("Lot 6 Invariants", "historique dossier trié chronologiquement", () => {
+  const dossier: DossierSAV = {
+    id: "TEST-002",
+    clientNom: "Salah",
+    clientTelephone: "55111001",
+    deposantNom: "Salah",
+    deposantTelephone: "55111001",
+    vehiculeMarque: "DFSK",
+    vehiculeModele: "Glory 580",
+    vehiculeImmatriculation: "111 TU 111",
+    vehiculeVIN: "VIN1",
+    vehiculeKilometrage: 12000,
+    vehiculeCouleur: "Blanc",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Vidange",
+    observationsReception: "",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, Blackberry: false, autresNotes: "" } as any,
+    objetsLaisses: [],
+    dateReception: "2026-06-14T08:00:00Z",
+    dateSouhaiteeLivraison: "2026-06-14T17:00:00Z",
+    statut: DossierStatus.LIVRE,
+    ordresReparation: [],
+    complements: [],
+    accords: [],
+    checklistQC: {
+      essaiEffectue: true,
+      defautRepare: true,
+      aucunVoyantAllume: true,
+      niveauxVerifies: true,
+      serrageSecurite: true,
+      propreteVehicule: true,
+      documentsPrets: true,
+      photosApresOk: true,
+      validationGlobale: "valide"
+    },
+    livraison: {
+      controleQualiteOk: true,
+      clientInforme: true,
+      dateLivraisonPrevue: "2026-06-14T17:00:00Z",
+      remarquesLivraison: "",
+      confirmationReceptionClient: true,
+      clotureInterne: true
+    },
+    dateDernierStatut: "2026-06-14T17:00:00Z",
+    avancementGlobal: 100,
+    prochaineActionRecommended: "",
+    historiqueLogs: [
+      "2026-06-14T10:00:00Z - [Contrôle Qualité] - Validation QC",
+      "2026-06-14T08:00:00Z - [Réceptionnaire] - Création dossier",
+      "2026-06-14T12:00:00Z - [Livraison] - Livraison effectuée"
+    ]
+  };
+  const history = buildDossierHistory(dossier);
+  assert.strictEqual(history[0].type, "creation");
+  assert.strictEqual(history[2].type, "delivery");
+});
+
+registerCheck("Lot 6 Invariants", "historique véhicule regroupe par VIN / immatriculation", () => {
+  const dossier1: DossierSAV = {
+    id: "NIMR-001",
+    clientNom: "Salah",
+    clientTelephone: "55111001",
+    deposantNom: "Salah",
+    deposantTelephone: "55111001",
+    vehiculeMarque: "DFSK",
+    vehiculeModele: "Glory 580",
+    vehiculeImmatriculation: "111 TU 111",
+    vehiculeVIN: "VIN1",
+    vehiculeKilometrage: 12000,
+    vehiculeCouleur: "Blanc",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Vidange",
+    observationsReception: "",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, Blackberry: false, autresNotes: "" } as any,
+    objetsLaisses: [],
+    dateReception: "2026-06-10T08:00:00Z",
+    dateSouhaiteeLivraison: "2026-06-10T17:00:00Z",
+    statut: DossierStatus.LIVRE,
+    ordresReparation: [],
+    complements: [],
+    accords: [],
+    checklistQC: {
+      essaiEffectue: true,
+      defautRepare: true,
+      aucunVoyantAllume: true,
+      niveauxVerifies: true,
+      serrageSecurite: true,
+      propreteVehicule: true,
+      documentsPrets: true,
+      photosApresOk: true,
+      validationGlobale: "valide"
+    },
+    livraison: {
+      controleQualiteOk: true,
+      clientInforme: true,
+      dateLivraisonPrevue: "2026-06-10T17:00:00Z",
+      remarquesLivraison: "",
+      confirmationReceptionClient: true,
+      clotureInterne: true
+    },
+    dateDernierStatut: "2026-06-10T17:00:00Z",
+    avancementGlobal: 100,
+    prochaineActionRecommended: "",
+    historiqueLogs: ["2026-06-10T08:00:00Z - Création"]
+  };
+  const dossier2 = { ...dossier1, id: "NIMR-002", dateReception: "2026-06-12T08:00:00Z", vehiculeKilometrage: 15000 };
+  const vHistory = buildVehicleHistory([dossier1, dossier2], "VIN1");
+  assert.ok(vHistory);
+  assert.strictEqual(vHistory.passagesCount, 2);
+  assert.strictEqual(vHistory.lastServiceMileage, 15000);
+});
+
+registerCheck("Lot 6 Invariants", "réclamations ouvertes visibles", () => {
+  const comp: ReclammationClient = {
+    id: "comp1",
+    dossierId: "NIMR-002",
+    clientNom: "Salah",
+    vehiculeNom: "Glory 580",
+    motif: "Bruit train",
+    criticite: "haute",
+    responsable: "Chef",
+    statut: "nouvelle",
+    actionCorrective: "",
+    delaiTraitement: "",
+    dateCreation: "2026-06-14T08:00:00Z",
+    historiqueLogs: []
+  };
+  const report = buildComplaintsReport([comp], { period: "tous" });
+  assert.strictEqual(report.byStatus.nouvelle, 1);
+});
+
+registerCheck("Lot 6 Invariants", "réservations transformées visibles", () => {
+  const res: WorkshopReservation = {
+    reservationId: "res1",
+    dossierId: "NIMR-002",
+    taskIds: [],
+    totalHours: 2,
+    desiredDate: "2026-06-14",
+    status: "TRANSFORMEE_PLANNING",
+    source: "reception",
+    history: []
+  };
+  const report = buildPlanningReport([], [res], { period: "tous" });
+  assert.strictEqual(report.reservationsConvertedCount, 1);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -1601,9 +1847,10 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 5F-5 - Base véhicules vendus NIMR + aide réception)
+- **Version** : v1.1.0 (Lot 6 - Historique & Rapports SAV opérationnels)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
+
 
 ## Anomalies détectées
 ${

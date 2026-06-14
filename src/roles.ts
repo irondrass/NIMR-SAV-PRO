@@ -39,6 +39,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "reception-rapide",
     "dossiers-liste",
     "reclamations",
+    "rendements-sav",
   ],
   [UserRole.CHEF_ATELIER]: [
     "atelier-planning",
@@ -46,6 +47,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "chef-atelier",
     "dossiers-liste",
     "reclamations",
+    "rendements-sav",
   ],
   [UserRole.TECHNICIEN]: [
     "tech-view",
@@ -54,15 +56,18 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "atelier-kanban",
     "dossiers-liste",
     "reclamations",
+    "rendements-sav",
   ],
   [UserRole.LIVRAISON]: [
     "dossiers-liste",
     "reclamations",
+    "rendements-sav",
   ],
   [UserRole.LECTURE_SEULE]: [
     "dashboard",
     "dossiers-liste",
     "reclamations",
+    "rendements-sav",
   ],
 };
 

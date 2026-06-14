@@ -458,4 +458,135 @@ export interface VehicleMasterImportResult {
   warnings: string[];
 }
 
+export type SavReportPeriod = "jour" | "semaine" | "mois" | "tous";
+
+export interface SavReportFilters {
+  period: SavReportPeriod;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string;   // YYYY-MM-DD
+  dossierStatus?: DossierStatus;
+  technicianId?: string;
+  workshopBayId?: string;
+  receptionistId?: string;
+  typeDossier?: InterventionType;
+  modelQuery?: string;
+  searchQuery?: string; // VIN, immatriculation, client
+  vehicleMasterRecords?: VehicleMasterRecord[];
+}
+
+export interface DossierHistoryEntry {
+  date: string; // ISO string or YYYY-MM-DD HH:MM
+  type: string; // e.g. "creation", "status_change", "task_started", "qc_valid", etc.
+  label: string;
+  actor?: string;
+  role?: UserRole | string;
+  statusBefore?: string;
+  statusAfter?: string;
+  details?: string;
+}
+
+export interface VehicleHistoryEntry {
+  vin?: string;
+  plateNumber?: string;
+  brand?: string;
+  model?: string;
+  clientNom?: string;
+  dossierIds: string[];
+  passagesCount: number;
+  firstPassageDate?: string;
+  lastPassageDate?: string;
+  lastServiceMileage?: number;
+  lastStatus?: DossierStatus;
+  complaintsCount: number;
+  dossiers: DossierSAV[];
+}
+
+export interface ClientHistoryEntry {
+  clientNom: string;
+  clientTelephone?: string;
+  associatedVehicles: Array<{ vin?: string; plateNumber?: string; brand?: string; model?: string }>;
+  passagesCount: number;
+  dossierIds: string[];
+  complaintsCount: number;
+}
+
+export interface ReceptionReport {
+  totalCreated: number;
+  manualCount: number;
+  prefilledCount: number;
+  prefilledPercentage: number;
+  notFoundInMasterCount: number;
+  motifsFrequents: Array<{ motif: string; count: number }>;
+  modelsFrequents: Array<{ model: string; count: number }>;
+  incompleteDossiersCount: number; // e.g. missing plate/VIN or phone
+}
+
+export interface WorkshopReport {
+  tasksByStatus: Record<RepairOrderStatus, number>;
+  totalLaborHoursEstimated: number; // validated preset/quote-import hours
+  totalLaborHoursPlanned: number;   // planned Gantt segments duration
+  totalLaborHoursSpent: number;     // actual spent hours of done tasks
+  techniciansLoad: Array<{
+    technicianId: string;
+    technicianNom: string;
+    plannedTasksCount: number;
+    plannedHours: number;
+  }>;
+  baysLoad: Array<{
+    bayId: string;
+    bayName: string;
+    plannedTasksCount: number;
+    plannedHours: number;
+  }>;
+}
+
+export interface PlanningReport {
+  reservationsToConfirmCount: number; // A_RESERVER or CRENEAU_PROPOSE
+  reservationsConfirmedCount: number; // RESERVATION_CONFIRMEE
+  reservationsCancelledCount: number; // ANNULEE
+  reservationsConvertedCount: number; // TRANSFORMEE_PLANNING
+  conversionRate: number; // Converted / (Confirmed + Converted + Cancelled) * 100
+  multiDayReservationsCount: number;
+  conflictsPreventedCount: number;
+}
+
+export interface QcReport {
+  totalQcChecked: number;
+  totalQcPassed: number;
+  totalQcFailed: number;
+  passRate: number; // (Passed / Checked) * 100
+  motifsRefus: Array<{ motif: string; count: number }>;
+  firstTimeRightRate: number; // % of dossiers that passed QC without any QC refusals in history
+}
+
+export interface DeliveryReport {
+  totalReadyToDeliver: number;
+  totalDelivered: number;
+  totalPendingClient: number; // client notified or en attente client
+  averageQcToDeliveryDays: number; // average duration between last QC approval and delivery
+}
+
+export interface ComplaintReport {
+  totalComplaints: number;
+  byStatus: Record<ComplaintStatus, number>;
+  byCriticite: Record<ComplaintCriticity, number>;
+  averageResolutionDays: number;
+}
+
+export interface BlockingReport {
+  totalBlockedDossiers: number;
+  totalBlockedTasks: number;
+  motifsBlocage: Array<{ motif: string; count: number }>;
+  averageBlockingDurationHours: number;
+  blockingByFamily: Array<{ family: string; count: number }>; // e.g. delay parts, assurance, client devis
+}
+
+export interface OperationalKpiReport {
+  dossiersStatusCounts: Record<DossierStatus, number>;
+  activeDossiersCount: number; // non-delivered/non-ERP dossiers
+  criticalPriorityDossiersCount: number;
+  averageStayDays: number; // average stay duration from reception to delivery/ERP
+}
+
+
 

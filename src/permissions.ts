@@ -146,3 +146,16 @@ export function canViewVehicleSensitiveFields(role: UserRole): boolean {
   return role === UserRole.DIRECTEUR_SAV || role === UserRole.RECEPTIONNAIRE;
 }
 
+export function canViewSavReports(role: UserRole): boolean {
+  return role !== UserRole.TECHNICIEN;
+}
+
+export function canViewSensitiveReportFields(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.RECEPTIONNAIRE;
+}
+
+export function canExportSavReports(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
+}
+
+

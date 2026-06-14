@@ -644,7 +644,7 @@ export default function App() {
               { id: "chef-atelier", label: "Chef d'atelier", icon: Wrench },
               { id: "tech-view", label: "Mode Technicien", icon: UserCheck },
               { id: "reclamations", label: "Réclamations SAV", icon: ShieldAlert },
-              { id: "rendements-sav", label: "Rapport Performances", icon: BarChart3 },
+              { id: "rendements-sav", label: "Rapports SAV", icon: BarChart3 },
               { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal },
               { id: "users", label: "Gestion utilisateurs", icon: UserCog }
             ].map(item => {
@@ -996,7 +996,14 @@ export default function App() {
               )}
 
               {activeTab === "rendements-sav" && (
-                <PerformanceSAV />
+                <PerformanceSAV 
+                  dossiers={dossiers}
+                  reservations={reservations}
+                  complaints={reclamations}
+                  availabilityConfig={availabilityConfig}
+                  vehicleMasterRecords={vehicleMasterRecords}
+                  currentUserRole={activeRole}
+                />
               )}
 
               {activeTab === "parametres" && (
