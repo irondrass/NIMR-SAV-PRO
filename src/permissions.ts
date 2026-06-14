@@ -129,3 +129,20 @@ export function canManageWorkshopAvailability(role: UserRole): boolean {
 export function canViewWorkshopAvailability(role: UserRole): boolean {
   return true;
 }
+
+export function canManageVehicleMaster(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.RECEPTIONNAIRE;
+}
+
+export function canSearchVehicleMaster(role: UserRole): boolean {
+  return role !== UserRole.TECHNICIEN;
+}
+
+export function canUseVehicleForReception(role: UserRole): boolean {
+  return role === UserRole.RECEPTIONNAIRE || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canViewVehicleSensitiveFields(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.RECEPTIONNAIRE;
+}
+

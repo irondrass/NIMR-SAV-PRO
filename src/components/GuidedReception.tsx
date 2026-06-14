@@ -4,7 +4,17 @@
  */
 
 import React, { useState } from "react";
-import { CameraPhoto, DossierSAV, DossierPriority, InterventionType, PHOTO_CATEGORIES, PhotoCategory } from "../types";
+import {
+  CameraPhoto,
+  DossierSAV,
+  DossierPriority,
+  InterventionType,
+  PHOTO_CATEGORIES,
+  PhotoCategory,
+  UserRole,
+  VehicleMasterRecord,
+  VehicleMasterImportResult
+} from "../types";
 import { createReceptionDossier } from "../sav-core";
 import { fileToCameraPhoto } from "../photo-utils";
 import { 
@@ -20,14 +30,34 @@ import {
   ClipboardCheck, 
   Sparkles,
   Percent,
-  Plus
+  Plus,
+  Search,
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
 import { LicencePlate } from "./UIParts";
+import {
+  canManageVehicleMaster,
+  canSearchVehicleMaster,
+  canUseVehicleForReception,
+  canViewVehicleSensitiveFields
+} from "../permissions";
+import {
+  parseVehicleMasterCsv,
+  searchVehicleMaster,
+  getVehicleWarrantyStatus,
+  getVehicleReceptionHints
+} from "../vehicle-master";
 
 interface GuidedReceptionProps {
   existingDossierIds: string[];
   onAddDossier: (dossier: DossierSAV) => void;
   onNavigateToTab: (tab: string) => void;
+  vehicleMasterRecords: VehicleMasterRecord[];
+  vehicleMasterLastImport: string | null;
+  onUpdateVehicleMaster: (records: VehicleMasterRecord[]) => void;
+  onClearVehicleMaster: () => void;
+  currentUserRole: UserRole;
 }
 
 const PRESET_CLIENTS = [
@@ -58,9 +88,88 @@ const PRESET_COMPLAINTS = [
   { text: "Perte de puissance", testId: "preset-complaint-puissance" }
 ];
 
-export default function GuidedReception({ existingDossierIds, onAddDossier, onNavigateToTab }: GuidedReceptionProps) {
+export default function GuidedReception({
+  existingDossierIds,
+  onAddDossier,
+  onNavigateToTab,
+  vehicleMasterRecords,
+  vehicleMasterLastImport,
+  onUpdateVehicleMaster,
+  onClearVehicleMaster,
+  currentUserRole
+}: GuidedReceptionProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [receptionError, setReceptionError] = useState<string | null>(null);
+
+  // Vehicle Master states
+  const [vehicleMasterPanelOpen, setVehicleMasterPanelOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<VehicleMasterRecord[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [importResult, setImportResult] = useState<VehicleMasterImportResult | null>(null);
+  const [showOverwriteConfirmation, setShowOverwriteConfirmation] = useState(false);
+  const [pendingVehicleToUse, setPendingVehicleToUse] = useState<VehicleMasterRecord | null>(null);
+  const [showClearConfirmation, setShowClearConfirmation] = useState(false);
+
+  const handleSearchVehicle = (q: string) => {
+    setSearchQuery(q);
+    if (!q.trim()) {
+      setSearchResults([]);
+      setHasSearched(false);
+      return;
+    }
+    const results = searchVehicleMaster(vehicleMasterRecords, q);
+    setSearchResults(results);
+    setHasSearched(true);
+  };
+
+  const handleImportCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files[0]) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        const result = parseVehicleMasterCsv(text);
+        setImportResult(result);
+        if (result.records.length > 0) {
+          onUpdateVehicleMaster(result.records);
+        }
+      };
+      reader.readAsText(files[0]);
+    }
+    e.target.value = "";
+  };
+
+  const executeUseVehicle = (vehicle: VehicleMasterRecord) => {
+    updateClientNom(vehicle.customerName || "");
+    updateClientTelephone(vehicle.customerPhone || "");
+    setVehiculeMarque(vehicle.brand || "Dongfeng");
+    setVehiculeModele(vehicle.model || "");
+    setVehiculeVIN(vehicle.vin || "");
+    setVehiculeImmatriculation(vehicle.plateNumber || "");
+
+    setSearchQuery("");
+    setSearchResults([]);
+    setHasSearched(false);
+    setPendingVehicleToUse(null);
+    setShowOverwriteConfirmation(false);
+  };
+
+  const handleUseVehicleClick = (vehicle: VehicleMasterRecord) => {
+    const isFormFilled = 
+      clientNom.trim() !== "" ||
+      clientTelephone.trim() !== "" ||
+      vehiculeModele.trim() !== "" ||
+      vehiculeVIN.trim() !== "" ||
+      vehiculeImmatriculation.trim() !== "";
+
+    if (isFormFilled) {
+      setPendingVehicleToUse(vehicle);
+      setShowOverwriteConfirmation(true);
+    } else {
+      executeUseVehicle(vehicle);
+    }
+  };
   
   // Local Form state
   const [clientNom, setClientNom] = useState("");
@@ -244,10 +353,207 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
         })}
       </div>
 
+      {/* Collapsible Panel: Base véhicules NIMR */}
+      {canSearchVehicleMaster(currentUserRole) && (
+        <div className="mx-6 mt-4 border border-slate-200 rounded-lg overflow-hidden">
+          <button
+            type="button"
+            data-testid="vehicle-master-panel-toggle"
+            onClick={() => setVehicleMasterPanelOpen(!vehicleMasterPanelOpen)}
+            className="w-full px-4 py-3 bg-slate-50 flex justify-between items-center text-xs font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <Car className="w-4 h-4 text-blue-600" />
+              Base véhicules NIMR ({vehicleMasterRecords.length} véhicule(s) en local)
+            </span>
+            <span>{vehicleMasterPanelOpen ? "▲ Masquer" : "▼ Gérer / Consulter"}</span>
+          </button>
+
+          {vehicleMasterPanelOpen && (
+            <div className="p-4 bg-white space-y-4 border-t border-slate-100 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-slate-500 font-semibold">Dernier import : <span className="text-slate-800 font-bold">{vehicleMasterLastImport ? new Date(vehicleMasterLastImport).toLocaleString("fr-FR") : "Aucun"}</span></p>
+                  <p className="text-slate-400 text-[10px] mt-1">
+                    Base locale importée par l’utilisateur. Ne pas partager/exporter sans autorisation.
+                  </p>
+                </div>
+
+                {canManageVehicleMaster(currentUserRole) && (
+                  <div className="flex flex-col gap-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Importer un fichier véhicules (CSV) :</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        accept=".csv"
+                        data-testid="vehicle-master-import-input"
+                        onChange={handleImportCsvFile}
+                        className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                      />
+                      {vehicleMasterRecords.length > 0 && (
+                        <button
+                          type="button"
+                          data-testid="vehicle-master-clear-btn"
+                          onClick={() => setShowClearConfirmation(true)}
+                          className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-md font-bold transition active:scale-95 cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Vider la base
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {importResult && (
+                <div data-testid="vehicle-master-import-result" className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5 animate-fade-in">
+                  <h4 className="font-bold text-slate-800">Résultat du dernier import :</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-semibold text-slate-600">
+                    <div>Véhicules importés : <strong className="text-emerald-600">{importResult.importedCount}</strong></div>
+                    <div>Lignes ignorées : <strong className="text-amber-600">{importResult.ignoredCount}</strong></div>
+                    <div>Doublons VIN : <strong className="text-red-600">{importResult.duplicateVinCount}</strong></div>
+                    <div>Doublons Immatriculation : <strong className="text-red-600">{importResult.duplicatePlateCount}</strong></div>
+                  </div>
+
+                  {importResult.errors.length > 0 && (
+                    <div className="text-red-600 font-bold text-[10px] mt-2 space-y-0.5">
+                      <p>Erreurs détectées :</p>
+                      <ul className="list-disc list-inside">
+                        {importResult.errors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {importResult.warnings.length > 0 && (
+                    <div className="text-amber-600 font-bold text-[10px] mt-1 space-y-0.5">
+                      <p>Avertissements :</p>
+                      <ul className="list-disc list-inside">
+                        {importResult.warnings.map((warn, idx) => (
+                          <li key={idx}>{warn}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main step content */}
       <div className="p-6 min-h-[380px]">
         {currentStep === 1 && (
           <div className="space-y-4 animate-fade-in">
+            {/* Zone : Recherche véhicule NIMR */}
+            {canSearchVehicleMaster(currentUserRole) && (
+              <div data-testid="workshop-vehicle-master-search-zone" className="p-4 bg-blue-50/35 border border-blue-100 rounded-xl space-y-3">
+                <h4 className="font-bold text-blue-900 text-xs flex items-center gap-1.5 uppercase font-display">
+                  <Search className="w-4 h-4 text-blue-600" />
+                  Recherche véhicule NIMR
+                </h4>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    data-testid="vehicle-master-search-input"
+                    value={searchQuery}
+                    onChange={(e) => handleSearchVehicle(e.target.value)}
+                    placeholder="Saisir VIN, Immatriculation, Client ou Modèle..."
+                    className="flex-1 p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => handleSearchVehicle("")}
+                      className="px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition cursor-pointer"
+                    >
+                      Effacer
+                    </button>
+                  )}
+                </div>
+
+                {hasSearched && searchResults.length === 0 && (
+                  <div data-testid="vehicle-master-not-found-alert" className="p-3 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4.5 h-4.5 shrink-0 text-amber-600" />
+                    Véhicule non trouvé dans la base locale. Continuer en saisie manuelle.
+                  </div>
+                )}
+
+                {searchResults.length > 0 && (
+                  <div className="max-h-60 overflow-y-auto space-y-2 pt-1">
+                    {searchResults.map(vehicle => {
+                      const hints = getVehicleReceptionHints(vehicle, new Date());
+                      const isWarrantyActive = hints.warrantyStatus === "Garantie active";
+                      const isWarrantyExpired = hints.warrantyStatus === "Garantie expirée";
+                      const badgeColor = isWarrantyActive
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        : isWarrantyExpired
+                          ? "bg-red-100 text-red-800 border border-red-200"
+                          : "bg-slate-100 text-slate-800 border border-slate-200";
+
+                      return (
+                        <div
+                          key={vehicle.id}
+                          data-testid={`vehicle-result-row-${vehicle.id}`}
+                          className="p-3 bg-white border border-slate-150 rounded-lg hover:border-blue-200 hover:shadow-xs transition flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 text-xs"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono font-bold text-slate-800" data-testid={`vehicle-result-vin-${vehicle.id}`}>{vehicle.vin || "PAS DE VIN"}</span>
+                              {vehicle.plateNumber && (
+                                <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded font-mono font-black text-slate-700">{vehicle.plateNumber}</span>
+                              )}
+                            </div>
+                            <div className="font-semibold text-slate-600">
+                              {vehicle.brand} {vehicle.model} {vehicle.version ? `· ${vehicle.version}` : ""}
+                            </div>
+                            <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                              <span>Client : <strong className="text-slate-700">{vehicle.customerName || "Inconnu"}</strong></span>
+                              {canViewVehicleSensitiveFields(currentUserRole) && vehicle.customerPhone && (
+                                <span>Tél : <strong className="text-slate-700 font-mono" data-testid={`vehicle-result-phone-${vehicle.id}`}>{vehicle.customerPhone}</strong></span>
+                              )}
+                            </div>
+                            {hints.lastServiceInfo && (
+                              <div className="text-[10px] text-blue-700 font-bold mt-1">
+                                {hints.lastServiceInfo}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-row sm:flex-col items-end justify-between sm:justify-center gap-2">
+                            <div className="space-y-1 text-right">
+                              <span className={`px-2.5 py-1 rounded-md text-[10px] font-extrabold uppercase inline-block ${badgeColor}`}>
+                                {hints.warrantyStatus}
+                              </span>
+                              {(vehicle.warrantyPartsEndDate || vehicle.warrantyLaborEndDate) && (
+                                <div className="text-[9px] text-slate-400 font-medium leading-tight hidden sm:block">
+                                  {vehicle.warrantyPartsEndDate && <div>Garantie pièces : {vehicle.warrantyPartsEndDate}</div>}
+                                  {vehicle.warrantyLaborEndDate && <div>Garantie MO : {vehicle.warrantyLaborEndDate}</div>}
+                                </div>
+                              )}
+                            </div>
+                            {canUseVehicleForReception(currentUserRole) && (
+                              <button
+                                type="button"
+                                data-testid={`vehicle-use-btn-${vehicle.id}`}
+                                onClick={() => handleUseVehicleClick(vehicle)}
+                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[10px] font-extrabold transition active:scale-95 cursor-pointer"
+                              >
+                                Utiliser ce véhicule
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             <h3 className="font-bold text-slate-800  text-sm border-b pb-2">Informations Générales Client</h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -892,6 +1198,86 @@ export default function GuidedReception({ existingDossierIds, onAddDossier, onNa
               <Check className="w-4 h-4" />
             </button>
           )}
+        </div>
+      )}
+
+      {/* Overwrite Confirmation Modal */}
+      {showOverwriteConfirmation && pendingVehicleToUse && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Champs déjà renseignés</h3>
+                <p className="text-slate-500 text-xs mt-1">
+                  Certains champs sont déjà renseignés. Remplacer par les données du véhicule sélectionné ?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="vehicle-overwrite-cancel"
+                onClick={() => {
+                  setShowOverwriteConfirmation(false);
+                  setPendingVehicleToUse(null);
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="vehicle-overwrite-confirm"
+                onClick={() => executeUseVehicle(pendingVehicleToUse)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition cursor-pointer"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear Confirmation Modal */}
+      {showClearConfirmation && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Vider la base locale ?</h3>
+                <p className="text-slate-500 text-xs mt-1">
+                  Confirmer la suppression de la base véhicules locale ?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="vehicle-clear-cancel"
+                onClick={() => setShowClearConfirmation(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="vehicle-clear-confirm"
+                onClick={() => {
+                  onClearVehicleMaster();
+                  setImportResult(null);
+                  setSearchResults([]);
+                  setSearchQuery("");
+                  setHasSearched(false);
+                  setShowClearConfirmation(false);
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition cursor-pointer"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

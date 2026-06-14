@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/sav-core.test.ts && tsx tests/quote-import.test.ts && tsx tests/workshop-reservations.test.ts && tsx tests/complaints-workflow.test.ts && tsx tests/vehicle-status.test.ts && tsx tests/workshop-availability.test.ts",
+    "test": "tsx tests/sav-core.test.ts && tsx tests/quote-import.test.ts && tsx tests/workshop-reservations.test.ts && tsx tests/complaints-workflow.test.ts && tsx tests/vehicle-status.test.ts && tsx tests/workshop-availability.test.ts && tsx tests/vehicle-master.test.ts",
     "test:e2e": "playwright test",
     "qa:agent": "tsx tests/qa-agent.test.ts",
     "test:qa": "npm run lint && npm test && npm run build && npm run test:e2e"

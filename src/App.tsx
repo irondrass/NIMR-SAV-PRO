@@ -16,7 +16,8 @@ import {
   User,
   UserSession,
   WorkshopReservation,
-  WorkshopAvailabilityConfig
+  WorkshopAvailabilityConfig,
+  VehicleMasterRecord
 } from "./types";
 import { 
   INITIAL_DOSSIERS, 
@@ -157,6 +158,40 @@ function loadStoredAvailabilityConfig(key: string, fallback: WorkshopAvailabilit
   return fallback;
 }
 
+function loadStoredVehicleMaster(key: string): VehicleMasterRecord[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item: any) => ({
+        id: String(item.id || ""),
+        vin: item.vin ? String(item.vin) : undefined,
+        plateNumber: item.plateNumber ? String(item.plateNumber) : undefined,
+        customerName: item.customerName ? String(item.customerName) : undefined,
+        customerPhone: item.customerPhone ? String(item.customerPhone) : undefined,
+        itemNo: item.itemNo ? String(item.itemNo) : undefined,
+        brand: item.brand ? String(item.brand) : undefined,
+        model: item.model ? String(item.model) : undefined,
+        version: item.version ? String(item.version) : undefined,
+        deliveryDate: item.deliveryDate ? String(item.deliveryDate) : undefined,
+        circulationDate: item.circulationDate ? String(item.circulationDate) : undefined,
+        saleDate: item.saleDate ? String(item.saleDate) : undefined,
+        warrantyPartsEndDate: item.warrantyPartsEndDate ? String(item.warrantyPartsEndDate) : undefined,
+        warrantyLaborEndDate: item.warrantyLaborEndDate ? String(item.warrantyLaborEndDate) : undefined,
+        lastServiceDate: item.lastServiceDate ? String(item.lastServiceDate) : undefined,
+        lastServiceMileage: item.lastServiceMileage !== undefined && item.lastServiceMileage !== null ? Number(item.lastServiceMileage) : undefined,
+        energy: item.energy ? String(item.energy) : undefined,
+        source: item.source ? String(item.source) : undefined,
+        importedAt: item.importedAt ? String(item.importedAt) : undefined,
+      }));
+    }
+  } catch {
+    // Ignore
+  }
+  return [];
+}
+
 type DossierOperationalFilter = "active" | "ready_for_billing" | "delivered" | "all";
 
 export default function App() {
@@ -192,6 +227,25 @@ export default function App() {
   // Detailed selected folder id
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
 
+  // Vehicle master local database
+  const [vehicleMasterRecords, setVehicleMasterRecords] = useState<VehicleMasterRecord[]>([]);
+  const [vehicleMasterLastImport, setVehicleMasterLastImport] = useState<string | null>(null);
+
+  const handleUpdateVehicleMaster = (records: VehicleMasterRecord[]) => {
+    setVehicleMasterRecords(records);
+    localStorage.setItem(STORAGE_KEYS.vehicleMaster, JSON.stringify(records));
+    const importTime = new Date().toISOString();
+    setVehicleMasterLastImport(importTime);
+    localStorage.setItem(STORAGE_KEYS.vehicleMasterLastImport, importTime);
+  };
+
+  const handleClearVehicleMaster = () => {
+    setVehicleMasterRecords([]);
+    localStorage.removeItem(STORAGE_KEYS.vehicleMaster);
+    setVehicleMasterLastImport(null);
+    localStorage.removeItem(STORAGE_KEYS.vehicleMasterLastImport);
+  };
+
   // Import feedback states
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
   const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
@@ -212,6 +266,8 @@ export default function App() {
     setTechList(loadStoredArray(STORAGE_KEYS.techs, MOCK_TECHNICIENS, isTechnicienResource));
     setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, INITIAL_ACTIVITE_LOGS, isActiviteLog));
     setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
+    setVehicleMasterRecords(loadStoredVehicleMaster(STORAGE_KEYS.vehicleMaster));
+    setVehicleMasterLastImport(localStorage.getItem(STORAGE_KEYS.vehicleMasterLastImport) || null);
 
     const defaultAvail: WorkshopAvailabilityConfig = {
       schedule: getDefaultWorkshopSchedule(),
@@ -735,6 +791,11 @@ export default function App() {
                   onNavigateToTab={(tab) => {
                     goToTab(tab);
                   }}
+                  vehicleMasterRecords={vehicleMasterRecords}
+                  vehicleMasterLastImport={vehicleMasterLastImport}
+                  onUpdateVehicleMaster={handleUpdateVehicleMaster}
+                  onClearVehicleMaster={handleClearVehicleMaster}
+                  currentUserRole={activeRole}
                 />
               )}
 

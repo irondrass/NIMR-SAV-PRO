@@ -417,3 +417,45 @@ export interface WorkshopAvailabilityConfig {
   holidays: WorkshopHoliday[];
 }
 
+export interface VehicleMasterRecord {
+  id: string;
+  vin?: string;
+  plateNumber?: string;
+  customerName?: string;
+  customerPhone?: string;
+  itemNo?: string;
+  brand?: string;
+  model?: string;
+  version?: string;
+  deliveryDate?: string;
+  circulationDate?: string;
+  saleDate?: string;
+  warrantyPartsEndDate?: string;
+  warrantyLaborEndDate?: string;
+  lastServiceDate?: string;
+  lastServiceMileage?: number;
+  energy?: string;
+  source?: string;
+  importedAt?: string;
+}
+
+export type VehicleWarrantyStatus = "Garantie active" | "Garantie expirée" | "Garantie inconnue";
+
+export interface VehicleReceptionHint {
+  warrantyStatus: VehicleWarrantyStatus;
+  lastServiceInfo?: string;
+  hasActiveWarranty: boolean;
+  recommendedService?: string;
+}
+
+export interface VehicleMasterImportResult {
+  records: VehicleMasterRecord[];
+  importedCount: number;
+  ignoredCount: number;
+  duplicateVinCount: number;
+  duplicatePlateCount: number;
+  errors: string[];
+  warnings: string[];
+}
+
+
