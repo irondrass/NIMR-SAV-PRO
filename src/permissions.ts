@@ -158,4 +158,32 @@ export function canExportSavReports(role: UserRole): boolean {
   return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
 }
 
+export function canPerformQC(role: UserRole): boolean {
+  return role === UserRole.CONTROLE_QUALITE || role === UserRole.CHEF_ATELIER || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canAcceptQC(role: UserRole): boolean {
+  return role === UserRole.CONTROLE_QUALITE || role === UserRole.CHEF_ATELIER || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canRefuseQC(role: UserRole): boolean {
+  return role === UserRole.CONTROLE_QUALITE || role === UserRole.CHEF_ATELIER || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canViewQcDashboard(role: UserRole): boolean {
+  return role === UserRole.CONTROLE_QUALITE || role === UserRole.CHEF_ATELIER || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canPerformDelivery(role: UserRole): boolean {
+  return role === UserRole.LIVRAISON || role === UserRole.RECEPTIONNAIRE || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canConfirmDelivery(role: UserRole): boolean {
+  return role === UserRole.LIVRAISON || role === UserRole.RECEPTIONNAIRE || role === UserRole.DIRECTEUR_SAV;
+}
+
+export function canViewDeliveryDashboard(role: UserRole): boolean {
+  return role === UserRole.LIVRAISON || role === UserRole.RECEPTIONNAIRE || role === UserRole.DIRECTEUR_SAV;
+}
+
 

@@ -1267,8 +1267,9 @@ export default function WorkshopPlanning({
                 // Calculate total active/planned hours today
                 const dailyLoad = calculateTechnicianDailyLoad(tech.id, selectedDateStr, dossiers);
                 const maxCap = isClosedDay ? 0 : isSat ? 4 : 8;
-                const chargePercent = Math.min(100, Math.round((dailyLoad / maxCap) * 100));
-                const isOverloaded = dailyLoad > maxCap;
+                const chargePercent = maxCap > 0 ? Math.min(100, Math.round((dailyLoad / maxCap) * 100)) : 0;
+                const chargePercentText = maxCap > 0 ? `${chargePercent}%` : "Non mesurable";
+                const isOverloaded = maxCap > 0 && dailyLoad > maxCap;
 
                 // Determine availability status
                 const isNonDisponible = tech.disponibilite === "absent" || tech.disponibilite === "formation";
@@ -1356,7 +1357,7 @@ export default function WorkshopPlanning({
                       <div className="flex justify-between items-center text-[9px] text-gray-500 pt-0.5">
                         <span>Charge : <strong className="text-gray-700">{dailyLoad}H</strong></span>
                         <span data-testid={`tech-charge-${tech.id}`} className={`font-mono font-bold ${isOverloaded ? "text-red-500 font-black" : ""}`}>
-                          {chargePercent}%{isOverloaded && " (Surcharge)"}
+                          {chargePercentText}{isOverloaded && " (Surcharge)"}
                         </span>
                       </div>
                     </div>

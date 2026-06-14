@@ -73,6 +73,8 @@ import LoginView from "./components/LoginView";
 import UserManagementView from "./components/UserManagementView";
 import { KanbanBoard } from "./components/KanbanBoard";
 import { StatusBadge, PriorityBadge } from "./components/UIParts";
+import ControleQualiteView from "./components/ControleQualiteView";
+import LivraisonView from "./components/LivraisonView";
 
 // Icons
 import { 
@@ -96,7 +98,9 @@ import {
   Lock,
   LogOut,
   Plus,
-  UserCog
+  UserCog,
+  Truck,
+  ClipboardCheck
 } from "lucide-react";
 
 function writeLocalStorageValue(key: string, value: string) {
@@ -643,6 +647,8 @@ export default function App() {
               { id: "atelier-kanban", label: "Kanban Atelier", icon: ClipboardList },
               { id: "chef-atelier", label: "Chef d'atelier", icon: Wrench },
               { id: "tech-view", label: "Mode Technicien", icon: UserCheck },
+              { id: "controle-qualite", label: "Contrôle Qualité", icon: ClipboardCheck },
+              { id: "livraison", label: "Livraison SAV", icon: Truck },
               { id: "reclamations", label: "Réclamations SAV", icon: ShieldAlert },
               { id: "rendements-sav", label: "Rapports SAV", icon: BarChart3 },
               { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal },
@@ -660,6 +666,8 @@ export default function App() {
                 "atelier-planning": "nav-planning",
                 "chef-atelier": "nav-chef-atelier",
                 "tech-view": "nav-technician",
+                "controle-qualite": "nav-controle-qualite",
+                "livraison": "nav-livraison",
                 "parametres": "nav-settings",
                 "atelier-kanban": "nav-kanban",
                 "reclamations": "nav-reclamations",
@@ -778,6 +786,8 @@ export default function App() {
                 <DirectorDashboard 
                   dossiers={dossiers} 
                   techniciens={techList}
+                  reservations={reservations}
+                  availabilityConfig={availabilityConfig}
                   onSelectDossier={(id) => {
                     setSelectedDossierId(id);
                   }}
@@ -992,6 +1002,22 @@ export default function App() {
                   dossiers={dossiers}
                   techniciens={techList}
                   onUpdateDossier={handleUpdateDossier}
+                />
+              )}
+
+              {activeTab === "controle-qualite" && (
+                <ControleQualiteView 
+                  dossiers={dossiers}
+                  onUpdateDossier={handleUpdateDossier}
+                  currentUser={{ displayName: currentUser.displayName, role: activeRole }}
+                />
+              )}
+
+              {activeTab === "livraison" && (
+                <LivraisonView 
+                  dossiers={dossiers}
+                  onUpdateDossier={handleUpdateDossier}
+                  currentUser={{ displayName: currentUser.displayName, role: activeRole }}
                 />
               )}
 

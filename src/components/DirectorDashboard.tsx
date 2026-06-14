@@ -23,12 +23,14 @@ import {
   DashboardPeriod,
   DashboardTone,
 } from "../dashboard-kpis";
-import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource } from "../types";
+import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
 import { LicencePlate, PriorityBadge } from "./UIParts";
 
 interface DirectorDashboardProps {
   dossiers: DossierSAV[];
   techniciens: TechnicienResource[];
+  reservations?: WorkshopReservation[];
+  availabilityConfig?: WorkshopAvailabilityConfig;
   onSelectDossier: (id: string) => void;
 }
 
@@ -49,7 +51,7 @@ const toneClasses: Record<DashboardTone, { border: string; bg: string; text: str
   violet: { border: "border-violet-200", bg: "bg-violet-50", text: "text-violet-900", icon: "text-violet-600" },
 };
 
-export default function DirectorDashboard({ dossiers, techniciens, onSelectDossier }: DirectorDashboardProps) {
+export default function DirectorDashboard({ dossiers, techniciens, reservations, availabilityConfig, onSelectDossier }: DirectorDashboardProps) {
   const [period, setPeriod] = useState<DashboardPeriod>("all");
   const [status, setStatus] = useState<DossierStatus | "all">("all");
   const [technicianId, setTechnicianId] = useState<string | "all">("all");
@@ -72,8 +74,10 @@ export default function DirectorDashboard({ dossiers, techniciens, onSelectDossi
   const kpis = useMemo(() => buildDirectorDashboardKpis({
     dossiers: filteredDossiersForKpis,
     techniciens,
+    reservations,
+    availabilityConfig,
     filters: { period, status, technicianId, priority },
-  }), [filteredDossiersForKpis, period, priority, status, technicianId, techniciens]);
+  }), [filteredDossiersForKpis, period, priority, status, technicianId, techniciens, reservations, availabilityConfig]);
   const activeActivityCards = kpis.activity.cards.slice(0, 4);
   const erpActivityCards = kpis.activity.cards.slice(4);
 
@@ -188,7 +192,7 @@ export default function DirectorDashboard({ dossiers, techniciens, onSelectDossi
               testId="kpi-workshop-occupancy"
               label="Occupation atelier"
               value={kpis.workshop.occupancyLabel}
-              detail={kpis.workshop.planningSaturated ? "Planning saturé" : "Capacité lisible"}
+              detail={`Capacité réelle • Planifié: ${kpis.workshop.plannedLoadLabel} | Réservé: ${kpis.workshop.reservedLoadLabel}`}
             />
             <InfoTile
               testId="kpi-estimated-vs-spent"

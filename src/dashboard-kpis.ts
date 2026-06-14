@@ -4,7 +4,8 @@
  */
 
 import { canDeliverDossier, normalizeRepairOrderStatus } from "./sav-core";
-import { DossierPriority, DossierSAV, DossierStatus, RepairOrderLine, TechnicienResource } from "./types";
+import { DossierPriority, DossierSAV, DossierStatus, RepairOrderLine, TechnicienResource, WorkshopReservation, WorkshopAvailabilityConfig } from "./types";
+import { isWorkshopClosed, isTechnicianAbsent, isBayUnavailable } from "./workshop-availability";
 
 export type DashboardPeriod = "today" | "week" | "month" | "all";
 
@@ -19,6 +20,8 @@ export interface DashboardKpiFilters {
 export interface DirectorDashboardKpiInput {
   dossiers: DossierSAV[];
   techniciens: TechnicienResource[];
+  reservations?: WorkshopReservation[];
+  availabilityConfig?: WorkshopAvailabilityConfig;
   filters?: DashboardKpiFilters;
 }
 
@@ -98,6 +101,10 @@ export interface DirectorDashboardKpis {
   workshop: {
     occupancyRate: number | null;
     occupancyLabel: string;
+    plannedLoadRate: number | null;
+    plannedLoadLabel: string;
+    reservedLoadRate: number | null;
+    reservedLoadLabel: string;
     technicianLoad: DashboardLoadItem[];
     bayLoad: DashboardLoadItem[];
     estimatedHours: number;
@@ -162,7 +169,7 @@ export function buildDirectorDashboardKpis(input: DirectorDashboardKpiInput): Di
     dossier.statut === DossierStatus.LIVRE && dossier.livraison.clotureInterne === true
   )).length;
 
-  const workshop = buildWorkshopKpis(filteredDossiers, input.techniciens, range, now);
+  const workshop = buildWorkshopKpis(filteredDossiers, input.techniciens, range, now, input.reservations, input.availabilityConfig);
   const quality = buildQualityKpis(filteredDossiers);
   const alerts = buildAlerts(filteredDossiers, input.techniciens, workshop, now);
 
@@ -298,11 +305,12 @@ function buildWorkshopKpis(
   dossiers: DossierSAV[],
   techniciens: TechnicienResource[],
   range: DateRange,
-  now: Date
+  now: Date,
+  reservations?: WorkshopReservation[],
+  availabilityConfig?: WorkshopAvailabilityConfig
 ): DirectorDashboardKpis["workshop"] {
   const estimatedHours = sum(dossiers.flatMap(dossier => dossier.ordresReparation.map(line => line.tempsEstime)));
   const spentHours = sum(dossiers.flatMap(dossier => dossier.ordresReparation.map(line => line.tempsPasse)));
-  const workdayCount = getCapacityDayCount(dossiers, range);
   const technicianHours = new Map<string, number>();
   const bayHours = new Map<string, number>();
   const lateTasks: DashboardTaskRef[] = [];
@@ -331,7 +339,7 @@ function buildWorkshopKpis(
 
   const technicianLoad = techniciens.map(technician => {
     const hours = roundHours(technicianHours.get(technician.id) ?? 0);
-    const capacityHours = Math.max(0, technician.capaciteJournaliere * workdayCount);
+    const capacityHours = calculateTechEffectiveCapacity(technician.id, technician.capaciteJournaliere, range, dossiers, availabilityConfig);
     const percent = capacityHours > 0 ? Math.round((hours / capacityHours) * 100) : null;
     return {
       id: technician.id,
@@ -357,7 +365,7 @@ function buildWorkshopKpis(
   }
 
   const bayLoad = Array.from(bayHours.entries()).map(([bayId, hours]) => {
-    const capacityHours = 8 * workdayCount;
+    const capacityHours = calculateBayEffectiveCapacity(bayId, range, dossiers, availabilityConfig);
     const roundedHours = roundHours(hours);
     const percent = capacityHours > 0 ? Math.round((roundedHours / capacityHours) * 100) : null;
     return {
@@ -370,13 +378,63 @@ function buildWorkshopKpis(
     };
   });
 
-  const totalCapacity = techniciens.reduce((total, technician) => total + technician.capaciteJournaliere * workdayCount, 0);
+  // Calculate Capacity
+  const totalCapacity = calculateEffectiveCapacity(techniciens, range, dossiers, availabilityConfig);
+  
+  // 1. Planned Load
   const plannedHours = sum(Array.from(technicianHours.values()));
-  const occupancyRate = totalCapacity > 0 ? Math.round((plannedHours / totalCapacity) * 100) : null;
+  const plannedLoadRate = totalCapacity > 0 
+    ? (plannedHours > 0 ? Math.max(1, Math.round((plannedHours / totalCapacity) * 100)) : 0) 
+    : null;
+  const plannedLoadLabel = plannedLoadRate === null ? NON_MEASURABLE : `${plannedLoadRate}%`;
+
+  // 2. Reserved Load
+  let reservedHours = 0;
+  if (reservations) {
+    const activeRes = reservations.filter(res => 
+      res.status === "RESERVATION_CONFIRMEE" || 
+      res.status === "AFFECTEE_ATELIER" || 
+      res.status === "CRENEAU_PROPOSE"
+    );
+    const filteredRes = activeRes.filter(res => {
+      if (!range) return true;
+      const rDate = parseDate(`${res.desiredDate}T12:00:00.000Z`);
+      return Boolean(rDate && rDate.getTime() >= range.start.getTime() && rDate.getTime() < range.end.getTime());
+    });
+    reservedHours = sum(filteredRes.map(res => res.totalHours));
+  }
+  const reservedLoadRate = totalCapacity > 0 
+    ? (reservedHours > 0 ? Math.max(1, Math.round((reservedHours / totalCapacity) * 100)) : 0) 
+    : null;
+  const reservedLoadLabel = reservedLoadRate === null ? NON_MEASURABLE : `${reservedLoadRate}%`;
+
+  // 3. In Progress tasks with no Gantt segments
+  let inProgressNoPlanningHours = 0;
+  for (const dossier of dossiers) {
+    for (const line of dossier.ordresReparation) {
+      if (normalizeRepairOrderStatus(line.status) === "in_progress") {
+        const segments = getPlanningSegments(line);
+        if (segments.length === 0) {
+          inProgressNoPlanningHours += line.tempsEstime;
+        }
+      }
+    }
+  }
+
+  // 4. Combined Occupancy
+  const usedCapacityHours = plannedHours + reservedHours + inProgressNoPlanningHours;
+  const occupancyRate = totalCapacity > 0 
+    ? (usedCapacityHours > 0 ? Math.max(1, Math.round((usedCapacityHours / totalCapacity) * 100)) : 0) 
+    : null;
+  const occupancyLabel = occupancyRate === null ? NON_MEASURABLE : `${occupancyRate}%`;
 
   return {
     occupancyRate,
-    occupancyLabel: occupancyRate === null ? NON_MEASURABLE : `${occupancyRate}%`,
+    occupancyLabel,
+    plannedLoadRate,
+    plannedLoadLabel,
+    reservedLoadRate,
+    reservedLoadLabel,
     technicianLoad: technicianLoad.sort((left, right) => right.hours - left.hours),
     bayLoad: bayLoad.sort((left, right) => right.hours - left.hours),
     estimatedHours: roundHours(estimatedHours),
@@ -385,6 +443,161 @@ function buildWorkshopKpis(
     blockedTasks,
     planningSaturated: technicianLoad.some(item => item.alert) || bayLoad.some(item => item.alert),
   };
+}
+
+function calculateEffectiveCapacity(
+  techniciens: TechnicienResource[],
+  range: DateRange,
+  dossiers: DossierSAV[],
+  availabilityConfig?: WorkshopAvailabilityConfig
+): number {
+  const defaultCapacity = () => {
+    const workdayCount = getCapacityDayCount(dossiers, range);
+    return techniciens.reduce((total, t) => total + t.capaciteJournaliere * workdayCount, 0);
+  };
+
+  if (!availabilityConfig) {
+    return defaultCapacity();
+  }
+
+  const days: Date[] = [];
+  if (range) {
+    const cursor = new Date(range.start);
+    while (cursor.getTime() < range.end.getTime()) {
+      days.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else {
+    const dateKeys = new Set<string>();
+    for (const dossier of dossiers) {
+      for (const line of dossier.ordresReparation) {
+        for (const segment of getPlanningSegments(line)) {
+          const start = parseDate(segment.start);
+          if (start) dateKeys.add(start.toISOString().slice(0, 10));
+        }
+      }
+    }
+    for (const dateKey of dateKeys) {
+      const d = parseDate(`${dateKey}T10:00:00.000Z`);
+      if (d) days.push(d);
+    }
+  }
+
+  if (days.length === 0) {
+    return defaultCapacity();
+  }
+
+  let capacitySum = 0;
+  for (const day of days) {
+    if (isWorkshopClosed(day, availabilityConfig)) {
+      continue;
+    }
+    const isSat = day.getDay() === 6;
+    const isSun = day.getDay() === 0;
+    if (isSun) continue;
+
+    for (const tech of techniciens) {
+      if (isTechnicianAbsent(tech.id, day, availabilityConfig)) {
+        continue;
+      }
+      let dayCap = tech.capaciteJournaliere;
+      if (isSat) {
+        dayCap = Math.max(0, dayCap / 2);
+      }
+      capacitySum += dayCap;
+    }
+  }
+
+  return capacitySum;
+}
+
+function calculateTechEffectiveCapacity(
+  techId: string,
+  techDailyCap: number,
+  range: DateRange,
+  dossiers: DossierSAV[],
+  availabilityConfig?: WorkshopAvailabilityConfig
+): number {
+  if (!availabilityConfig) {
+    const workdayCount = getCapacityDayCount(dossiers, range);
+    return techDailyCap * workdayCount;
+  }
+  const days: Date[] = [];
+  if (range) {
+    const cursor = new Date(range.start);
+    while (cursor.getTime() < range.end.getTime()) {
+      days.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else {
+    const dateKeys = new Set<string>();
+    for (const dossier of dossiers) {
+      for (const line of dossier.ordresReparation) {
+        for (const segment of getPlanningSegments(line)) {
+          const start = parseDate(segment.start);
+          if (start) dateKeys.add(start.toISOString().slice(0, 10));
+        }
+      }
+    }
+    for (const dateKey of dateKeys) {
+      const d = parseDate(`${dateKey}T10:00:00.000Z`);
+      if (d) days.push(d);
+    }
+  }
+  let capacitySum = 0;
+  for (const day of days) {
+    if (isWorkshopClosed(day, availabilityConfig)) continue;
+    if (day.getDay() === 0) continue;
+    if (isTechnicianAbsent(techId, day, availabilityConfig)) continue;
+    let dayCap = techDailyCap;
+    if (day.getDay() === 6) dayCap = Math.max(0, dayCap / 2);
+    capacitySum += dayCap;
+  }
+  return capacitySum;
+}
+
+function calculateBayEffectiveCapacity(
+  bayId: string,
+  range: DateRange,
+  dossiers: DossierSAV[],
+  availabilityConfig?: WorkshopAvailabilityConfig
+): number {
+  if (!availabilityConfig) {
+    const workdayCount = getCapacityDayCount(dossiers, range);
+    return 8 * workdayCount;
+  }
+  const days: Date[] = [];
+  if (range) {
+    const cursor = new Date(range.start);
+    while (cursor.getTime() < range.end.getTime()) {
+      days.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else {
+    const dateKeys = new Set<string>();
+    for (const dossier of dossiers) {
+      for (const line of dossier.ordresReparation) {
+        for (const segment of getPlanningSegments(line)) {
+          const start = parseDate(segment.start);
+          if (start) dateKeys.add(start.toISOString().slice(0, 10));
+        }
+      }
+    }
+    for (const dateKey of dateKeys) {
+      const d = parseDate(`${dateKey}T10:00:00.000Z`);
+      if (d) days.push(d);
+    }
+  }
+  let capacitySum = 0;
+  for (const day of days) {
+    if (isWorkshopClosed(day, availabilityConfig)) continue;
+    if (day.getDay() === 0) continue;
+    if (isBayUnavailable(bayId, day, availabilityConfig)) continue;
+    let dayCap = 8;
+    if (day.getDay() === 6) dayCap = 4;
+    capacitySum += dayCap;
+  }
+  return capacitySum;
 }
 
 function buildQualityKpis(dossiers: DossierSAV[]): DirectorDashboardKpis["quality"] {
@@ -546,14 +759,76 @@ function buildDelayMetric(
   };
 }
 
-function extractDossierTiming(dossier: DossierSAV): DossierTiming {
-  return {
-    reception: parseDate(dossier.dateReception),
-    workStart: getWorkStartDate(dossier),
-    workEnd: getWorkEndDate(dossier),
-    qc: parseDate(dossier.checklistQC.dateValidation),
-    delivery: parseDate(dossier.livraison.dateLivraisonReelle),
-  };
+function getLogDate(logs: string[] | undefined, predicate: (msg: string) => boolean): Date | null {
+  if (!logs) return null;
+  const dates: Date[] = [];
+  for (const log of logs) {
+    const trimmed = log.trim();
+    const firstDash = trimmed.indexOf(" - ");
+    if (firstDash !== -1) {
+      const datePart = trimmed.slice(0, firstDash).trim();
+      const rest = trimmed.slice(firstDash + 3).trim();
+      let msgStr = rest;
+      if (rest.startsWith("[")) {
+        const endBracket = rest.indexOf("]");
+        if (endBracket !== -1) {
+          const afterBracket = rest.slice(endBracket + 1).trim();
+          msgStr = afterBracket.startsWith("-") ? afterBracket.slice(1).trim() : afterBracket;
+        }
+      } else {
+        const secondDash = rest.indexOf(" - ");
+        if (secondDash !== -1) {
+          msgStr = rest.slice(secondDash + 3).trim();
+        }
+      }
+      if (predicate(msgStr.toLowerCase())) {
+        const d = new Date(datePart);
+        if (Number.isFinite(d.getTime())) {
+          dates.push(d);
+        }
+      }
+    }
+  }
+  return dates.length > 0 ? minDate(dates) : null;
+}
+
+export function extractDossierTiming(dossier: DossierSAV): DossierTiming {
+  const logs = dossier.historiqueLogs;
+  
+  // Reception
+  let reception = parseDate(dossier.dateReception);
+  if (!reception && (dossier as any).createdAt) {
+    reception = parseDate((dossier as any).createdAt);
+  }
+  if (!reception) {
+    reception = getLogDate(logs, msg => msg.includes("créé") || msg.includes("création") || msg.includes("creation") || msg.includes("reception") || msg.includes("réception"));
+  }
+
+  // WorkStart
+  let workStart = getWorkStartDate(dossier);
+  if (!workStart) {
+    workStart = getLogDate(logs, msg => msg.includes("démarr") || msg.includes("commenc") || msg.includes("travaux") || msg.includes("début"));
+  }
+
+  // WorkEnd
+  let workEnd = getWorkEndDate(dossier);
+  if (!workEnd) {
+    workEnd = getLogDate(logs, msg => msg.includes("termin") || msg.includes("fin de tâche") || msg.includes("fin des travaux") || msg.includes("prêt à livrer"));
+  }
+
+  // QC
+  let qc = parseDate(dossier.checklistQC.dateValidation);
+  if (!qc) {
+    qc = getLogDate(logs, msg => (msg.includes("qc") || msg.includes("qualité") || msg.includes("qualite")) && (msg.includes("valid") || msg.includes("accept") || msg.includes("valide") || msg.includes("ok")));
+  }
+
+  // Delivery
+  let delivery = parseDate(dossier.livraison.dateLivraisonReelle);
+  if (!delivery) {
+    delivery = getLogDate(logs, msg => msg.includes("livr") || msg.includes("remis") || msg.includes("clôtur") || msg.includes("clotur"));
+  }
+
+  return { reception, workStart, workEnd, qc, delivery };
 }
 
 function getWorkStartDate(dossier: DossierSAV): Date | null {

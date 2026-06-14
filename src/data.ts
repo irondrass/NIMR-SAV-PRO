@@ -433,6 +433,75 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     prochaineActionRecommended: "Compléter la checklist de contrôle qualité par l'essayeur",
     dateDernierStatut: "2026-06-09T14:45:00Z",
     avancementGlobal: 85
+  },
+  {
+    id: "NIMR-2026-006",
+    clientNom: "Client Démo 006",
+    clientTelephone: "+216 20 000 006",
+    deposantNom: "Client Démo 006",
+    deposantTelephone: "+216 20 000 006",
+    vehiculeMarque: "Forthing",
+    vehiculeModele: "U-Tour (Monospace)",
+    vehiculeImmatriculation: "000 TU 0006",
+    vehiculeVIN: "DEMOVIN000000006",
+    vehiculeKilometrage: 10500,
+    vehiculeCouleur: "Bleu Océan",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Entretien des 10 000 km réglementaire selon les préconisations NIMR.",
+    observationsReception: "Véhicule en excellent état, pas de chocs.",
+    photosAvant: [],
+    niveauCarburant: 45,
+    etatCarrosserie: {
+      rayures: false,
+      bosses: false,
+      fissureParbrise: false,
+      jantesAbimees: false,
+      autresNotes: "R.A.S."
+    },
+    objetsLaisses: [],
+    dateReception: "2026-06-10T08:00:00Z",
+    dateSouhaiteeLivraison: "2026-06-10T12:00:00Z",
+    statut: DossierStatus.LIVRE,
+    technicienId: "tech_01",
+    zoneAtelier: AtelierZone.MECANIQUE_RAPIDE,
+    ordresReparation: [
+      { id: "ro_15", designation: "Vidange moteur + remplacement filtre à huile", tempsEstime: 0.8, tempsPasse: 0.8, status: "done" }
+    ],
+    complements: [],
+    accords: [],
+    checklistQC: {
+      essaiEffectue: true,
+      defautRepare: true,
+      aucunVoyantAllume: true,
+      niveauxVerifies: true,
+      serrageSecurite: true,
+      propreteVehicule: true,
+      documentsPrets: true,
+      photosApresOk: true,
+      validationGlobale: "valide",
+      dateValidation: "2026-06-10T10:30:00Z"
+    },
+    livraison: {
+      controleQualiteOk: true,
+      clientInforme: true,
+      dateLivraisonPrevue: "2026-06-10T12:00:00Z",
+      dateLivraisonReelle: "2026-06-10T11:15:00Z",
+      remarquesLivraison: "Restitution effectuée en mains propres. Kilométrage de sortie vérifié.",
+      confirmationReceptionClient: true,
+      clotureInterne: true,
+      kilometrageSortie: 10505
+    },
+    prochaineActionRecommended: "Dossier entièrement livré et clôturé.",
+    dateDernierStatut: "2026-06-10T11:15:00Z",
+    avancementGlobal: 100,
+    historiqueLogs: [
+      "2026-06-10T11:15:00.000Z - [LIVRAISON] - Restitution validée. Dossier statut mis à LIVRE. KM Sortie: 10505.",
+      "2026-06-10T10:30:00.000Z - [CONTROLE_QUALITE] - Validation QC positive.",
+      "2026-06-10T10:15:00.000Z - Tâche \"Vidange moteur + remplacement filtre à huile\" terminée",
+      "2026-06-10T09:30:00.000Z - Tâche \"Vidange moteur + remplacement filtre à huile\" démarrée",
+      "2026-06-10T08:00:00.000Z - [RECEPTIONNAIRE] - Dossier créé pour Forthing U-Tour."
+    ]
   }
 ];
 

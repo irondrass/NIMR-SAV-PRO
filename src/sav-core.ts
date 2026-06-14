@@ -470,6 +470,7 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
         bloqueRaison: "",
         prochaineActionRecommended: "Terminer la tâche en cours avant d'en démarrer une autre",
       },
+      dossierLog: `Tâche "${line.designation}" ${status === "paused" ? "reprise" : "démarrée"}`,
     };
   });
 }
@@ -518,6 +519,7 @@ export function pauseRepairOrder(dossiers: DossierSAV[], dossierId: string, line
         statut: DossierStatus.TRAVAUX_PLANIFIES,
         prochaineActionRecommended: "Reprendre la tâche suspendue ou affecter une autre intervention",
       },
+      dossierLog: `Tâche "${line.designation}" suspendue`,
     };
   });
 }
@@ -527,6 +529,7 @@ export function blockRepairOrder(
   dossierId: string,
   lineId: string,
   reason = "Blocage technique atelier",
+  userRole: UserRole = UserRole.TECHNICIEN,
   now = new Date()
 ): TaskMutationResult {
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
@@ -541,6 +544,7 @@ export function blockRepairOrder(
         bloqueRaison: reason,
         prochaineActionRecommended: `Lever le blocage atelier: ${reason}`,
       },
+      dossierLog: `[${userRole}] - Blocage Tâche "${line.designation}" - Motif: ${reason}`,
     };
   });
 }
@@ -567,6 +571,7 @@ export function finishRepairOrder(dossiers: DossierSAV[], dossierId: string, lin
           ? "Lancer le contrôle qualité d'essai routier"
           : "Continuer les ordres de réparation restants",
       },
+      dossierLog: `Tâche "${line.designation}" terminée`,
     };
   });
 }
@@ -1147,9 +1152,9 @@ export function submitQualityControl(
   return {
     ...dossier,
     checklistQC: updatedQC,
-    statut: DossierStatus.BLOQUE,
-    prochaineActionRecommended: `Alerte: Retour atelier suite à refus contrôle qualité. Motif: ${comment}`,
-    bloqueRaison: `Refus qualité: ${comment}`,
+    statut: DossierStatus.EN_TRAVAUX,
+    prochaineActionRecommended: `Retour atelier suite à refus contrôle qualité. Motif: ${comment}`,
+    bloqueRaison: "",
     dateDernierStatut: now.toISOString(),
   };
 }

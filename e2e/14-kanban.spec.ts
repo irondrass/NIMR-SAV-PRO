@@ -33,7 +33,8 @@ test.describe("Lot 4A - Kanban Board visual", () => {
     await expect(page.locator("text=1. Réceptionnés (1)")).toBeVisible();
     await expect(page.locator("text=2. En travaux (1)")).toBeVisible();
     await expect(page.locator("text=3. Bloqués (1)")).toBeVisible();
-    await expect(page.locator("text=4. À livrer (1)")).toBeVisible();
+    await expect(page.locator("text=4. Contrôle Qualité (0)")).toBeVisible();
+    await expect(page.locator("text=5. Prêt à livrer (1)")).toBeVisible();
 
     // Check dossier IDs and client names are shown inside columns
     await expect(page.locator("text=Client K1")).toBeVisible();

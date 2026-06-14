@@ -139,7 +139,7 @@ test.describe("Rôle : Contrôle Qualité", () => {
     // Modal should close
     await expect(modal).toHaveCount(0);
  
-    // Verify status has updated to Bloqué
-    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: "Bloqué" })).toBeVisible();
+    // Verify status has updated to En travaux
+    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: "En travaux" })).toBeVisible();
   });
 });

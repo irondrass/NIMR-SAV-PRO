@@ -154,9 +154,9 @@ function testQualityControl() {
   assert.equal(accepted.bloqueRaison, "");
 
   const rejected = submitQualityControl(dossier, UserRole.CONTROLE_QUALITE, "refuse", "Voyant ABS", fixedNow);
-  assert.equal(rejected.statut, DossierStatus.BLOQUE);
+  assert.equal(rejected.statut, DossierStatus.EN_TRAVAUX);
   assert.equal(rejected.checklistQC.validationGlobale, "refuse");
-  assert.equal(rejected.bloqueRaison, "Refus qualité: Voyant ABS");
+  assert.equal(rejected.bloqueRaison, "");
 }
 
 function testDeliveryAndBilling() {
@@ -490,7 +490,7 @@ function testRoleTabsAndPermissions() {
   assert.equal(getDefaultTabForRole(UserRole.DIRECTEUR_SAV), "dashboard");
   assert.equal(getDefaultTabForRole(UserRole.RECEPTIONNAIRE), "reception-rapide");
   assert.equal(getDefaultTabForRole(UserRole.TECHNICIEN), "tech-view");
-  assert.equal(getDefaultTabForRole(UserRole.LIVRAISON), "dossiers-liste");
+  assert.equal(getDefaultTabForRole(UserRole.LIVRAISON), "livraison");
 
   assert.equal(canAccessTab(UserRole.CHEF_ATELIER, "chef-atelier"), true);
   assert.equal(canAccessTab(UserRole.CHEF_ATELIER, "parametres"), false);

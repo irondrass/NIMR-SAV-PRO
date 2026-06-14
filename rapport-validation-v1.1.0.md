@@ -403,38 +403,81 @@ Le Lot 5F-5 implémente une base de données locale des véhicules vendus par NI
 
 ---
 
-## 13. Résultats de la Validation Globale
+## 13. Lot 6 : Historique & Rapports SAV Opérationnels
 
-Le pipeline complet de validation locale a été exécuté et validé avec succès :
+Nous avons développé un module d'historique et rapports opérationnels permettant d'analyser l'activité de l'atelier sans aucune dimension financière :
+* **Module pur Rapports** (`src/sav-reports.ts`) : implémentation de fonctions pures pour construire les rapports de Réception, Atelier, Planning, Contrôle Qualité, Livraison, Réclamations et Blocages.
+* **Historique Véhicule & Dossier** : Reconstruction chronologique unifiée de toutes les actions enregistrées sur un véhicule ou un dossier à partir des logs d'activité.
+* **Interface "Rapports SAV"** : Intégration de l'onglet dans la navigation globale avec filtres par période, statut de dossier, technicien, pont, et type d'intervention.
+* **Zéro Finance** : Absence totale de concepts de chiffre d'affaires, marges, prix, coûts, caisse ou facturation réelle, assurant un périmètre purement opérationnel.
+
+---
+
+## 14. Lot 6B : Recette Terrain & Corrections P0 avant Release
+
+Nous avons résolu les 5 blocages terrain P0 identifiés lors de l'audit d'intégration :
+1. **BUG-001 — NaN% Charge Techniciens** :
+   - Sécurisation du calcul de charge dans le Gantt.
+   - En cas de capacité nulle ou absente (ex: dimanche), affichage de `"Non mesurable"` ou `"0%"`.
+   - Si charge > 0 avec capacité absente, aucun pourcentage faux n'est généré.
+2. **BUG-002 — Occupation Atelier 0%** :
+   - Prise en compte de la charge planifiée (Gantt segments), de la charge réservée (confirmée/affectée) et des tâches en cours non planifiées (temps estimé validé).
+   - Intégration de `availabilityConfig` pour le calcul de la capacité effective.
+   - Forçage à au moins 1% d'occupation réelle dès qu'une charge active existe (aucun affichage de 0% par arrondi).
+   - Correction orthographique de `"Capacité lisible"` en `"Capacité réelle"`.
+3. **BUG-003 — Délais "Non mesurable"** :
+   - Exploitation dynamique des logs d'activité et des dates de réception réelles.
+   - Ajout d'un dossier démo fictif complet (`NIMR-2026-006`) dans `data.ts` avec historique de logs complet pour avoir des délais mesurables dès le premier chargement.
+   - Interdiction de fabriquer des timestamps artificiels pour les dossiers existants.
+4. **BUG-004 — Module Contrôle Qualité Dédié** :
+   - Création du composant dédié `src/components/ControleQualiteView.tsx` pour le rôle Contrôle Qualité (et accessible en lecture pour Directeur/Chef d'atelier).
+   - Liste des dossiers en statut `CONTROLE_QUALITE`.
+   - Checklist obligatoire de 8 points avant validation.
+   - Validation transite vers `PRET_A_LIVRER`. Refus transite vers `EN_TRAVAUX` avec motif de refus obligatoire.
+   - Historique des contrôles effectués et calcul du KPI First Time Right (FTR).
+5. **BUG-005 — Module Livraison Dédié** :
+   - Création du composant dédié `src/components/LivraisonView.tsx` pour le rôle Livraison (et accessible au Réceptionnaire).
+   - Liste des dossiers prêts à livrer.
+   - Checklist de restitution, saisie du kilométrage de sortie obligatoire (avec validation : km sortie >= km entrée), et commentaire.
+   - Confirmation de livraison passe le dossier en statut `LIVRE`.
+   - Historique des livraisons.
+
+### Polissage & Sécurisations additionnelles
+* **Kanban responsive à 5 colonnes** : Intégration des colonnes "Contrôle qualité" et "Prêt à livrer" avec conteneur à défilement horizontal en responsive.
+* **Securisation Technicien** : Les boutons désactivés "Démarrer" ne déclenchent aucun handler d'action s'ils sont cliqués (sécurité renforcée). Résolution des doublons de logs lors du démarrage des tâches.
+
+---
+
+## 15. Résultats de la Validation Globale
+
+Le pipeline complet de validation locale a été ré-exécuté avec succès après intégration des corrections :
 
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
-| **Vérification des Types** | `npm run lint` (`tsc --noEmit`) | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **12 tests unitaires de réservation**, tests unitaires de disponibilité et de base véhicules au vert. |
-| **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production généré avec succès avec Vite. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **264 tests E2E Playwright validés** sur toutes les configurations (Desktop, Tablette, Mobile). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 85/85 contrôles validés** |
+| **Vérification des Types** | `npm run lint` | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **23 suites de tests** au vert, incluant les calculs de KPIs et d'occupation. |
+| **Build de Production** | `npm run build` | **RÉUSSI** | Compiles cleanly. Bundle de production Vite généré sans erreurs. |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **288 tests E2E Playwright validés** sur Desktop, Tablette et Mobile. |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 102/102 invariants validés** (incluant les 102 contrôles QA). |
 
 ---
 
-## 14. Nouveaux Tests E2E Playwright
+## 16. Nouveaux Tests E2E Playwright (Lot 6 & Lot 6B)
 
-La suite E2E a été enrichie avec 9 nouveaux fichiers de tests complets :
-1. `e2e/14-kanban.spec.ts` : Valide l'affichage des colonnes Kanban, la disposition des dossiers et l'ouverture du modal de détail au clic.
-2. `e2e/15-reclamations.spec.ts` : Valide les contrôles d'accès, la création et la modification des réclamations, l'affectation, la criticité, les changements de statut, l'action corrective, la résolution, la clôture, la réouverture, l'historique, les filtres et le lien vers le dossier lié.
-3. `e2e/16-dashboard-filters.spec.ts` : Valide les filtres de priorité, de statut et de période de temps du Dashboard KPI Directeur.
-4. `e2e/17-vehicle-search.spec.ts` : Valide la recherche véhicule/dossier, les véhicules multi-dossiers, le statut véhicule agrégé et les statuts tâche visibles dans le Gantt.
-5. `e2e/18-operational-cleanup.spec.ts` : Valide le nettoyage opérationnel du Mode Technicien, de la vue Dossiers actifs, du Kanban Atelier et de l'historique véhicule.
-6. `e2e/19-quote-import.spec.ts` : Valide l'importation de devis textuel et PDF multi-pages (fixture 1076), la fusion des lignes coupées, la non-sélection par défaut des pièces et produits peinture, le blocage et la validation des tâches à 0h, et l'absence de CA/prix/paiement/caisse/stock.
-7. `e2e/20-workshop-reservations.spec.ts` : Valide le cycle complet de réservation (À réserver → Proposé → Confirmé → Planning) sous le rôle Chef Atelier, le rendu du calque distinct sur le Gantt, le déblocage du créneau lors de l'annulation, l'exclusion des dossiers non-réservables, ainsi que le scénario de réservation de 52h (affichage des segments détaillés, répartition, et Gantt dynamique).
-8. `e2e/21-workshop-availability.spec.ts` : Valide la configuration des indisponibilités de ponts, des absences techniciens et des jours fériés/fermetures exceptionnelles, ainsi que l'impact sur les suggestions de planification.
-9. `e2e/22-vehicle-master-reception.spec.ts` : Valide l'importation de la base de véhicules via un CSV fictif, la recherche de véhicule (VIN, immatriculation, client, modèle), le pré-remplissage sur clic et confirmation, le masquage par rôle du numéro de téléphone client, l'avertissement en cas de véhicule inexistant, et la suppression complète de la base locale.
+La suite E2E a été complétée avec les spécifications suivantes :
+1. `e2e/23-sav-reports.spec.ts` : Valide l'accès aux rapports par rôle, les filtres de période, l'exportation et l'absence stricte de données financières.
+2. `e2e/24-qc-view.spec.ts` : Valide le module Contrôle Qualité dédié (checklist, validation, refus avec motif obligatoire et FTR KPI).
+3. `e2e/25-delivery-view.spec.ts` : Valide le module Livraison dédié (checklist, km de sortie >= km d'entrée, confirmation).
+4. `e2e/26-lot6b-recette.spec.ts` : Valide le bouton démarrer technicien protégé contre les clics forcés, l'occupation dashboard > 0% si des charges existent, et les délais mesurables sur le dossier démo.
 
 ---
 
-## 15. Décision avant Lot 6
+## 17. Décision Finale avant Tag v1.1.0
 
 **Décision :**
-Les Lots 1 à 5F-5 sont validés.
-Aucun tag v1.1.0 ne doit être créé avant la fin du Lot 6 et la recette finale complète.
-Le Lot 5F-5 (Base véhicules vendus NIMR + aide réception) et le Lot 5F-4B (Disponibilités atelier) sont entièrement validés et intégrés.
+Les Lots 1 à 6B sont entièrement validés en environnement de test local.
+Cependant, conformément aux exigences obligatoires du Lot 6B, **le tag v1.1.0 reste suspendu** jusqu'à la recette terrain finale par l'équipe cliente post-déploiement.
+Aucune donnée réelle n'a été committée, et aucun tag Git `v1.1.0` n'a été créé.
+
+
+

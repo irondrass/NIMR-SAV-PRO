@@ -74,6 +74,8 @@ import {
   WorkshopAvailabilityConfig,
   WorkshopReservation,
 } from "../src/types";
+import { INITIAL_DOSSIERS } from "../src/data";
+import { buildDirectorDashboardKpis, extractDossierTiming } from "../src/dashboard-kpis";
 
 
 interface QACheck {
@@ -1822,6 +1824,154 @@ registerCheck("Lot 6 Invariants", "réservations transformées visibles", () => 
   };
   const report = buildPlanningReport([], [res], { period: "tous" });
   assert.strictEqual(report.reservationsConvertedCount, 1);
+});
+
+registerCheck("Lot 6B Invariants", "aucun NaN affiché dans l'application", () => {
+  const filesToCheck = ["src/components/WorkshopPlanning.tsx", "src/dashboard-kpis.ts"];
+  for (const f of filesToCheck) {
+    const content = fs.readFileSync(f, "utf8");
+    assert.ok(!content.includes("NaN%"), `Le fichier ${f} ne doit pas afficher NaN%`);
+  }
+});
+
+registerCheck("Lot 6B Invariants", "aucune notion financière ajoutée", () => {
+  const financialKeywords = ["chiffre d'affaires", "chiffredaffaires", "marge", "paiement", "caisse", "facturation réelle", "facturationreelle"];
+  const filesToCheck = ["src/sav-core.ts", "src/dashboard-kpis.ts", "src/sav-reports.ts", "src/components/ControleQualiteView.tsx", "src/components/LivraisonView.tsx"];
+  for (const f of filesToCheck) {
+    if (fs.existsSync(f)) {
+      const content = fs.readFileSync(f, "utf8").toLowerCase();
+      for (const kw of financialKeywords) {
+        assert.ok(!content.includes(kw), `Le fichier ${f} contient le mot interdit: ${kw}`);
+      }
+    }
+  }
+});
+
+registerCheck("Lot 6B Invariants", "occupation atelier non 0 si charge > 0", () => {
+  const mockTechs: TechnicienResource[] = [
+    {
+      id: "tech_01",
+      nom: "Tech 1",
+      specialite: "Mecanique",
+      disponibilite: "disponible",
+      capaciteJournaliere: 8,
+      compétences: [],
+      zoneAffectee: AtelierZone.MECANIQUE_RAPIDE,
+      absencesConges: [],
+      chargeActuelle: 0
+    }
+  ];
+  const dossier: DossierSAV = {
+    id: "NIMR-TEST-001",
+    clientNom: "Test",
+    clientTelephone: "",
+    deposantNom: "Test",
+    deposantTelephone: "",
+    vehiculeMarque: "Forthing",
+    vehiculeModele: "T5 EVO",
+    vehiculeImmatriculation: "111 TU 111",
+    vehiculeVIN: "VIN111",
+    vehiculeKilometrage: 1000,
+    vehiculeCouleur: "",
+    typeDossier: InterventionType.MECANIQUE_GENERALE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "",
+    observationsReception: "",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, Flat: false } as any,
+    objetsLaisses: [],
+    dateReception: "2026-06-11T08:00:00Z",
+    dateSouhaiteeLivraison: "2026-06-11T17:00:00Z",
+    statut: DossierStatus.EN_TRAVAUX,
+    technicienId: "tech_01",
+    zoneAtelier: AtelierZone.MECANIQUE_RAPIDE,
+    ordresReparation: [
+      {
+        id: "ro_1",
+        designation: "Tâche 1",
+        tempsEstime: 2.0,
+        tempsPasse: 0.5,
+        status: "in_progress",
+        plannedTechnicianId: "tech_01",
+        plannedBayId: "bay_01",
+        planningDate: "2026-06-11",
+        planningStart: "2026-06-11T09:00:00.000Z",
+        planningEnd: "2026-06-11T10:00:00.000Z",
+      }
+    ],
+    complements: [],
+    accords: [],
+    checklistQC: {
+      essaiEffectue: false,
+      defautRepare: false,
+      aucunVoyantAllume: false,
+      niveauxVerifies: false,
+      serrageSecurite: false,
+      propreteVehicule: false,
+      documentsPrets: false,
+      photosApresOk: false,
+      validationGlobale: "en_attente"
+    },
+    livraison: {
+      controleQualiteOk: false,
+      clientInforme: false,
+      dateLivraisonPrevue: "2026-06-11T17:00:00Z",
+      remarquesLivraison: "",
+      confirmationReceptionClient: false,
+      clotureInterne: false
+    },
+    prochaineActionRecommended: "",
+    dateDernierStatut: "2026-06-11T08:00:00Z",
+    avancementGlobal: 0
+  };
+
+  const kpis = buildDirectorDashboardKpis({
+    dossiers: [dossier],
+    techniciens: mockTechs,
+    reservations: [],
+    filters: { period: "all", now: new Date("2026-06-11T10:00:00.000Z") }
+  });
+
+  assert.ok(kpis.workshop.occupancyRate! > 0, "L'occupation atelier doit être supérieure à 0% s'il y a de la charge");
+  assert.ok(kpis.workshop.occupancyLabel !== "0%", "Le libellé d'occupation atelier ne doit pas être 0%");
+});
+
+registerCheck("Lot 6B Invariants", "délais mesurables sur dossier démo complet", () => {
+  const demoDossier = INITIAL_DOSSIERS.find(d => d.id === "NIMR-2026-006");
+  assert.ok(demoDossier, "Le dossier démo NIMR-2026-006 doit exister");
+  
+  const timing = extractDossierTiming(demoDossier);
+  assert.ok(timing.reception !== null, "La date de réception doit être mesurable");
+  assert.ok(timing.workStart !== null, "La date de début de travaux doit être mesurable");
+  assert.ok(timing.workEnd !== null, "La date de fin de travaux doit être mesurable");
+  assert.ok(timing.qc !== null, "La date de QC doit être mesurable");
+  assert.ok(timing.delivery !== null, "La date de livraison doit être mesurable");
+});
+
+registerCheck("Lot 6B Invariants", "QC a module dédié", () => {
+  assert.ok(fs.existsSync("src/components/ControleQualiteView.tsx"), "Le composant ControleQualiteView.tsx doit exister");
+});
+
+registerCheck("Lot 6B Invariants", "Livraison a module dédié", () => {
+  assert.ok(fs.existsSync("src/components/LivraisonView.tsx"), "Le composant LivraisonView.tsx doit exister");
+});
+
+registerCheck("Lot 6B Invariants", "refus QC exige motif", () => {
+  const viewContent = fs.readFileSync("src/components/ControleQualiteView.tsx", "utf8");
+  assert.ok(viewContent.includes("refusalComment.trim()"), "ControleQualiteView doit valider le motif de refus");
+});
+
+registerCheck("Lot 6B Invariants", "livraison exige km sortie valide", () => {
+  const viewContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  assert.ok(viewContent.includes("vehiculeKilometrage"), "LivraisonView doit valider le kilométrage d'entrée");
+  assert.ok(viewContent.includes("parsedExitKm"), "LivraisonView doit valider le kilométrage de sortie");
+});
+
+registerCheck("Lot 6B Invariants", "technicien ne peut pas démarrer tâche désactivée", () => {
+  const techViewContent = fs.readFileSync("src/components/TechnicianView.tsx", "utf8");
+  assert.ok(techViewContent.includes("canStartLine"), "TechnicianView doit contenir la variable canStartLine");
+  assert.ok(techViewContent.includes("if (canStartLine)"), "Le bouton de démarrage doit vérifier canStartLine avant de déclencher l'action");
 });
 
 // -----------------------------------------------------------------

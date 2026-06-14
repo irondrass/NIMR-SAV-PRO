@@ -340,22 +340,11 @@ export default function DossierDetail({
   const handleBlockConfirm = (reason: string, details: string) => {
     const fullReason = details ? `${reason} : ${details}` : reason;
     if (modalTargetLineId) {
-      const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
-      const taskName = line ? line.designation : modalTargetLineId;
-      const logMessage = `[${userRole}] - Blocage Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
-      
-      const result = blockRepairOrder(dossiers, dossier.id, modalTargetLineId, fullReason);
+      const result = blockRepairOrder(dossiers, dossier.id, modalTargetLineId, fullReason, userRole);
       if (result.ok === false) {
         setTaskError(result.error);
       } else {
-        const updatedLogs = [
-          `${new Date().toISOString()} - ${logMessage}`,
-          ...(result.dossier.historiqueLogs || [])
-        ];
-        onUpdateDossier({
-          ...result.dossier,
-          historiqueLogs: updatedLogs
-        });
+        onUpdateDossier(result.dossier);
         setTaskError(null);
       }
     }

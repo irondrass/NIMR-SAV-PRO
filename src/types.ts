@@ -215,6 +215,7 @@ export interface DeliveryProtocole {
   confirmationReceptionClient: boolean;
   signatureClientUri?: string; // Simulated base64
   clotureInterne: boolean;
+  kilometrageSortie?: number;
 }
 
 export type ComplaintCriticity = "basse" | "moyenne" | "haute" | "critique";

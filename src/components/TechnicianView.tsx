@@ -139,26 +139,12 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
     setSuccessMsg(null);
     const fullReason = details ? `${reason} : ${details}` : reason;
     if (modalTargetDossierId && modalTargetLineId) {
-      const original = dossiers.find(d => d.id === modalTargetDossierId);
-      if (original) {
-        const line = original.ordresReparation.find(l => l.id === modalTargetLineId);
-        const taskName = line ? line.designation : modalTargetLineId;
-        const logMessage = `[${UserRole.TECHNICIEN}] - Blocage Tâche "${taskName}" (Rapport Tech) - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
-        
-        const result = blockRepairOrder(dossiers, modalTargetDossierId, modalTargetLineId, fullReason);
-        if (result.ok === false) {
-          setErrorMsg(result.error || "Impossible de bloquer la tâche.");
-        } else {
-          const updatedLogs = [
-            `${new Date().toISOString()} - ${logMessage}`,
-            ...(result.dossier.historiqueLogs || [])
-          ];
-          onUpdateDossier({
-            ...result.dossier,
-            historiqueLogs: updatedLogs
-          });
-          setSuccessMsg("Tâche bloquée avec succès !");
-        }
+      const result = blockRepairOrder(dossiers, modalTargetDossierId, modalTargetLineId, fullReason, UserRole.TECHNICIEN);
+      if (result.ok === false) {
+        setErrorMsg(result.error || "Impossible de bloquer la tâche.");
+      } else {
+        onUpdateDossier(result.dossier);
+        setSuccessMsg("Tâche bloquée avec succès !");
       }
     }
     setModalActive(false);
@@ -392,7 +378,11 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                                     <button
                                       disabled={!canStartLine}
                                       data-testid={`task-start-${line.id}`}
-                                      onClick={() => handleRepairOrderAction(task.id, line.id, "start")}
+                                      onClick={() => {
+                                        if (canStartLine) {
+                                          handleRepairOrderAction(task.id, line.id, "start");
+                                        }
+                                      }}
                                       className="w-full py-3.5 px-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-35 disabled:cursor-not-allowed text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer"
                                     >
                                       <Play className="w-4.5 h-4.5" />
