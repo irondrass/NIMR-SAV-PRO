@@ -719,8 +719,8 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
 
       // When compatibility is equal, sort by daily load on the start date
       const dateStr = getLocalDateKey(startAfter);
-      let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers, input.dossierId);
-      let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers, input.dossierId);
+      let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers, input.reservations, input.dossierId);
+      let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers, input.reservations, input.dossierId);
       if (dateStr === getLocalDateKey(now)) {
         loadLeft = Math.max(loadLeft, left.chargeActuelle || 0);
         loadRight = Math.max(loadRight, right.chargeActuelle || 0);
@@ -772,7 +772,7 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
 
     if (bestSlot) {
       const dateStr = getLocalDateKey(bestSlot.startTime);
-      const dailyLoad = calculateTechnicianDailyLoad(bestSlot.techId, dateStr, input.dossiers, input.dossierId);
+      const dailyLoad = calculateTechnicianDailyLoad(bestSlot.techId, dateStr, input.dossiers, input.reservations, input.dossierId);
       let reason = `Créneau disponible trouvé selon les disponibilités de l'atelier.`;
       if (isShiftedDueToNow) {
         reason = "Créneau proposé à partir de l’heure actuelle. " + reason;
@@ -872,8 +872,8 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
             if (!compLeft && compRight) return 1;
           }
         }
-        let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers);
-        let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers);
+        let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers, input.reservations);
+        let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers, input.reservations);
         if (dayOffset === 0) {
           loadLeft = Math.max(loadLeft, left.chargeActuelle || 0);
           loadRight = Math.max(loadRight, right.chargeActuelle || 0);
@@ -893,7 +893,7 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
 
         // 2. Capacity check for technician
         const maxCap = candidateDate.getDay() === 6 ? 4 : 8;
-        let dailyLoad = calculateTechnicianDailyLoad(tech.id, dateStr, input.dossiers);
+        let dailyLoad = calculateTechnicianDailyLoad(tech.id, dateStr, input.dossiers, input.reservations);
         if (dayOffset === 0) {
           dailyLoad = Math.max(dailyLoad, tech.chargeActuelle || 0);
         }
@@ -1067,7 +1067,7 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   const planningDate = getLocalDateKey(start);
   const maxCapacity = input.technicianDailyCapacityHours ?? (isSaturday ? 4 : 8);
   const requestedHours = calculateSegmentHoursForDate(submittedSegments, planningDate);
-  const currentDailyLoad = calculateTechnicianDailyLoad(input.technicianId, planningDate, input.dossiers, input.lineId);
+  const currentDailyLoad = calculateTechnicianDailyLoad(input.technicianId, planningDate, input.dossiers, input.reservations, input.lineId);
   if (currentDailyLoad + requestedHours > maxCapacity) {
     pushIssue("planning-collision-overload");
   }
@@ -1828,20 +1828,101 @@ export function detectBayCollision(
   return false;
 }
 
-export function calculateTechnicianDailyLoad(techId: string, dateStr: string, dossiers: DossierSAV[], ignoreTaskId?: string): number {
+export function calculateTechnicianDailyLoad(
+  techId: string,
+  dateStr: string,
+  dossiers: DossierSAV[],
+  reservations: WorkshopReservation[] = [],
+  ignoreTaskId?: string
+): number {
   let total = 0;
   for (const dossier of dossiers) {
     if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
-      if (line.plannedTechnicianId === techId) {
-        const segments = getLinePlanningSegments(line);
-        if (segments.some(seg => seg.start.startsWith(dateStr)) || line.planningDate === dateStr) {
-          total += calculateSegmentHoursForDate(segments, dateStr);
+      
+      const assignedTechId = line.plannedTechnicianId || dossier.technicienId;
+      if (assignedTechId !== techId) continue;
+      
+      const status = normalizeRepairOrderStatus(line.status);
+      if (status === "done") continue;
+      
+      const segments = getLinePlanningSegments(line);
+      if (segments.length > 0) {
+        total += calculateSegmentHoursForDate(segments, dateStr);
+      } else if (status === "in_progress") {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const isOnDate = line.planningDate === dateStr || (!line.planningDate && dateStr === todayStr);
+        if (isOnDate) {
+          total += line.tempsEstime;
         }
       }
     }
   }
+
+  for (const res of reservations) {
+    if (res.technicianId !== techId) continue;
+    if (res.status === "RESERVATION_CONFIRMEE" || res.status === "AFFECTEE_ATELIER") {
+      if (res.segments && res.segments.length > 0) {
+        total += calculateSegmentHoursForDate(res.segments, dateStr);
+      } else {
+        const resDate = res.startTime ? res.startTime.split("T")[0] : res.desiredDate;
+        if (resDate === dateStr) {
+          total += res.totalHours;
+        }
+      }
+    }
+  }
+
+  return total;
+}
+
+export function calculateBayDailyLoad(
+  bayId: string,
+  dateStr: string,
+  dossiers: DossierSAV[],
+  reservations: WorkshopReservation[] = [],
+  ignoreTaskId?: string
+): number {
+  let total = 0;
+  for (const dossier of dossiers) {
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    for (const line of dossier.ordresReparation) {
+      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      
+      const assignedBayId = line.plannedBayId;
+      if (assignedBayId !== bayId) continue;
+      
+      const status = normalizeRepairOrderStatus(line.status);
+      if (status === "done") continue;
+      
+      const segments = getLinePlanningSegments(line);
+      if (segments.length > 0) {
+        total += calculateSegmentHoursForDate(segments, dateStr);
+      } else if (status === "in_progress") {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const isOnDate = line.planningDate === dateStr || (!line.planningDate && dateStr === todayStr);
+        if (isOnDate) {
+          total += line.tempsEstime;
+        }
+      }
+    }
+  }
+
+  for (const res of reservations) {
+    if (res.bayId !== bayId) continue;
+    if (res.status === "RESERVATION_CONFIRMEE" || res.status === "AFFECTEE_ATELIER") {
+      if (res.segments && res.segments.length > 0) {
+        total += calculateSegmentHoursForDate(res.segments, dateStr);
+      } else {
+        const resDate = res.startTime ? res.startTime.split("T")[0] : res.desiredDate;
+        if (resDate === dateStr) {
+          total += res.totalHours;
+        }
+      }
+    }
+  }
+
   return total;
 }
 

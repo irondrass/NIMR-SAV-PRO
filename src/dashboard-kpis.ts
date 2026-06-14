@@ -105,6 +105,8 @@ export interface DirectorDashboardKpis {
     plannedLoadLabel: string;
     reservedLoadRate: number | null;
     reservedLoadLabel: string;
+    inProgressLoadRate: number | null;
+    inProgressLoadLabel: string;
     technicianLoad: DashboardLoadItem[];
     bayLoad: DashboardLoadItem[];
     estimatedHours: number;
@@ -112,6 +114,13 @@ export interface DirectorDashboardKpis {
     lateTasks: DashboardTaskRef[];
     blockedTasks: DashboardTaskRef[];
     planningSaturated: boolean;
+    detailsCalcul?: {
+      totalCapacity: number;
+      plannedHours: number;
+      reservedHours: number;
+      inProgressHours: number;
+      usedCapacityHours: number;
+    };
   };
   delays: DashboardDelayMetric[];
   quality: {
@@ -393,8 +402,7 @@ function buildWorkshopKpis(
   if (reservations) {
     const activeRes = reservations.filter(res => 
       res.status === "RESERVATION_CONFIRMEE" || 
-      res.status === "AFFECTEE_ATELIER" || 
-      res.status === "CRENEAU_PROPOSE"
+      res.status === "AFFECTEE_ATELIER"
     );
     const filteredRes = activeRes.filter(res => {
       if (!range) return true;
@@ -420,13 +428,22 @@ function buildWorkshopKpis(
       }
     }
   }
+  const inProgressLoadRate = totalCapacity > 0
+    ? (inProgressNoPlanningHours > 0 ? Math.max(1, Math.round((inProgressNoPlanningHours / totalCapacity) * 100)) : 0)
+    : null;
+  const inProgressLoadLabel = inProgressLoadRate === null ? NON_MEASURABLE : `${inProgressLoadRate}%`;
 
   // 4. Combined Occupancy
   const usedCapacityHours = plannedHours + reservedHours + inProgressNoPlanningHours;
-  const occupancyRate = totalCapacity > 0 
-    ? (usedCapacityHours > 0 ? Math.max(1, Math.round((usedCapacityHours / totalCapacity) * 100)) : 0) 
-    : null;
-  const occupancyLabel = occupancyRate === null ? NON_MEASURABLE : `${occupancyRate}%`;
+  let occupancyRate: number | null = null;
+  let occupancyLabel = NON_MEASURABLE;
+
+  if (totalCapacity > 0) {
+    occupancyRate = usedCapacityHours > 0 ? Math.max(1, Math.round((usedCapacityHours / totalCapacity) * 100)) : 0;
+    occupancyLabel = `${occupancyRate}%`;
+  } else if (usedCapacityHours > 0) {
+    occupancyLabel = "Charge hors capacité";
+  }
 
   return {
     occupancyRate,
@@ -435,6 +452,8 @@ function buildWorkshopKpis(
     plannedLoadLabel,
     reservedLoadRate,
     reservedLoadLabel,
+    inProgressLoadRate,
+    inProgressLoadLabel,
     technicianLoad: technicianLoad.sort((left, right) => right.hours - left.hours),
     bayLoad: bayLoad.sort((left, right) => right.hours - left.hours),
     estimatedHours: roundHours(estimatedHours),
@@ -442,6 +461,13 @@ function buildWorkshopKpis(
     lateTasks,
     blockedTasks,
     planningSaturated: technicianLoad.some(item => item.alert) || bayLoad.some(item => item.alert),
+    detailsCalcul: {
+      totalCapacity,
+      plannedHours,
+      reservedHours,
+      inProgressHours: inProgressNoPlanningHours,
+      usedCapacityHours
+    }
   };
 }
 

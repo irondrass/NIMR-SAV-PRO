@@ -44,6 +44,11 @@ const fixedNow = new Date("2026-06-11T10:00:00.000Z");
   assert.strictEqual(zeroCapKpis.workshop.plannedLoadLabel, "Non mesurable");
   assert.strictEqual(zeroCapKpis.workshop.reservedLoadRate, null);
   assert.strictEqual(zeroCapKpis.workshop.reservedLoadLabel, "Non mesurable");
+  assert.strictEqual(zeroCapKpis.workshop.detailsCalcul.totalCapacity, 0);
+  assert.strictEqual(zeroCapKpis.workshop.detailsCalcul.plannedHours, 0);
+  assert.strictEqual(zeroCapKpis.workshop.detailsCalcul.reservedHours, 0);
+  assert.strictEqual(zeroCapKpis.workshop.detailsCalcul.inProgressHours, 0);
+  assert.strictEqual(zeroCapKpis.workshop.detailsCalcul.usedCapacityHours, 0);
 
   // Case B: Normal capacity, zero load
   const normalCapKpis = buildDirectorDashboardKpis({
@@ -59,6 +64,11 @@ const fixedNow = new Date("2026-06-11T10:00:00.000Z");
   assert.strictEqual(normalCapKpis.workshop.plannedLoadLabel, "0%");
   assert.strictEqual(normalCapKpis.workshop.reservedLoadRate, 0);
   assert.strictEqual(normalCapKpis.workshop.reservedLoadLabel, "0%");
+  assert.ok(normalCapKpis.workshop.detailsCalcul.totalCapacity > 0);
+  assert.strictEqual(normalCapKpis.workshop.detailsCalcul.plannedHours, 0);
+  assert.strictEqual(normalCapKpis.workshop.detailsCalcul.reservedHours, 0);
+  assert.strictEqual(normalCapKpis.workshop.detailsCalcul.inProgressHours, 0);
+  assert.strictEqual(normalCapKpis.workshop.detailsCalcul.usedCapacityHours, 0);
 }
 
 // Test 2: BUG-002 occupancy rate threshold and components
@@ -160,6 +170,10 @@ const fixedNow = new Date("2026-06-11T10:00:00.000Z");
   assert.ok(kpis.workshop.occupancyRate! >= 30 && kpis.workshop.occupancyRate! <= 32);
   assert.strictEqual(kpis.workshop.plannedLoadRate, 13); // 1.0 / 8 = 12.5% -> 13%
   assert.strictEqual(kpis.workshop.reservedLoadRate, 19); // 1.5 / 8 = 18.75% -> 19%
+  assert.strictEqual(kpis.workshop.detailsCalcul.plannedHours, 1.0);
+  assert.strictEqual(kpis.workshop.detailsCalcul.reservedHours, 1.5);
+  assert.strictEqual(kpis.workshop.detailsCalcul.inProgressHours, 0);
+  assert.strictEqual(kpis.workshop.detailsCalcul.usedCapacityHours, 2.5);
 
   // Verify that if capacity is tiny and charge > 0, occupancy is not 0%
   const tinyCapacityKpis = buildDirectorDashboardKpis({

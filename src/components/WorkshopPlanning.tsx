@@ -15,6 +15,7 @@ import {
   addWorkingMinutes,
   buildPlanningSegments,
   calculateTechnicianDailyLoad,
+  calculateBayDailyLoad,
   validatePlanningAssignment
 } from "../sav-core";
 import { 
@@ -1265,11 +1266,41 @@ export default function WorkshopPlanning({
                 const techPlannedLines = activePlannedLines.filter(item => item.line.plannedTechnicianId === tech.id);
                 
                 // Calculate total active/planned hours today
-                const dailyLoad = calculateTechnicianDailyLoad(tech.id, selectedDateStr, dossiers);
-                const maxCap = isClosedDay ? 0 : isSat ? 4 : 8;
-                const chargePercent = maxCap > 0 ? Math.min(100, Math.round((dailyLoad / maxCap) * 100)) : 0;
-                const chargePercentText = maxCap > 0 ? `${chargePercent}%` : "Non mesurable";
-                const isOverloaded = maxCap > 0 && dailyLoad > maxCap;
+                const dailyLoad = calculateTechnicianDailyLoad(tech.id, selectedDateStr, dossiers, reservations);
+                const isAbsent = availabilityConfig ? isTechnicianAbsent(tech.id, selectedDate, availabilityConfig) : false;
+                const isClosed = availabilityConfig ? isWorkshopClosed(selectedDate, availabilityConfig) : isClosedDay;
+
+                let techCapacity = 0;
+                if (!isClosed && !isAbsent) {
+                  if (availabilityConfig) {
+                    const effWindows = getEffectiveWorkshopWindows(selectedDate, availabilityConfig);
+                    techCapacity = effWindows.reduce((sum, win) => {
+                      const [sh, sm] = win.start.split(":").map(Number);
+                      const [eh, em] = win.end.split(":").map(Number);
+                      return sum + (eh * 60 + em - (sh * 60 + sm)) / 60;
+                    }, 0);
+                  } else {
+                    techCapacity = isSat ? 4 : 8;
+                  }
+                }
+
+                let loadText = "";
+                let chargePercentText = "";
+                let isOverloaded = false;
+
+                if (techCapacity === 0 && dailyLoad === 0) {
+                  loadText = "Non mesurable";
+                  chargePercentText = "Non mesurable";
+                } else if (dailyLoad > 0 && techCapacity === 0) {
+                  loadText = `${dailyLoad}h / 0h`;
+                  chargePercentText = "Charge hors capacité";
+                  isOverloaded = true;
+                } else {
+                  loadText = `${dailyLoad}h / ${techCapacity}h`;
+                  const percent = Math.round((dailyLoad / techCapacity) * 100);
+                  chargePercentText = `${percent}%`;
+                  isOverloaded = dailyLoad > techCapacity;
+                }
 
                 // Determine availability status
                 const isNonDisponible = tech.disponibilite === "absent" || tech.disponibilite === "formation";
@@ -1310,8 +1341,6 @@ export default function WorkshopPlanning({
                 });
 
                 const hasSegmentsToday = todayTechSegments.length > 0;
-
-                const isAbsent = availabilityConfig ? isTechnicianAbsent(tech.id, selectedDate, availabilityConfig) : false;
 
                 let statusLabel = "Disponible";
                 let statusColor = "bg-green-500 text-white";
@@ -1355,8 +1384,8 @@ export default function WorkshopPlanning({
                         {tech.zoneAffectee} • {tech.specialite}
                       </div>
                       <div className="flex justify-between items-center text-[9px] text-gray-500 pt-0.5">
-                        <span>Charge : <strong className="text-gray-700">{dailyLoad}H</strong></span>
-                        <span data-testid={`tech-charge-${tech.id}`} className={`font-mono font-bold ${isOverloaded ? "text-red-500 font-black" : ""}`}>
+                        <span>Charge : <strong className="text-gray-700" data-testid={`technician-load-hours-${tech.id}`}>{loadText}</strong></span>
+                        <span data-testid={`technician-charge-${tech.id}`} className={`font-mono font-bold ${isOverloaded ? "text-red-500 font-black" : ""}`}>
                           {chargePercentText}{isOverloaded && " (Surcharge)"}
                         </span>
                       </div>
@@ -1552,7 +1581,42 @@ export default function WorkshopPlanning({
 
             const hasBaySegmentsToday = todayBaySegments.length > 0;
 
+            const isClosedDay = availabilityConfig ? isWorkshopClosed(selectedDate, availabilityConfig) : selectedDate.getDay() === 0;
             const isBayUnav = availabilityConfig ? isBayUnavailable(bay.id, selectedDate, availabilityConfig) : false;
+
+            let bayCapacity = 0;
+            if (!isClosedDay && !isBayUnav) {
+              if (availabilityConfig) {
+                const effWindows = getEffectiveWorkshopWindows(selectedDate, availabilityConfig);
+                bayCapacity = effWindows.reduce((sum, win) => {
+                  const [sh, sm] = win.start.split(":").map(Number);
+                  const [eh, em] = win.end.split(":").map(Number);
+                  return sum + (eh * 60 + em - (sh * 60 + sm)) / 60;
+                }, 0);
+              } else {
+                bayCapacity = isSat ? 4 : 8;
+              }
+            }
+
+            const bayDailyLoad = calculateBayDailyLoad(bay.id, selectedDateStr, dossiers, reservations);
+
+            let bayLoadText = "";
+            let bayChargePercentText = "";
+            let isBayOverloaded = false;
+
+            if (bayCapacity === 0 && bayDailyLoad === 0) {
+              bayLoadText = "Non mesurable";
+              bayChargePercentText = "Non mesurable";
+            } else if (bayDailyLoad > 0 && bayCapacity === 0) {
+              bayLoadText = `${bayDailyLoad}h / 0h`;
+              bayChargePercentText = "Charge hors capacité";
+              isBayOverloaded = true;
+            } else {
+              bayLoadText = `${bayDailyLoad}h / ${bayCapacity}h`;
+              const percent = Math.round((bayDailyLoad / bayCapacity) * 100);
+              bayChargePercentText = `${percent}%`;
+              isBayOverloaded = bayDailyLoad > bayCapacity;
+            }
 
             let bayStatusLabel = "Libre maintenant";
             let bayStatusColor = "bg-green-500 text-white";
@@ -1595,6 +1659,12 @@ export default function WorkshopPlanning({
                   <span className="text-[9px] text-gray-400 font-bold block uppercase tracking-wider">
                     {bay.zone || "Zone Polyvalente"}
                   </span>
+                  <div className="flex justify-between items-center text-[9px] text-gray-500 pt-0.5">
+                    <span>Charge : <strong className="text-gray-700" data-testid={`bay-load-hours-${bay.id}`}>{bayLoadText}</strong></span>
+                    <span data-testid={`bay-charge-${bay.id}`} className={`font-mono font-bold ${isBayOverloaded ? "text-red-500 font-black" : ""}`}>
+                      {bayChargePercentText}{isBayOverloaded && " (Surcharge)"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Right: Gantt timeline bar row */}

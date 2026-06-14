@@ -18,6 +18,7 @@ import {
   startRepairOrder
 } from "../sav-core";
 import { fileToCameraPhoto } from "../photo-utils";
+import { canSimulateTechnicianAccess } from "../permissions";
 import { 
   Play, 
   Pause, 
@@ -41,6 +42,8 @@ interface TechnicianViewProps {
   dossiers: DossierSAV[];
   techniciens: TechnicienResource[];
   onUpdateDossier: (updated: DossierSAV) => void;
+  activeRole: UserRole;
+  currentUserLabel: string;
 }
 
 const OBSERVATION_PRESETS = [
@@ -52,7 +55,7 @@ const OBSERVATION_PRESETS = [
   "Plaquette de frein usée à remplacer"
 ];
 
-export default function TechnicianView({ dossiers, techniciens, onUpdateDossier }: TechnicianViewProps) {
+export default function TechnicianView({ dossiers, techniciens, onUpdateDossier, activeRole, currentUserLabel }: TechnicianViewProps) {
   const [selectedTechId, setSelectedTechId] = useState<string>("tech_01");
   const [tempNotes, setTempNotes] = useState<Record<string, string>>({});
   const [tempPhotoTitle, setTempPhotoTitle] = useState("");
@@ -70,10 +73,18 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
   const [modalTargetDossierId, setModalTargetDossierId] = useState<string | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
 
-  const activeTech = techniciens.find(t => t.id === selectedTechId);
+  const canSimulate = canSimulateTechnicianAccess(activeRole);
+
+  const matchedTech = techniciens.find(t => 
+    t.nom.toLowerCase().includes(currentUserLabel.toLowerCase()) ||
+    currentUserLabel.toLowerCase().includes(t.nom.toLowerCase())
+  );
+
+  const activeTechId = canSimulate ? selectedTechId : (matchedTech ? matchedTech.id : null);
+  const activeTech = activeTechId ? techniciens.find(t => t.id === activeTechId) : null;
 
   // Filter operational tasks specific to this technician.
-  const techTasks = dossiers.filter(d => shouldShowDossierForTechnician(d, selectedTechId));
+  const techTasks = activeTechId ? dossiers.filter(d => shouldShowDossierForTechnician(d, activeTechId)) : [];
 
   const setNoteForDossier = (dossierId: string, val: string) => {
     setTempNotes(prev => ({ ...prev, [dossierId]: val }));
@@ -181,36 +192,51 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
     <div className="max-w-md mx-auto space-y-6">
       
       {/* Simulation Tech Switcher */}
-      <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm space-y-2 border border-slate-800">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-bold tracking-wider text-slate-400 flex items-center gap-1">
-            <Smartphone className="w-4 h-4 text-emerald-400" />
-            VUE TABLETTE COMPAGNON / TECHNICIEN
-          </span>
-          <span className="bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded text-[9px] uppercase border border-emerald-500/30">
-            CONNECTÉ
-          </span>
+      {canSimulate ? (
+        <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm space-y-2 border border-slate-800">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold tracking-wider text-slate-400 flex items-center gap-1">
+              <Smartphone className="w-4 h-4 text-emerald-400" />
+              VUE TABLETTE COMPAGNON / TECHNICIEN
+            </span>
+            <span className="bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded text-[9px] uppercase border border-emerald-500/30">
+              CONNECTÉ
+            </span>
+          </div>
+          
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-slate-400 pb-1">Choisir Compagnon (Simulateur d'Accès) :</label>
+            <select
+              data-testid="companion-simulator-select"
+              className="w-full p-2 bg-slate-800 text-white border-2 border-slate-700 rounded font-bold text-xs"
+              value={selectedTechId}
+              onChange={(e) => {
+                setSelectedTechId(e.target.value);
+                setErrorMsg(null);
+                setSuccessMsg(null);
+              }}
+            >
+              {techniciens.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.nom} — {t.specialite} ({t.zoneAffectee})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        
-        <div>
-          <label className="block text-[10px] uppercase font-bold text-slate-400 pb-1">Choisir Compagnon (Simulateur d'Accès) :</label>
-          <select
-            className="w-full p-2 bg-slate-800 text-white border-2 border-slate-700 rounded font-bold text-xs"
-            value={selectedTechId}
-            onChange={(e) => {
-              setSelectedTechId(e.target.value);
-              setErrorMsg(null);
-              setSuccessMsg(null);
-            }}
-          >
-            {techniciens.map(t => (
-              <option key={t.id} value={t.id}>
-                {t.nom} — {t.specialite} ({t.zoneAffectee})
-              </option>
-            ))}
-          </select>
+      ) : (
+        <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm border border-slate-800">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold tracking-wider text-slate-400 flex items-center gap-1">
+              <Smartphone className="w-4 h-4 text-emerald-400" />
+              TABLETTE COMPAGNON : {activeTech ? activeTech.nom : currentUserLabel}
+            </span>
+            <span className="bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded text-[9px] uppercase border border-emerald-500/30">
+              CONNECTÉ
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* DOM Notification messages for tactile use */}
       {(errorMsg || successMsg) && (
@@ -246,8 +272,20 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
         </div>
       )}
 
+      {/* If no technician profile is matched for a non-admin role */}
+      {!activeTechId && (
+        <div 
+          data-testid="no-technician-profile-message"
+          className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl font-bold text-xs shadow-xs text-center space-y-2 mt-4"
+        >
+          <AlertTriangle className="w-8 h-8 text-red-600 mx-auto" />
+          <p>Aucun profil technicien associé à ce compte.</p>
+        </div>
+      )}
+
       {/* Primary tasks */}
-      <div className="space-y-4">
+      {activeTechId && (
+        <div className="space-y-4">
         <h3 className="font-bold text-sm text-slate-800  uppercase tracking-wider">
           Mes travaux assignés aujourd'hui ({techTasks.length})
         </h3>
@@ -357,7 +395,6 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
                               </div>
                               {startBlockedMessage && status !== "done" && status !== "in_progress" && (
                                 <div className="space-y-1.5 mt-1">
-                                  <p className="text-[10px] text-rose-600 font-bold">{startBlockedMessage}</p>
                                   <div 
                                     data-testid="technician-task-locked-message"
                                     className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-700 font-bold flex items-center gap-1.5"
@@ -592,6 +629,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier 
           </div>
         )}
       </div>
+      )}
 
       <StandardReasonModal
         isOpen={modalActive}

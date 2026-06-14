@@ -192,7 +192,25 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
               testId="kpi-workshop-occupancy"
               label="Occupation atelier"
               value={kpis.workshop.occupancyLabel}
-              detail={`Capacité réelle • Planifié: ${kpis.workshop.plannedLoadLabel} | Réservé: ${kpis.workshop.reservedLoadLabel}`}
+              detail="Capacité réelle"
+            />
+            <InfoTile
+              testId="kpi-workshop-planned"
+              label="Charge planifiée"
+              value={kpis.workshop.plannedLoadLabel}
+              detail="Depuis Gantt"
+            />
+            <InfoTile
+              testId="kpi-workshop-reserved"
+              label="Charge réservée"
+              value={kpis.workshop.reservedLoadLabel}
+              detail="Depuis réservations"
+            />
+            <InfoTile
+              testId="kpi-workshop-in-progress"
+              label="Charge en cours"
+              value={kpis.workshop.inProgressLoadLabel}
+              detail="Travaux actifs"
             />
             <InfoTile
               testId="kpi-estimated-vs-spent"

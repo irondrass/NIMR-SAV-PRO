@@ -188,7 +188,7 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     objetsLaisses: ["Lunettes de soleil (boîtier) dans la boîte à gants"],
     dateReception: "2026-06-09T09:15:00Z",
     dateSouhaiteeLivraison: "2026-06-09T16:00:00Z",
-    statut: DossierStatus.PRET_A_LIVRER,
+    statut: DossierStatus.LIVRE,
     technicienId: "tech_03",
     zoneAtelier: AtelierZone.LAVAGE_FINITION,
     ordresReparation: [
@@ -215,13 +215,22 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
       controleQualiteOk: true,
       clientInforme: true,
       dateLivraisonPrevue: "2026-06-09T16:00:00Z",
+      dateLivraisonReelle: "2026-06-09T16:15:00Z",
       remarquesLivraison: "Sifflement venait d'un joint de porte conducteur légèrement pincé de travers en usine. Repositionné et graissé sous garantie constructeur.",
-      confirmationReceptionClient: false,
-      clotureInterne: false
+      confirmationReceptionClient: true,
+      clotureInterne: true,
+      kilometrageSortie: 12110
     },
-    prochaineActionRecommended: "Appeler le client pour confirmation heure de livraison",
-    dateDernierStatut: "2026-06-09T14:35:00Z",
-    avancementGlobal: 95
+    prochaineActionRecommended: "Dossier entièrement livré et clôturé.",
+    dateDernierStatut: "2026-06-09T16:15:00Z",
+    avancementGlobal: 100,
+    historiqueLogs: [
+      "2026-06-09T16:15:00.000Z - [LIVRAISON] - Restitution validée. Dossier statut mis à LIVRE. KM Sortie: 12110.",
+      "2026-06-09T14:30:00.000Z - [CONTROLE_QUALITE] - Validation QC positive.",
+      "2026-06-09T14:00:00.000Z - Tâche \"Vérification des joints de portières (problème bruit aérodynamique)\" terminée",
+      "2026-06-09T13:30:00.000Z - Tâche \"Vérification des joints de portières (problème bruit aérodynamique)\" démarrée",
+      "2026-06-09T09:15:00.000Z - [RECEPTIONNAIRE] - Dossier créé pour Dongfeng Aeolus Huge."
+    ]
   },
   {
     id: "NIMR-2026-003",
@@ -392,7 +401,7 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
     objetsLaisses: [],
     dateReception: "2026-06-09T07:45:00Z",
     dateSouhaiteeLivraison: "2026-06-10T16:00:00Z",
-    statut: DossierStatus.CONTROLE_QUALITE,
+    statut: DossierStatus.LIVRE,
     technicienId: "tech_01",
     zoneAtelier: AtelierZone.CONTROLE_QUALITE,
     ordresReparation: [
@@ -412,27 +421,38 @@ export const INITIAL_DOSSIERS: DossierSAV[] = [
       }
     ],
     checklistQC: {
-      essaiEffectue: false,
+      essaiEffectue: true,
       defautRepare: true,
       aucunVoyantAllume: true,
       niveauxVerifies: true,
       serrageSecurite: true,
-      propreteVehicule: false,
-      documentsPrets: false,
-      photosApresOk: false,
-      validationGlobale: "en_attente"
+      propreteVehicule: true,
+      documentsPrets: true,
+      photosApresOk: true,
+      validationGlobale: "valide",
+      dateValidation: "2026-06-10T14:30:00Z",
+      validePar: "Contrôle Qualité Démo (Qualité)"
     },
     livraison: {
-      controleQualiteOk: false,
-      clientInforme: false,
+      controleQualiteOk: true,
+      clientInforme: true,
       dateLivraisonPrevue: "2026-06-10T16:00:00Z",
-      remarquesLivraison: "",
-      confirmationReceptionClient: false,
-      clotureInterne: false
+      dateLivraisonReelle: "2026-06-10T16:15:00Z",
+      remarquesLivraison: "Remplacement sous garantie constructeur validé, clim testée et pleinement fonctionnelle.",
+      confirmationReceptionClient: true,
+      clotureInterne: true,
+      kilometrageSortie: 24715
     },
-    prochaineActionRecommended: "Compléter la checklist de contrôle qualité par l'essayeur",
-    dateDernierStatut: "2026-06-09T14:45:00Z",
-    avancementGlobal: 85
+    prochaineActionRecommended: "Dossier entièrement livré et clôturé.",
+    dateDernierStatut: "2026-06-10T16:15:00Z",
+    avancementGlobal: 100,
+    historiqueLogs: [
+      "2026-06-10T16:15:00.000Z - [LIVRAISON] - Restitution validée. Dossier statut mis à LIVRE. KM Sortie: 24715.",
+      "2026-06-10T14:30:00.000Z - [CONTROLE_QUALITE] - Validation QC positive.",
+      "2026-06-09T14:45:00.000Z - Tâche \"Recharge de gaz clim et contrôle de température différentielle\" terminée",
+      "2026-06-09T13:45:00.000Z - Tâche \"Recharge de gaz clim et contrôle de température différentielle\" démarrée",
+      "2026-06-09T07:45:00.000Z - [RECEPTIONNAIRE] - Dossier créé pour DFSK Glory 500."
+    ]
   },
   {
     id: "NIMR-2026-006",

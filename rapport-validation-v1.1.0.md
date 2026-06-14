@@ -446,37 +446,57 @@ Nous avons résolu les 5 blocages terrain P0 identifiés lors de l'audit d'inté
 * **Kanban responsive à 5 colonnes** : Intégration des colonnes "Contrôle qualité" et "Prêt à livrer" avec conteneur à défilement horizontal en responsive.
 * **Securisation Technicien** : Les boutons désactivés "Démarrer" ne déclenchent aucun handler d'action s'ils sont cliqués (sécurité renforcée). Résolution des doublons de logs lors du démarrage des tâches.
 
+## 15. Lot 6C : Corrections terrain persistantes post-ré-audit
+
+Nous avons résolu toutes les anomalies terrain persistantes identifiées lors du ré-audit :
+1. **BUG-001-P & NEW-003 — Charge Techniciens et Ponts fiables** :
+   - Mise à jour de `calculateTechnicianDailyLoad` et implémentation de `calculateBayDailyLoad` pour éviter le double comptage et prendre en compte les segments Gantt, les tâches `in_progress` non couvertes par le planning, et les réservations confirmées/affectées.
+   - Intégration de `availabilityConfig` et `getEffectiveWorkshopWindows` pour calculer dynamiquement la capacité effective quotidienne.
+   - Application des règles d'affichage UI (surcharge, "Non mesurable", "Charge hors capacité" ou pourcentage, pas de `NaN` ou `0h/0h` pour les ressources actives).
+2. **BUG-002-P — Occupation Atelier et détails de calcul** :
+   - Exposition détaillée des calculs dans `buildWorkshopKpis` via `detailsCalcul` (totalCapacity, plannedHours, reservedHours, inProgressHours, usedCapacityHours).
+   - Intégration des 4 tuiles distinctes (Occupation réelle, charge planifiée, charge réservée, charge en cours) dans la section "Vue atelier" du tableau de bord Directeur.
+3. **BUG-013-P — Horaires d'atelier harmonisés** :
+   - Remplacement de toutes les valeurs par défaut de fermeture à `18:00` par `17:00` (semaine) et `12:00` (samedi) dans l'interface et les tests unitaires/E2E.
+4. **Sécurisation du Sélecteur de Compagnon (Simulateur)** :
+   - Ajout de la permission `canSimulateTechnicianAccess` pour n'autoriser la simulation que pour le Directeur SAV et le Chef Atelier.
+   - Masquage du sélecteur compagnon pour les techniciens standard et verrouillage sur leur profil via matching case-insensitive (avec message d'avertissement si aucun profil n'est lié).
+5. **Sécurisation du bouton Démarrer et messages de blocage** :
+   - Retour immédiat dans le handler du bouton "Démarrer" si la tâche n'est pas démarrable.
+   - Suppression du message de tâche verrouillée dupliqué en conservant une seule instance avec `data-testid="technician-task-locked-message"`.
+
 ---
 
-## 15. Résultats de la Validation Globale
+## 16. Résultats de la Validation Globale
 
 Le pipeline complet de validation locale a été ré-exécuté avec succès après intégration des corrections :
 
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **23 suites de tests** au vert, incluant les calculs de KPIs et d'occupation. |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **24 suites de tests** au vert, incluant les calculs de charge, exclusions et permissions. |
 | **Build de Production** | `npm run build` | **RÉUSSI** | Compiles cleanly. Bundle de production Vite généré sans erreurs. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **288 tests E2E Playwright validés** sur Desktop, Tablette et Mobile. |
+| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **303 tests E2E Playwright validés** sur Desktop, Tablette et Mobile (dont Lot 6C). |
 | **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 102/102 invariants validés** (incluant les 102 contrôles QA). |
 
 ---
 
-## 16. Nouveaux Tests E2E Playwright (Lot 6 & Lot 6B)
+## 17. Nouveaux Tests E2E Playwright (Lot 6, Lot 6B & Lot 6C)
 
 La suite E2E a été complétée avec les spécifications suivantes :
 1. `e2e/23-sav-reports.spec.ts` : Valide l'accès aux rapports par rôle, les filtres de période, l'exportation et l'absence stricte de données financières.
 2. `e2e/24-qc-view.spec.ts` : Valide le module Contrôle Qualité dédié (checklist, validation, refus avec motif obligatoire et FTR KPI).
 3. `e2e/25-delivery-view.spec.ts` : Valide le module Livraison dédié (checklist, km de sortie >= km d'entrée, confirmation).
 4. `e2e/26-lot6b-recette.spec.ts` : Valide le bouton démarrer technicien protégé contre les clics forcés, l'occupation dashboard > 0% si des charges existent, et les délais mesurables sur le dossier démo.
+5. `e2e/27-lot6c-terrain-fixes.spec.ts` : Valide la charge des techniciens/ponts non nulle, l'occupation cohérente, l'harmonisation des horaires, l'absence du sélecteur compagnon pour les techniciens standards, le bouton Démarrer bloqué et le message non dupliqué.
 
 ---
 
-## 17. Décision Finale avant Tag v1.1.0
+## 18. Décision Finale avant Tag v1.1.0
 
 **Décision :**
-Les Lots 1 à 6B sont entièrement validés en environnement de test local.
-Cependant, conformément aux exigences obligatoires du Lot 6B, **le tag v1.1.0 reste suspendu** jusqu'à la recette terrain finale par l'équipe cliente post-déploiement.
+Les Lots 1 à 6C sont entièrement validés en environnement de test local.
+Cependant, conformément aux exigences obligatoires du Lot 6C, **le tag v1.1.0 reste suspendu** jusqu'à la recette terrain finale par l'équipe cliente post-déploiement.
 Aucune donnée réelle n'a été committée, et aucun tag Git `v1.1.0` n'a été créé.
 
 

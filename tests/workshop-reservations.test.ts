@@ -408,7 +408,7 @@ console.log("▶ Running tests/workshop-reservations.test.ts...");
 {
   const dossier52 = mockDossier({
     id: "NIMR-2026-52H",
-    dateSouhaiteeLivraison: "2026-06-15T18:00:00", // Start suggesting from Monday 15 June 2026
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00", // Start suggesting from Monday 15 June 2026
     ordresReparation: [
       { id: "task_52", designation: "Task 52 Hours", tempsEstime: 52.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
     ]

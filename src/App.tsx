@@ -1002,6 +1002,8 @@ export default function App() {
                   dossiers={dossiers}
                   techniciens={techList}
                   onUpdateDossier={handleUpdateDossier}
+                  activeRole={activeRole}
+                  currentUserLabel={currentUser?.displayName || ""}
                 />
               )}
 

@@ -905,7 +905,11 @@ export default function DossierDetail({
                             {status !== "in_progress" && (
                               <button
                                 disabled={!canStartLine}
-                                onClick={() => handleStartROLine(line.id)}
+                                onClick={() => {
+                                  if (canStartLine) {
+                                    handleStartROLine(line.id);
+                                  }
+                                }}
                                 data-testid={`task-start-${line.id}`}
                                 className="p-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold text-[10px] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                                 title={startBlockedMessage || "Lancer la tâche"}

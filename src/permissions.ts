@@ -186,4 +186,8 @@ export function canViewDeliveryDashboard(role: UserRole): boolean {
   return role === UserRole.LIVRAISON || role === UserRole.RECEPTIONNAIRE || role === UserRole.DIRECTEUR_SAV;
 }
 
+export function canSimulateTechnicianAccess(role: UserRole): boolean {
+  return role === UserRole.DIRECTEUR_SAV || role === UserRole.CHEF_ATELIER;
+}
+
 

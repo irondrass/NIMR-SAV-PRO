@@ -37,8 +37,8 @@ export default function SettingsView({
   ];
 
   const openingHours = [
-    { day: "Lundi - Vendredi", hm: "08:00 - 12:00, 14:00 - 18:00", active: true },
-    { day: "Samedi", hm: "08:00 - 13:00", active: true },
+    { day: "Lundi - Vendredi", hm: "08:00 - 12:00, 13:00 - 17:00", active: true },
+    { day: "Samedi", hm: "08:00 - 12:00", active: true },
     { day: "Dimanche", hm: "Fermé / Garde d'urgence assistance", active: false }
   ];
 

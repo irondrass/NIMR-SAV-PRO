@@ -1224,7 +1224,7 @@ registerCheck("Lot 5F-4A Invariants", "Gantt distingue réservation et tâche r�
 registerCheck("Lot 5F-4A Invariants", "réservation multi-jours (52h) répartie sur plusieurs jours", () => {
   const dossier = getMockDossier({
     id: "NIMR-QA-52H",
-    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00",
     ordresReparation: [
       { id: "t1", designation: "Task 52H", tempsEstime: 52.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
     ]
@@ -1254,7 +1254,7 @@ registerCheck("Lot 5F-4A Invariants", "réservation multi-jours (52h) répartie 
 registerCheck("Lot 5F-4A Invariants", "validation d'une réservation multi-jours de 52h autorisée", () => {
   const dossier = getMockDossier({
     id: "NIMR-QA-52H",
-    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00",
     ordresReparation: [
       { id: "t1", designation: "Task 52H", tempsEstime: 52.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
     ]
@@ -1493,7 +1493,7 @@ registerCheck("Lot 5F-4B Invariants", "réservation longue saute les jours ferm�
   };
   const dossier = getMockDossier({
     id: "NIMR-QA-LONG",
-    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00",
     ordresReparation: [
       { id: "t1", designation: "Task", tempsEstime: 12.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
     ]
@@ -1524,7 +1524,7 @@ registerCheck("Lot 5F-4B Invariants", "réservation longue saute les absences", 
   };
   const dossier = getMockDossier({
     id: "NIMR-QA-LONG2",
-    dateSouhaiteeLivraison: "2026-06-15T18:00:00",
+    dateSouhaiteeLivraison: "2026-06-15T17:00:00",
     ordresReparation: [
       { id: "t1", designation: "Task", tempsEstime: 12.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
     ]
