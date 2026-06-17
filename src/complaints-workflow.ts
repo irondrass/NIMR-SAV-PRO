@@ -12,6 +12,7 @@ import {
   ReclammationClient,
   UserRole,
 } from "./types";
+import { normalizePlateNumber, sanitizeFreeText } from "./field-validations";
 
 export type ActiveComplaintStatus = Exclude<ComplaintStatus, "en_cours" | "classee">;
 
@@ -91,17 +92,18 @@ export function createComplaint(
   now = new Date()
 ): ReclammationClient {
   const timestamp = now.toISOString();
+  const motif = sanitizeFreeText(input.motif);
   const complaint: ReclammationClient = {
     id: createSequentialComplaintId("REC", existingIds, now),
-    dossierId: input.dossierId.trim() || "NIMR-GEN",
-    clientNom: input.clientNom.trim(),
-    vehiculeNom: input.vehiculeNom.trim() || "Véhicule non spécifié",
-    immatriculation: input.immatriculation?.trim() || "",
-    motif: input.motif.trim(),
+    dossierId: sanitizeFreeText(input.dossierId) || "NIMR-GEN",
+    clientNom: sanitizeFreeText(input.clientNom),
+    vehiculeNom: sanitizeFreeText(input.vehiculeNom) || "Véhicule non spécifié",
+    immatriculation: normalizePlateNumber(input.immatriculation || ""),
+    motif,
     criticite: input.criticite,
-    responsable: input.responsable.trim() || "Responsable SAV à affecter",
+    responsable: sanitizeFreeText(input.responsable) || "Responsable SAV à affecter",
     statut: "nouvelle",
-    actionCorrective: input.actionCorrective?.trim() || "À définir",
+    actionCorrective: sanitizeFreeText(input.actionCorrective || "") || "À définir",
     delaiCible: input.delaiCible || "",
     delaiTraitement: input.delaiCible || "À définir",
     dateCreation: timestamp,
@@ -114,7 +116,7 @@ export function createComplaint(
     actor,
     action: "Création réclamation",
     newStatus: "nouvelle",
-    comment: input.motif.trim(),
+    comment: motif,
     now,
   });
 }
@@ -128,11 +130,17 @@ export function updateComplaint(
 ): ReclammationClient {
   assertComplaintEditable(complaint);
   const normalized = normalizeComplaint(complaint);
+  const sanitizedChanges = { ...changes };
+  if (changes.motif !== undefined) sanitizedChanges.motif = sanitizeFreeText(changes.motif);
+  if (changes.actionCorrective !== undefined) sanitizedChanges.actionCorrective = sanitizeFreeText(changes.actionCorrective);
+  if (changes.immatriculation !== undefined) sanitizedChanges.immatriculation = normalizePlateNumber(changes.immatriculation);
+  if (changes.vehiculeNom !== undefined) sanitizedChanges.vehiculeNom = sanitizeFreeText(changes.vehiculeNom);
+  if (changes.clientNom !== undefined) sanitizedChanges.clientNom = sanitizeFreeText(changes.clientNom);
   const next: ReclammationClient = {
     ...normalized,
-    ...changes,
+    ...sanitizedChanges,
     statut: normalizeComplaintStatus(normalized.statut),
-    delaiTraitement: changes.delaiCible ?? changes.delaiTraitement ?? normalized.delaiTraitement,
+    delaiTraitement: sanitizedChanges.delaiCible ?? sanitizedChanges.delaiTraitement ?? normalized.delaiTraitement,
   };
 
   return appendComplaintHistory(next, {
@@ -206,7 +214,7 @@ export function addComplaintAction(
 ): ReclammationClient {
   assertComplaintEditable(complaint);
   const normalized = normalizeComplaint(complaint);
-  const nextAction = actionCorrective.trim();
+  const nextAction = sanitizeFreeText(actionCorrective);
   if (!nextAction) {
     throw new Error("L'action corrective est obligatoire.");
   }
@@ -369,7 +377,7 @@ function appendComplaintHistory(
     action: entry.action,
     ancienStatut: entry.oldStatus,
     nouveauStatut: entry.newStatus,
-    commentaire: entry.comment?.trim() || "",
+    commentaire: sanitizeFreeText(entry.comment || ""),
     ancienResponsable: entry.oldOwner,
     nouveauResponsable: entry.newOwner,
   };
@@ -378,7 +386,7 @@ function appendComplaintHistory(
     timestamp,
     `${entry.actor.user} (${entry.actor.role})`,
     entry.action,
-    entry.comment ? `Commentaire: ${entry.comment}` : "",
+    entry.comment ? `Commentaire: ${sanitizeFreeText(entry.comment)}` : "",
   ].filter(Boolean).join(" - ");
 
   return {

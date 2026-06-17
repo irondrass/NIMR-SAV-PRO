@@ -25,6 +25,7 @@ import {
   WorkshopAvailabilityConfig,
 } from "./types";
 import { createComplaint } from "./complaints-workflow";
+import { normalizePlateNumber, sanitizeFreeText, validateTechnicianDiagnostic } from "./field-validations";
 import {
   validateAvailabilityForSlot,
   isTechnicianAbsent,
@@ -220,37 +221,51 @@ export function createReceptionDossier(
   const deliveryDate = new Date(now.getTime() + DELIVERY_OFFSET_MS).toISOString();
   const safeKilometrage = Number.isFinite(input.vehiculeKilometrage) ? input.vehiculeKilometrage : 0;
   const fuelLevel = Math.min(100, Math.max(0, input.niveauCarburant));
+  const clientNom = sanitizeFreeText(input.clientNom);
+  const deposantNom = sanitizeFreeText(input.deposantNom);
+  const clientTelephone = sanitizeFreeText(input.clientTelephone);
+  const deposantTelephone = sanitizeFreeText(input.deposantTelephone);
+  const vehiculeMarque = sanitizeFreeText(input.vehiculeMarque);
+  const vehiculeModele = sanitizeFreeText(input.vehiculeModele);
+  const vehiculeImmatriculation = normalizePlateNumber(input.vehiculeImmatriculation);
+  const vehiculeVIN = sanitizeFreeText(input.vehiculeVIN).toUpperCase();
+  const vehiculeCouleur = sanitizeFreeText(input.vehiculeCouleur);
+  const plainteClient = sanitizeFreeText(input.plainteClient);
+  const observationsReception = sanitizeFreeText(input.observationsReception);
 
   return {
     id: createSequentialBusinessId("NIMR", existingIds, now),
-    clientNom: input.clientNom.trim() || "Client Inconnu",
-    clientTelephone: input.clientTelephone.trim() || "+216 20 000 000",
-    deposantNom: input.deposantNom.trim() || input.clientNom.trim() || "Déposant",
-    deposantTelephone: input.deposantTelephone.trim() || input.clientTelephone.trim() || "+216 20 000 000",
-    vehiculeMarque: input.vehiculeMarque,
-    vehiculeModele: input.vehiculeModele.trim() || "Modèle standard",
-    vehiculeImmatriculation: input.vehiculeImmatriculation.trim() || "000 TU 0000",
-    vehiculeVIN: input.vehiculeVIN.trim() || "17-VIN-PLACEHOLDER",
+    clientNom: clientNom || "Client Inconnu",
+    clientTelephone: clientTelephone || "+216 20 000 000",
+    deposantNom: deposantNom || clientNom || "Déposant",
+    deposantTelephone: deposantTelephone || clientTelephone || "+216 20 000 000",
+    vehiculeMarque: vehiculeMarque || "Dongfeng",
+    vehiculeModele: vehiculeModele || "Modèle standard",
+    vehiculeImmatriculation: vehiculeImmatriculation || "000 TU 0000",
+    vehiculeVIN: vehiculeVIN || "17-VIN-PLACEHOLDER",
     vehiculeKilometrage: Math.max(0, safeKilometrage),
-    vehiculeCouleur: input.vehiculeCouleur.trim() || "Non spécifiée",
-    vehiculeVersion: input.vehiculeVersion || "",
-    dateLivraison: input.dateLivraison || "",
-    dateMiseCirculation: input.dateMiseCirculation || "",
-    statutGarantie: input.statutGarantie || "Garantie inconnue",
-    dernierEntretien: input.dernierEntretien || "",
+    vehiculeCouleur: vehiculeCouleur || "Non spécifiée",
+    vehiculeVersion: sanitizeFreeText(input.vehiculeVersion || ""),
+    dateLivraison: sanitizeFreeText(input.dateLivraison || ""),
+    dateMiseCirculation: sanitizeFreeText(input.dateMiseCirculation || ""),
+    statutGarantie: sanitizeFreeText(input.statutGarantie || "Garantie inconnue"),
+    dernierEntretien: sanitizeFreeText(input.dernierEntretien || ""),
     typeDossier: input.typeDossier,
     priorite: input.priorite,
-    plainteClient: input.plainteClient.trim() || "R.A.S. - Entretien périodique",
-    observationsReception: input.observationsReception.trim() || "Aucune observation particulière",
+    plainteClient: plainteClient || "R.A.S. - Entretien périodique",
+    observationsReception: observationsReception || "Aucune observation particulière",
     photosAvant: input.photosAvant.map((photo): CameraPhoto => ({
       ...photo,
-      title: photo.title.trim() || "Photo réception",
+      title: sanitizeFreeText(photo.title) || "Photo réception",
       category: normalizePhotoCategory(photo.category),
       takenBy: photo.takenBy || "Conseiller Client NIMR",
     })),
     niveauCarburant: fuelLevel,
-    etatCarrosserie: input.etatCarrosserie,
-    objetsLaisses: input.objetsLaisses,
+    etatCarrosserie: {
+      ...input.etatCarrosserie,
+      autresNotes: sanitizeFreeText(input.etatCarrosserie.autresNotes),
+    },
+    objetsLaisses: input.objetsLaisses.map(sanitizeFreeText).filter(Boolean),
     dateReception: receptionDate,
     dateSouhaiteeLivraison: deliveryDate,
     statut: DossierStatus.VEHICULE_RECU,
@@ -510,6 +525,8 @@ export function releaseRepairOrderBlock(
       dossierChanges: {
         statut: DossierStatus.TRAVAUX_PLANIFIES,
         bloqueRaison: "",
+        bloqueSparePartRef: "",
+        bloqueSparePartEta: "",
         prochaineActionRecommended: "Reprendre la tâche après levée du blocage",
       },
       dossierLog: `Levée de blocage tâche ${line.designation}: ${reason.trim()}`,
@@ -540,7 +557,9 @@ export function blockRepairOrder(
   lineId: string,
   reason = "Blocage technique atelier",
   userRole: UserRole = UserRole.TECHNICIEN,
-  now = new Date()
+  now = new Date(),
+  sparePartRef?: string,
+  sparePartEta?: string
 ): TaskMutationResult {
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
     if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
@@ -552,6 +571,8 @@ export function blockRepairOrder(
       dossierChanges: {
         statut: DossierStatus.BLOQUE,
         bloqueRaison: reason,
+        bloqueSparePartRef: sparePartRef || "",
+        bloqueSparePartEta: sparePartEta || "",
         prochaineActionRecommended: `Lever le blocage atelier: ${reason}`,
       },
       dossierLog: `[${userRole}] - Blocage Tâche "${line.designation}" - Motif: ${reason}`,
@@ -559,7 +580,16 @@ export function blockRepairOrder(
   });
 }
 
-export function finishRepairOrder(dossiers: DossierSAV[], dossierId: string, lineId: string, now = new Date()): TaskMutationResult {
+export function finishRepairOrder(
+  dossiers: DossierSAV[],
+  dossierId: string,
+  lineId: string,
+  diagnosticOrNow: string | Date = "",
+  nowArg = new Date()
+): TaskMutationResult {
+  const diagnostic = diagnosticOrNow instanceof Date ? "" : sanitizeFreeText(diagnosticOrNow);
+  const now = diagnosticOrNow instanceof Date ? diagnosticOrNow : nowArg;
+
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ dossier, line }) => {
     if (normalizeRepairOrderStatus(line.status) === "done") {
       return { ok: false, error: "Cette tâche est déjà terminée." };
@@ -567,8 +597,15 @@ export function finishRepairOrder(dossiers: DossierSAV[], dossierId: string, lin
     if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
       return { ok: false, error: "Une tâche doit être en cours avant d'être terminée." };
     }
+    if (!validateTechnicianDiagnostic(diagnostic)) {
+      return { ok: false, error: "Diagnostic invalide (au moins 15 caractères requis et ne doit pas être un mot trivial)." };
+    }
 
-    const nextLine = appendLineHistory({ ...line, status: "done", tempsPasse: Math.max(line.tempsPasse, line.tempsEstime) }, now, "Tâche terminée.");
+    const nextLine = appendLineHistory(
+      { ...line, status: "done", tempsPasse: Math.max(line.tempsPasse, line.tempsEstime) },
+      now,
+      `Tâche terminée. Diagnostic: ${diagnostic}`
+    );
     const nextLines = dossier.ordresReparation.map(current => current.id === lineId ? nextLine : current);
     const allDone = nextLines.every(isRepairOrderDone);
 
@@ -581,7 +618,7 @@ export function finishRepairOrder(dossiers: DossierSAV[], dossierId: string, lin
           ? "Lancer le contrôle qualité d'essai routier"
           : "Continuer les ordres de réparation restants",
       },
-      dossierLog: `Tâche "${line.designation}" terminée`,
+      dossierLog: `Tâche "${line.designation}" terminée - Diagnostic: ${diagnostic}`,
     };
   });
 }
@@ -1105,11 +1142,19 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   return buildPlanningValidationResult(codes, submittedSegments);
 }
 
-export function blockDossier(dossier: DossierSAV, reason: string, now = new Date()): DossierSAV {
+export function blockDossier(
+  dossier: DossierSAV,
+  reason: string,
+  now = new Date(),
+  sparePartRef?: string,
+  sparePartEta?: string
+): DossierSAV {
   return {
     ...dossier,
     statut: DossierStatus.BLOQUE,
     bloqueRaison: reason,
+    bloqueSparePartRef: sparePartRef || "",
+    bloqueSparePartEta: sparePartEta || "",
     dateDernierStatut: now.toISOString(),
     prochaineActionRecommended: "Traiter la cause de blocage technique",
   };
@@ -1120,6 +1165,8 @@ export function releaseDossierBlock(dossier: DossierSAV, now = new Date()): Doss
     ...dossier,
     statut: DossierStatus.EN_TRAVAUX,
     bloqueRaison: "",
+    bloqueSparePartRef: "",
+    bloqueSparePartEta: "",
     dateDernierStatut: now.toISOString(),
   };
 }
@@ -1153,6 +1200,7 @@ export function submitQualityControl(
       ...dossier,
       checklistQC: updatedQC,
       statut: DossierStatus.PRET_A_LIVRER,
+      retourQualite: false,
       prochaineActionRecommended: "Aviser le client et convenir de la date de livraison",
       bloqueRaison: "",
       dateDernierStatut: now.toISOString(),
@@ -1163,6 +1211,7 @@ export function submitQualityControl(
     ...dossier,
     checklistQC: updatedQC,
     statut: DossierStatus.EN_TRAVAUX,
+    retourQualite: true,
     prochaineActionRecommended: `Retour atelier suite à refus contrôle qualité. Motif: ${comment}`,
     bloqueRaison: "",
     dateDernierStatut: now.toISOString(),

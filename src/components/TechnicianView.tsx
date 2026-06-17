@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
 import { DossierSAV, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole, CameraPhoto } from "../types";
 import {
@@ -18,6 +18,7 @@ import {
   startRepairOrder
 } from "../sav-core";
 import { fileToCameraPhoto } from "../photo-utils";
+import { sanitizeFreeText, validateTechnicianDiagnostic } from "../field-validations";
 import { canSimulateTechnicianAccess } from "../permissions";
 import { 
   Play, 
@@ -55,6 +56,12 @@ const OBSERVATION_PRESETS = [
   "Plaquette de frein usée à remplacer"
 ];
 
+const DIAGNOSTIC_PRESETS = [
+  "Travaux réalisés et essai statique conforme",
+  "Réparation terminée, contrôle visuel et fonctionnel conforme",
+  "Intervention finalisée avec essai routier satisfaisant"
+];
+
 export default function TechnicianView({ dossiers, techniciens, onUpdateDossier, activeRole, currentUserLabel }: TechnicianViewProps) {
   const [selectedTechId, setSelectedTechId] = useState<string>("tech_01");
   const [tempNotes, setTempNotes] = useState<Record<string, string>>({});
@@ -72,6 +79,12 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
   const [modalActive, setModalActive] = useState<boolean>(false);
   const [modalTargetDossierId, setModalTargetDossierId] = useState<string | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
+  const [finishModalActive, setFinishModalActive] = useState(false);
+  const [finishDiagnostic, setFinishDiagnostic] = useState("");
+  const [finishPreset, setFinishPreset] = useState("");
+  const [finishTarget, setFinishTarget] = useState<{ dossierId: string; lineId: string } | null>(null);
+  const [finishSubmitting, setFinishSubmitting] = useState(false);
+  const finishSubmitRef = useRef(false);
 
   const canSimulate = canSimulateTechnicianAccess(activeRole);
 
@@ -132,10 +145,17 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
       return;
     }
 
+    if (action === "finish") {
+      setFinishTarget({ dossierId, lineId });
+      setFinishDiagnostic("");
+      setFinishPreset("");
+      setFinishModalActive(true);
+      return;
+    }
+
     const result =
       action === "start" ? startRepairOrder(dossiers, dossierId, lineId) :
-      action === "pause" ? pauseRepairOrder(dossiers, dossierId, lineId) :
-      finishRepairOrder(dossiers, dossierId, lineId);
+      pauseRepairOrder(dossiers, dossierId, lineId);
 
     if (result.ok === false) {
       setErrorMsg(result.error || "Une erreur est survenue.");
@@ -143,6 +163,36 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
     }
     onUpdateDossier(result.dossier);
     setSuccessMsg(`Tâche ${action === "start" ? "démarrée" : action === "pause" ? "suspendue" : "terminée"} avec succès !`);
+  };
+
+  const handleFinishConfirm = () => {
+    if (!finishTarget || finishSubmitRef.current) return;
+    const diagnostic = sanitizeFreeText(finishPreset || finishDiagnostic);
+    const usesPreset = Boolean(finishPreset);
+    if (!validateTechnicianDiagnostic(diagnostic, usesPreset)) {
+      setErrorMsg("Diagnostic invalide : minimum 15 caractères, ou modèle prédéfini, et pas de réponse courte type ok/fait/ras.");
+      return;
+    }
+
+    finishSubmitRef.current = true;
+    setFinishSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    const result = finishRepairOrder(dossiers, finishTarget.dossierId, finishTarget.lineId, diagnostic);
+    if (result.ok === false) {
+      setErrorMsg(result.error || "Impossible de terminer la tâche.");
+      setFinishSubmitting(false);
+      finishSubmitRef.current = false;
+      return;
+    }
+    onUpdateDossier(result.dossier);
+    setSuccessMsg("Tâche terminée avec diagnostic validé.");
+    setFinishModalActive(false);
+    setFinishTarget(null);
+    setFinishDiagnostic("");
+    setFinishPreset("");
+    setFinishSubmitting(false);
+    finishSubmitRef.current = false;
   };
 
   const handleBlockConfirm = (reason: string, details: string) => {
@@ -629,6 +679,74 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
           </div>
         )}
       </div>
+      )}
+
+      {finishModalActive && (
+        <div data-testid="modal-task-finish" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xl">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase">Diagnostic de clôture obligatoire</h3>
+                <p className="mt-1 text-slate-500">
+                  Saisissez un diagnostic exploitable avant de passer la tâche à terminée.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700">Modèle prédéfini</label>
+              <select
+                data-testid="modal-task-finish-preset"
+                value={finishPreset}
+                onChange={(e) => {
+                  setFinishPreset(e.target.value);
+                  if (e.target.value) setFinishDiagnostic(e.target.value);
+                }}
+                className="w-full rounded-lg border border-slate-200 bg-white p-2.5 font-semibold text-slate-800"
+              >
+                <option value="">Diagnostic libre</option>
+                {DIAGNOSTIC_PRESETS.map(preset => (
+                  <option key={preset} value={preset}>{preset}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700">Diagnostic technicien</label>
+              <textarea
+                data-testid="modal-task-finish-diagnostic"
+                value={finishDiagnostic}
+                onChange={(e) => {
+                  setFinishDiagnostic(e.target.value);
+                  setFinishPreset("");
+                }}
+                className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                placeholder="Ex: Filtre remplacé, essai statique OK, aucun bruit résiduel constaté."
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                data-testid="modal-task-finish-cancel"
+                onClick={() => {
+                  setFinishModalActive(false);
+                  setFinishTarget(null);
+                }}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-extrabold text-slate-700"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="modal-task-finish-confirm"
+                disabled={finishSubmitting || !validateTechnicianDiagnostic(finishPreset || finishDiagnostic, Boolean(finishPreset))}
+                onClick={handleFinishConfirm}
+                className="rounded-lg bg-green-600 px-4 py-2 font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                {finishSubmitting ? "Traitement..." : "Terminer"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <StandardReasonModal

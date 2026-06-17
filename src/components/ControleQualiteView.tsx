@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import StandardReasonModal from "./StandardReasonModal";
 import { DossierSAV, UserRole, DossierStatus } from "../types";
 import { submitQualityControl } from "../sav-core";
+import { sanitizeFreeText } from "../field-validations";
 import { 
   CheckCircle, 
   XCircle, 
@@ -38,6 +40,10 @@ export default function ControleQualiteView({
   const [refusalComment, setRefusalComment] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [showValidateConfirm, setShowValidateConfirm] = useState(false);
+  const [showRefuseConfirm, setShowRefuseConfirm] = useState(false);
+  const [isSubmittingQC, setIsSubmittingQC] = useState(false);
+  const qcSubmitRef = useRef(false);
 
   // Local checklist state for the currently selected dossier
   const [essaiEffectue, setEssaiEffectue] = useState(false);
@@ -57,6 +63,8 @@ export default function ControleQualiteView({
     setRefusalComment("");
     setValidationError(null);
     setSuccessMsg(null);
+    setShowValidateConfirm(false);
+    setShowRefuseConfirm(false);
     
     // Pre-populate with existing values if any
     setEssaiEffectue(dossier.checklistQC.essaiEffectue || false);
@@ -121,6 +129,14 @@ export default function ControleQualiteView({
       return;
     }
 
+    setShowValidateConfirm(true);
+  };
+
+  const confirmValidateQC = () => {
+    if (qcSubmitRef.current || !selectedDossier) return;
+    qcSubmitRef.current = true;
+    setIsSubmittingQC(true);
+
     const updatedDossier: DossierSAV = {
       ...selectedDossier,
       checklistQC: {
@@ -146,17 +162,23 @@ export default function ControleQualiteView({
     onUpdateDossier(validated);
     setSuccessMsg(`Contrôle qualité validé pour le dossier ${selectedDossier.id} ! Le véhicule est prêt à être livré.`);
     setSelectedDossierId(null);
+    setShowValidateConfirm(false);
+    setIsSubmittingQC(false);
+    qcSubmitRef.current = false;
   };
 
   const handleRefuseQC = () => {
     setValidationError(null);
     setSuccessMsg(null);
     if (!selectedDossier) return;
+    setShowRefuseConfirm(true);
+  };
 
-    if (!refusalComment.trim()) {
-      setValidationError("Le motif du refus est obligatoire pour renvoyer le véhicule à l'atelier.");
-      return;
-    }
+  const confirmRefuseQC = (reason: string, details: string) => {
+    if (qcSubmitRef.current || !selectedDossier) return;
+    qcSubmitRef.current = true;
+    setIsSubmittingQC(true);
+    const fullReason = sanitizeFreeText(`${reason} : ${details}`);
 
     const updatedDossier: DossierSAV = {
       ...selectedDossier,
@@ -173,16 +195,20 @@ export default function ControleQualiteView({
       }
     };
 
-    const refused = submitQualityControl(updatedDossier, currentUser.role, "refuse", refusalComment, new Date());
+    const refused = submitQualityControl(updatedDossier, currentUser.role, "refuse", fullReason, new Date());
     
     // Add custom actor information to logs
     const timestamp = new Date().toISOString();
-    const formattedLog = `${timestamp} - [${currentUser.role}] - Contrôle Qualité REFUSÉ par ${currentUser.displayName}. Motif: ${refusalComment}`;
+    const formattedLog = `${timestamp} - [${currentUser.role}] - Contrôle Qualité REFUSÉ par ${currentUser.displayName}. Motif: ${fullReason}`;
     refused.historiqueLogs = [formattedLog, ...(refused.historiqueLogs || [])];
 
     onUpdateDossier(refused);
     setSuccessMsg(`Contrôle qualité refusé pour le dossier ${selectedDossier.id}. Le véhicule est retourné en atelier.`);
     setSelectedDossierId(null);
+    setRefusalComment("");
+    setShowRefuseConfirm(false);
+    setIsSubmittingQC(false);
+    qcSubmitRef.current = false;
   };
 
   return (
@@ -359,18 +385,20 @@ export default function ControleQualiteView({
 
                 {/* Actions */}
                 <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                  <button
+                    <button
                     data-testid="btn-qc-refuse"
                     onClick={handleRefuseQC}
-                    className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer flex items-center justify-center gap-1.5"
+                    disabled={isSubmittingQC}
+                    className="flex-1 py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     <XCircle className="w-4 h-4" />
                     Refuser & Retour Atelier
                   </button>
-                  <button
+                    <button
                     data-testid="btn-qc-validate"
                     onClick={handleValidateQC}
-                    className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer flex items-center justify-center gap-1.5"
+                    disabled={isSubmittingQC}
+                    className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle className="w-4 h-4" />
                     Valider le Contrôle Qualité
@@ -386,6 +414,57 @@ export default function ControleQualiteView({
           )}
         </div>
       </div>
+
+      {showValidateConfirm && selectedDossier && (
+        <div data-testid="modal-qc-validate" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-6 w-6 shrink-0 text-amber-600" />
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800">Valider le contrôle qualité</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Confirmez-vous la validation QC du dossier {selectedDossier.id} et son passage en prêt à livrer ?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="modal-qc-validate-cancel"
+                onClick={() => setShowValidateConfirm(false)}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="modal-qc-validate-confirm"
+                disabled={isSubmittingQC}
+                onClick={confirmValidateQC}
+                className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500"
+              >
+                {isSubmittingQC ? "Traitement..." : "Confirmer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <StandardReasonModal
+        isOpen={showRefuseConfirm && !!selectedDossier}
+        onClose={() => setShowRefuseConfirm(false)}
+        onConfirm={confirmRefuseQC}
+        title="Refus du contrôle qualité"
+        description="Le retour atelier exige un motif standardisé et un commentaire exploitable."
+        reasons={[
+          "Essai routier non validé",
+          "Défaut d'aspect carrosserie",
+          "Bruit ou vibration persistant",
+          "Voyant anomalie actif",
+          "Autre"
+        ]}
+        testIdPrefix="modal-qc-refuse"
+      />
 
       {/* QC History Section */}
       <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-xs">

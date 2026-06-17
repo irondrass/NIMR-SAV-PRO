@@ -73,6 +73,8 @@ test.describe("Rôle : Contrôle Qualité", () => {
 
     // Now click accept
     await humanClick(page, page.locator('[data-testid="qc-accept"]'));
+    await expect(page.locator('[data-testid="modal-qc-validate-detail"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="modal-qc-validate-detail-confirm"]'));
 
     // Should display validation success status message
     await expect(page.locator('[data-testid="qc-status-message"]')).toBeVisible();
@@ -129,8 +131,11 @@ test.describe("Rôle : Contrôle Qualité", () => {
     const select = page.locator('[data-testid="modal-qc-refuse-select"]');
     await select.selectOption("Bruit ou vibration persistant");
  
-    // Confirm button should be enabled now
     const confirmBtn = page.locator('[data-testid="modal-qc-refuse-confirm"]');
+    await expect(confirmBtn).toBeDisabled();
+    await page.locator('[data-testid="modal-qc-refuse-input"]').fill("Vibration persistante constatée pendant l'essai routier.");
+
+    // Confirm button should be enabled now
     await expect(confirmBtn).toBeEnabled();
  
     // Click confirm

@@ -6,3 +6,21 @@
   --font-display: "Outfit", "Inter", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
+
+@media print {
+  /* Hide standard UI elements */
+  body * {
+    visibility: hidden;
+  }
+  #nimr-print-container, #nimr-print-container * {
+    visibility: visible;
+  }
+  #nimr-print-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: white !important;
+    color: black !important;
+  }
+}

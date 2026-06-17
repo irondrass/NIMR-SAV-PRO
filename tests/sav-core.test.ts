@@ -1040,9 +1040,9 @@ async function testLocalUsersAndSessions() {
   assert.equal(isSessionValid(session, directorLogin.users, now), true);
   assert.equal(isSessionValid(null, directorLogin.users, now), false);
 
-  // TTL expiration tests
-  assert.equal(isSessionValid(session, directorLogin.users, new Date(now.getTime() + 7 * 60 * 60 * 1000)), true); // 7h
-  assert.equal(isSessionValid(session, directorLogin.users, new Date(now.getTime() + 9 * 60 * 60 * 1000)), false); // 9h
+  // Session inactivity timeout: 30 minutes
+  assert.equal(isSessionValid(session, directorLogin.users, new Date(now.getTime() + 29 * 60 * 1000)), true);
+  assert.equal(isSessionValid(session, directorLogin.users, new Date(now.getTime() + 31 * 60 * 1000)), false);
 
   // Rate limiting tests
   // Reset memory storage before tests to ensure isolation

@@ -68,6 +68,8 @@ test.describe("BUG-005 — Module Livraison dédié", () => {
 
     // Confirm delivery
     await humanClick(page, page.locator('[data-testid="btn-delivery-confirm"]'));
+    await expect(page.locator('[data-testid="modal-delivery-confirm"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="modal-delivery-confirm"]'));
 
     // Success notice and removal
     await expect(page.locator("text=Livraison confirmée pour le dossier NIMR-DEL-001")).toBeVisible();

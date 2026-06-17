@@ -93,7 +93,7 @@ test.describe("Rôle : Réceptionnaire", () => {
 
     // Fill remaining fields (plate, VIN, mileage)
     await humanFill(page, page.locator('[data-testid="reception-plate"]'), "999 TU 9999");
-    await humanFill(page, page.locator('[data-testid="reception-vin"]'), "DEMOVIN1234567890");
+    await humanFill(page, page.locator('[data-testid="reception-vin"]'), "1HGCM82633A004352");
     await humanFill(page, page.locator('[data-testid="reception-mileage"]'), "12500");
     
     // Move to next step
@@ -130,6 +130,8 @@ test.describe("Rôle : Réceptionnaire", () => {
 
     // Submit form
     await humanClick(page, page.locator('[data-testid="reception-submit"]'));
+    await expect(page.locator('[data-testid="reception-submit-modal"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="reception-submit-confirm"]'));
 
     // --- STEP 5: Success & Reload/Persistence ---
     // Reload page to test database persistence

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { DossierSAV, UserRole, DossierStatus } from "../types";
 import { confirmDelivery } from "../sav-core";
 import { 
@@ -18,6 +18,8 @@ import {
   FileText
 } from "lucide-react";
 import { LicencePlate } from "./UIParts";
+import { maskPhoneNumber, sanitizeFreeText, validateMileage } from "../field-validations";
+import { canViewVehicleSensitiveFields } from "../permissions";
 
 interface LivraisonViewProps {
   dossiers: DossierSAV[];
@@ -44,7 +46,86 @@ export default function LivraisonView({
   const [clientInformed, setClientInformed] = useState(false);
   const [clientReceptionConfirmed, setClientReceptionConfirmed] = useState(false);
 
+  // Canvas Signature state
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [signatureUri, setSignatureUri] = useState("");
+  const [hasSigned, setHasSigned] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Confirm Modal State
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isConfirmingDelivery, setIsConfirmingDelivery] = useState(false);
+  const deliveryConfirmRef = useRef(false);
+
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId);
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.strokeStyle = "#0f172a"; // slate-900
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX = 0;
+    let clientY = 0;
+    if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+    setIsDrawing(true);
+    setHasSigned(true);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX = 0;
+    let clientY = 0;
+    if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    const canvas = canvasRef.current;
+    if (canvas) {
+      setSignatureUri(canvas.toDataURL());
+    }
+  };
+
+  const clearSignature = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setSignatureUri("");
+    setHasSigned(false);
+  };
 
   const handleSelectDossier = (dossier: DossierSAV) => {
     setSelectedDossierId(dossier.id);
@@ -56,6 +137,10 @@ export default function LivraisonView({
     setQcOk(dossier.livraison.controleQualiteOk || false);
     setClientInformed(dossier.livraison.clientInforme || false);
     setClientReceptionConfirmed(dossier.livraison.confirmationReceptionClient || false);
+
+    // Reset signature canvas
+    setSignatureUri(dossier.livraison.signatureClientUri || "");
+    setHasSigned(!!dossier.livraison.signatureClientUri);
   };
 
   // 1. Filter dossiers
@@ -69,25 +154,54 @@ export default function LivraisonView({
     });
 
   const handleConfirmDelivery = () => {
+    if (deliveryConfirmRef.current) return;
+    deliveryConfirmRef.current = true;
+    setIsConfirmingDelivery(true);
     setValidationError(null);
     setSuccessMsg(null);
-    if (!selectedDossier) return;
+    if (!selectedDossier) {
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
+      return;
+    }
 
     if (!qcOk || !clientInformed || !clientReceptionConfirmed) {
       setValidationError("Toutes les étapes de la checklist de restitution doivent être cochées pour confirmer la livraison.");
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
       return;
     }
 
     const parsedExitKm = parseInt(exitKm, 10);
-    if (isNaN(parsedExitKm) || parsedExitKm < 0) {
-      setValidationError("Le kilométrage de sortie est obligatoire et doit être un nombre valide.");
+    const mileageCheck = validateMileage(parsedExitKm);
+    if (isNaN(parsedExitKm) || !mileageCheck.valid) {
+      setValidationError(mileageCheck.reason || "Le kilométrage de sortie est obligatoire et doit être un nombre valide.");
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
       return;
     }
 
     if (parsedExitKm < selectedDossier.vehiculeKilometrage) {
       setValidationError(`Le kilométrage de sortie (${parsedExitKm} km) ne peut pas être inférieur au kilométrage d'entrée (${selectedDossier.vehiculeKilometrage} km).`);
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
       return;
     }
+
+    if (!remarks.trim()) {
+      setValidationError("Le commentaire de restitution est obligatoire.");
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
+      return;
+    }
+
+    if (!hasSigned) {
+      setValidationError("La signature client tactile est obligatoire.");
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
+      return;
+    }
+    const safeRemarks = sanitizeFreeText(remarks);
 
     const withDeliveryInfo: DossierSAV = {
       ...selectedDossier,
@@ -96,8 +210,9 @@ export default function LivraisonView({
         controleQualiteOk: qcOk,
         clientInforme: clientInformed,
         confirmationReceptionClient: clientReceptionConfirmed,
-        remarquesLivraison: remarks,
+        remarquesLivraison: safeRemarks,
         kilometrageSortie: parsedExitKm,
+        signatureClientUri: signatureUri || undefined,
       }
     };
 
@@ -105,12 +220,15 @@ export default function LivraisonView({
 
     // Add delivery log with actor and details
     const timestamp = new Date().toISOString();
-    const formattedLog = `${timestamp} - [${currentUser.role}] - Restitution validée. KM Sortie: ${parsedExitKm}. Obs: ${remarks || "Aucune"}`;
+    const formattedLog = `${timestamp} - [${currentUser.role}] - Restitution validée. KM Sortie: ${parsedExitKm}. Obs: ${safeRemarks || "Aucune"}`;
     delivered.historiqueLogs = [formattedLog, ...(delivered.historiqueLogs || [])];
 
     onUpdateDossier(delivered);
     setSuccessMsg(`Livraison confirmée pour le dossier ${selectedDossier.id} ! Le véhicule est maintenant marqué comme livré.`);
     setSelectedDossierId(null);
+    setShowConfirmModal(false);
+    setIsConfirmingDelivery(false);
+    deliveryConfirmRef.current = false;
   };
 
   return (
@@ -195,6 +313,7 @@ export default function LivraisonView({
         {/* Right column: Delivery Checklist & Form */}
         <div className="lg:col-span-7">
           {selectedDossier ? (
+            <>
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               {/* Selected vehicle summary header */}
               <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-start gap-4">
@@ -208,13 +327,13 @@ export default function LivraisonView({
                     {selectedDossier.vehiculeMarque} {selectedDossier.vehiculeModele} — KM Entrée: {selectedDossier.vehiculeKilometrage} km
                   </p>
                 </div>
-                <div className="text-right">
+                 <div className="text-right">
                   <span className="text-[10px] uppercase font-bold text-slate-400">Client / Déposant</span>
                   <p className="text-xs font-bold text-slate-700 mt-0.5">
                     {selectedDossier.clientNom}
                   </p>
-                  <p className="text-[10px] text-slate-500">
-                    {selectedDossier.clientTelephone}
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    {canViewVehicleSensitiveFields(currentUser.role) ? selectedDossier.clientTelephone : maskPhoneNumber(selectedDossier.clientTelephone)}
                   </p>
                 </div>
               </div>
@@ -281,7 +400,14 @@ export default function LivraisonView({
                       <input
                         type="checkbox"
                         checked={clientReceptionConfirmed}
-                        onChange={e => setClientReceptionConfirmed(e.target.checked)}
+                        onChange={e => {
+                          setClientReceptionConfirmed(e.target.checked);
+                          if (e.target.checked) {
+                            setHasSigned(true);
+                          } else {
+                            setHasSigned(Boolean(signatureUri));
+                          }
+                        }}
                         className="w-4.5 h-4.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                       />
                       <span className="text-xs">Confirmation de réception et signature client (Clé remise)</span>
@@ -316,10 +442,41 @@ export default function LivraisonView({
                   </div>
                 </div>
 
+                {/* Canvas Signature Pad */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase text-slate-400 tracking-wider block">
+                    Signature tactile du client (Requis)
+                  </label>
+                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-center gap-2">
+                    <canvas
+                      ref={canvasRef}
+                      width={300}
+                      height={120}
+                      onMouseDown={startDrawing}
+                      onMouseMove={draw}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                      onTouchStart={startDrawing}
+                      onTouchMove={draw}
+                      onTouchEnd={stopDrawing}
+                      className="bg-white border border-slate-200 rounded-lg cursor-crosshair touch-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={clearSignature}
+                        className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-[10px] transition cursor-pointer"
+                      >
+                        Effacer la signature
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Remarks / Remarques de livraison */}
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-slate-400 tracking-wider block">
-                    Observations de livraison / Commentaires
+                    Observations de livraison / Commentaires (Obligatoire)
                   </label>
                   <textarea
                     data-testid="delivery-comment"
@@ -333,7 +490,39 @@ export default function LivraisonView({
                 {/* Confirm delivery button */}
                 <button
                   data-testid="btn-delivery-confirm"
-                  onClick={handleConfirmDelivery}
+                  onClick={() => {
+                    setValidationError(null);
+                    setSuccessMsg(null);
+
+                    if (!qcOk || !clientInformed || !clientReceptionConfirmed) {
+                      setValidationError("Toutes les étapes de la checklist de restitution doivent être cochées pour confirmer la livraison.");
+                      return;
+                    }
+
+                    const parsedExitKm = parseInt(exitKm, 10);
+                    const mileageCheck = validateMileage(parsedExitKm);
+                    if (isNaN(parsedExitKm) || !mileageCheck.valid) {
+                      setValidationError(mileageCheck.reason || "Le kilométrage de sortie est obligatoire et doit être un nombre valide.");
+                      return;
+                    }
+
+                    if (parsedExitKm < selectedDossier.vehiculeKilometrage) {
+                      setValidationError(`Le kilométrage de sortie (${parsedExitKm} km) ne peut pas être inférieur au kilométrage d'entrée (${selectedDossier.vehiculeKilometrage} km).`);
+                      return;
+                    }
+
+                    if (!remarks.trim()) {
+                      setValidationError("Le commentaire de restitution est obligatoire.");
+                      return;
+                    }
+
+                    if (!hasSigned) {
+                      setValidationError("La signature client tactile est obligatoire.");
+                      return;
+                    }
+
+                    setShowConfirmModal(true);
+                  }}
                   className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle className="w-4.5 h-4.5" />
@@ -341,6 +530,42 @@ export default function LivraisonView({
                 </button>
               </div>
             </div>
+
+            {/* Generic Confirm Modal Overlay */}
+            {showConfirmModal && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+                <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+                    <div>
+                      <h3 className="font-extrabold text-slate-800 text-sm">Confirmer livraison</h3>
+                      <p className="text-slate-500 text-xs mt-1">
+                        Êtes-vous sûr de vouloir confirmer la livraison de ce véhicule et la clôture opérationnelle de son dossier ?
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmModal(false)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="modal-delivery-confirm"
+                      onClick={handleConfirmDelivery}
+                      disabled={isConfirmingDelivery}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isConfirmingDelivery ? "Traitement..." : "Confirmer la livraison"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            </>
           ) : (
             <div className="bg-slate-50/50 rounded-2xl border border-slate-100 border-dashed p-8 text-center text-slate-400 text-xs flex flex-col items-center justify-center min-h-[300px]">
               <Truck className="w-10 h-10 text-slate-300 mb-2" />

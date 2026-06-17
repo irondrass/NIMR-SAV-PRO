@@ -53,7 +53,7 @@ export async function ensureDefaultUsers(storedUsers: User[], now = new Date(DEF
   }));
 }
 
-export const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+export const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 export const LOGIN_MAX_ATTEMPTS = 5;
 export const LOGIN_LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -162,7 +162,9 @@ export function isSessionValid(session: UserSession | null, users: User[], now =
   }
   const activityTime = session.lastActivityAt ? new Date(session.lastActivityAt).getTime() : new Date(session.loginAt).getTime();
   const currentTime = now.getTime();
-  return (currentTime - activityTime) < SESSION_TTL_MS;
+  const testTimeout = typeof window !== "undefined" ? (window as any).__TEST_SESSION_TIMEOUT__ : undefined;
+  const timeoutMs = testTimeout !== undefined && testTimeout !== null ? Number(testTimeout) : SESSION_TTL_MS;
+  return (currentTime - activityTime) < timeoutMs;
 }
 
 export function touchSession(session: UserSession, now = new Date()): UserSession {

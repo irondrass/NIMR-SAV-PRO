@@ -32,7 +32,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     // 5. Upload fictitious CSV records using alternative headers (lot 6D mapping)
     const csvContent = 
       `Chassis,Immatriculation,Sell-to Customer Name,Customer Phone,Marque,Description,Version,Delivery Date,Warranty End Date,Last Service Date,Last Service Mileage\n` +
-      `VINFICTIF123,999 TU 999,Bob,+216 99 999 999,Dongfeng,Shine Max,Luxury,15/06/2026,15/06/2029,15/06/2027,15000`;
+      `1HGCM82633A004352,999 TU 999,Bob,+216 99 999 999,Dongfeng,Shine Max,Luxury,15/06/2026,15/06/2029,15/06/2027,15000`;
 
     const fileInput = page.locator('[data-testid="vehicle-master-import-input"]');
     await expect(fileInput).toBeVisible();
@@ -51,12 +51,12 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     // 6. Search for the imported vehicle
     const searchInput = page.locator('[data-testid="vehicle-master-search-input"]');
     await expect(searchInput).toBeVisible();
-    await searchInput.fill("VINFICTIF123");
+    await searchInput.fill("1HGCM82633A004352");
 
     // Verify search result is displayed with correct attributes
     const resultRow = page.locator('[data-testid^="vehicle-result-row-"]');
     await expect(resultRow).toBeVisible();
-    await expect(page.locator('[data-testid^="vehicle-result-vin-"]')).toContainText("VINFICTIF123");
+    await expect(page.locator('[data-testid^="vehicle-result-vin-"]')).toContainText("1HGCM82633A004352");
     await expect(page.locator('[data-testid^="vehicle-result-phone-"]')).toContainText("+216 99 999 999");
     await expect(resultRow).toContainText("Garantie active");
     await expect(resultRow).toContainText("Dernier entretien le 2027-06-15 à 15000 km");
@@ -119,7 +119,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     await expect(brandSelect).toHaveValue("Dongfeng");
     await expect(modelInput).toHaveValue("Shine Max");
     await expect(plateInput).toHaveValue("999 TU 999");
-    await expect(vinInput).toHaveValue("VINFICTIF123");
+    await expect(vinInput).toHaveValue("1HGCM82633A004352");
     await expect(versionInput).toHaveValue("Luxury");
     await expect(deliveryDateInput).toHaveValue("2026-06-15");
     await expect(warrantyBadge).toContainText("Garantie active");
@@ -133,6 +133,8 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     await humanClick(page, nextBtn); // Step 3 -> Step 4
     const submitBtn = page.locator('[data-testid="reception-submit"]');
     await humanClick(page, submitBtn); // Step 4 -> Success Screen
+    await expect(page.locator('[data-testid="reception-submit-modal"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="reception-submit-confirm"]'));
 
     // 9. Go to folders list and verify the record is added
     const foldersTabSelector = '[data-testid="nav-dossiers"]';
@@ -147,7 +149,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     await humanClick(page, bobRow);
 
     // Verify that the VIN is visible in the detailed view
-    await expect(page.locator('text=VINFICTIF123')).toBeVisible();
+    await expect(page.locator('text=1HGCM82633A004352')).toBeVisible();
 
     // Click on Client & Véhicule tab
     const clientTabBtn = page.locator('[data-testid="tab-client"]');
@@ -188,8 +190,8 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     // 1. Setup localStorage directly to bypass the importer duplicate-plate validations
     const mockVehicles = [
       {
-        id: "VINBLUR123",
-        vin: "VINBLUR123",
+        id: "2HGCM82633A004352",
+        vin: "2HGCM82633A004352",
         plateNumber: "888 TU 888",
         customerName: "Charlie",
         customerPhone: "+216 88 888 888",
@@ -207,8 +209,8 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
         importedAt: new Date().toISOString()
       },
       {
-        id: "VINBLUR456",
-        vin: "VINBLUR456",
+        id: "3HGCM82633A004352",
+        vin: "3HGCM82633A004352",
         plateNumber: "888 TU 888",
         customerName: "David",
         customerPhone: "+216 77 777 777",
@@ -226,8 +228,8 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
         importedAt: new Date().toISOString()
       },
       {
-        id: "VINUNIQUE777",
-        vin: "VINUNIQUE777",
+        id: "4HGCM82633A004352",
+        vin: "4HGCM82633A004352",
         plateNumber: "777 TU 777",
         customerName: "Emma",
         customerPhone: "+216 66 666 666",
@@ -270,6 +272,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     const clientNameInput = page.locator('[data-testid="reception-client-name"]');
     const clientPhoneInput = page.locator('[data-testid="reception-client-phone"]');
     await clientNameInput.fill("Temporary client");
+    await clientPhoneInput.fill("+216 88 888 888");
     
     const nextBtn = page.locator('[data-testid="reception-next"]');
     await humanClick(page, nextBtn); // Step 1 -> Step 2
@@ -303,6 +306,8 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
 
     const submitBtn = page.locator('[data-testid="reception-submit"]');
     await humanClick(page, submitBtn); // Step 4 -> Success Screen
+    await expect(page.locator('[data-testid="reception-submit-modal"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="reception-submit-confirm"]'));
 
     // 7. Test Case 2: Create a second dossier for the SAME vehicle and verify duplicate blocking
     const newBtn = page.locator('[data-testid="reception-new-btn"]');
@@ -311,6 +316,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
 
     // Fill client name
     await clientNameInput.fill("Emma");
+    await clientPhoneInput.fill("+216 66 666 666");
     await humanClick(page, nextBtn); // Step 1 -> Step 2
 
     // Blur on the plate of the duplicate vehicle
@@ -345,6 +351,6 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     await humanClick(page, openExistingBtn);
 
     // Detailed view should open, showing Bob's / David's vehicle details
-    await expect(page.locator('text=VINBLUR456')).toBeVisible();
+    await expect(page.locator('text=3HGCM82633A004352')).toBeVisible();
   });
 });

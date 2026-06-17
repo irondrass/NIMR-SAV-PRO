@@ -67,6 +67,8 @@ test.describe("BUG-004 — Module Contrôle Qualité dédié", () => {
 
     // Validate QC
     await humanClick(page, page.locator('[data-testid="btn-qc-validate"]'));
+    await expect(page.locator('[data-testid="modal-qc-validate"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="modal-qc-validate-confirm"]'));
 
     // Success notification should be visible
     await expect(page.locator("text=Contrôle qualité validé pour le dossier NIMR-QC-001")).toBeVisible();
@@ -86,13 +88,15 @@ test.describe("BUG-004 — Module Contrôle Qualité dédié", () => {
     // Select dossier NIMR-QC-002
     await humanClick(page, page.locator('[data-testid="qc-dossier-row-NIMR-QC-002"]'));
 
-    // Try to refuse without motif -> should fail
+    // Try to refuse without motif -> should open a guarded modal
     await humanClick(page, page.locator('[data-testid="btn-qc-refuse"]'));
-    await expect(page.locator("text=Le motif du refus est obligatoire")).toBeVisible();
+    await expect(page.locator('[data-testid="modal-qc-refuse"]')).toBeVisible();
+    await expect(page.locator('[data-testid="modal-qc-refuse-confirm"]')).toBeDisabled();
 
     // Add motif and refuse
-    await humanFill(page, page.locator('[data-testid="qc-comment-refus"]'), "Anomalie frein arrière");
-    await humanClick(page, page.locator('[data-testid="btn-qc-refuse"]'));
+    await page.locator('[data-testid="modal-qc-refuse-select"]').selectOption("Autre");
+    await humanFill(page, page.locator('[data-testid="modal-qc-refuse-input"]'), "Anomalie frein arrière");
+    await humanClick(page, page.locator('[data-testid="modal-qc-refuse-confirm"]'));
 
     // Success message and dossier removed
     await expect(page.locator("text=Contrôle qualité refusé pour le dossier NIMR-QC-002")).toBeVisible();

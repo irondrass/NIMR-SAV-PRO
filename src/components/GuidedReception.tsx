@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   CameraPhoto,
   DossierSAV,
@@ -49,6 +49,16 @@ import {
   getVehicleWarrantyStatus,
   getVehicleReceptionHints
 } from "../vehicle-master";
+import {
+  validateCustomerName,
+  validateTunisianPhone,
+  validatePlateNumber,
+  validateVin,
+  validateMileage,
+  validateComplaintText,
+  sanitizeFreeText,
+  maskPhoneNumber
+} from "../field-validations";
 
 interface GuidedReceptionProps {
   dossiers: DossierSAV[];
@@ -105,6 +115,37 @@ export default function GuidedReception({
 }: GuidedReceptionProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [receptionError, setReceptionError] = useState<string | null>(null);
+
+  const [mileageConfirmed, setMileageConfirmed] = useState(false);
+  const [showMileageConfirmModal, setShowMileageConfirmModal] = useState(false);
+  const [showCancelConfirmModal, setShowCancelConfirmModal] = useState(false);
+  const [showSubmitConfirmModal, setShowSubmitConfirmModal] = useState(false);
+  const [isSubmittingReception, setIsSubmittingReception] = useState(false);
+  const receptionSubmitRef = useRef(false);
+
+  const resetReceptionForm = () => {
+    setClientNom("");
+    setClientTelephone("");
+    setDeposantNom("");
+    setDeposantTelephone("");
+    setVehiculeModele("");
+    setVehiculeImmatriculation("");
+    setVehiculeVIN("");
+    setVehiculeKilometrage(15000);
+    setVehiculeCouleur("");
+    setVehiculeVersion("");
+    setVehiculeDateLivraison("");
+    setVehiculeDateMiseCirculation("");
+    setVehiculeStatutGarantie("");
+    setVehiculeDernierEntretien("");
+    setPlainteClient("");
+    setObservationsReception("");
+    setPhotosPre([]);
+    setPhotoCategory("réception avant");
+    setMileageConfirmed(false);
+    setReceptionError(null);
+    setCurrentStep(1);
+  };
 
   // Vehicle Master states
   const [vehicleMasterPanelOpen, setVehicleMasterPanelOpen] = useState(false);
@@ -354,21 +395,39 @@ export default function GuidedReception({
   };
 
   const handleFormSubmit = () => {
+    if (receptionSubmitRef.current) return;
+    receptionSubmitRef.current = true;
+    setIsSubmittingReception(true);
+
+    // Sanitize free text inputs to prevent XSS
+    const sanitizedClientNom = sanitizeFreeText(clientNom);
+    const sanitizedDeposantNom = sanitizeFreeText(deposantNom);
+    const sanitizedVehiculeMarque = sanitizeFreeText(vehiculeMarque);
+    const sanitizedVehiculeModele = sanitizeFreeText(vehiculeModele);
+    const sanitizedVehiculeImmatriculation = sanitizeFreeText(vehiculeImmatriculation);
+    const sanitizedVehiculeVIN = sanitizeFreeText(vehiculeVIN);
+    const sanitizedVehiculeCouleur = sanitizeFreeText(vehiculeCouleur);
+    const sanitizedPlainteClient = sanitizeFreeText(plainteClient);
+    const sanitizedObservationsReception = sanitizeFreeText(observationsReception);
+    const sanitizedAutresNotes = sanitizeFreeText(autresNotes);
+    const sanitizedObjets = objets.map(o => sanitizeFreeText(o));
+    const sanitizedVehiculeVersion = sanitizeFreeText(vehiculeVersion);
+
     const newDossier = createReceptionDossier({
-      clientNom,
-      clientTelephone,
-      deposantNom,
-      deposantTelephone,
-      vehiculeMarque,
-      vehiculeModele,
-      vehiculeImmatriculation,
-      vehiculeVIN,
+      clientNom: sanitizedClientNom,
+      clientTelephone: clientTelephone.trim(),
+      deposantNom: sanitizedDeposantNom,
+      deposantTelephone: deposantTelephone.trim(),
+      vehiculeMarque: sanitizedVehiculeMarque,
+      vehiculeModele: sanitizedVehiculeModele,
+      vehiculeImmatriculation: sanitizedVehiculeImmatriculation,
+      vehiculeVIN: sanitizedVehiculeVIN,
       vehiculeKilometrage: Number(vehiculeKilometrage),
-      vehiculeCouleur,
+      vehiculeCouleur: sanitizedVehiculeCouleur,
       typeDossier,
       priorite,
-      plainteClient,
-      observationsReception,
+      plainteClient: sanitizedPlainteClient,
+      observationsReception: sanitizedObservationsReception,
       photosAvant: photosPre,
       niveauCarburant,
       etatCarrosserie: {
@@ -376,10 +435,10 @@ export default function GuidedReception({
         bosses,
         fissureParbrise,
         jantesAbimees,
-        autresNotes
+        autresNotes: sanitizedAutresNotes
       },
-      objetsLaisses: objets,
-      vehiculeVersion,
+      objetsLaisses: sanitizedObjets,
+      vehiculeVersion: sanitizedVehiculeVersion,
       dateLivraison: vehiculeDateLivraison,
       dateMiseCirculation: vehiculeDateMiseCirculation,
       statutGarantie: vehiculeStatutGarantie,
@@ -388,6 +447,9 @@ export default function GuidedReception({
 
     onAddDossier(newDossier);
     setCurrentStep(5); // Show success screen
+    setShowSubmitConfirmModal(false);
+    setIsSubmittingReception(false);
+    receptionSubmitRef.current = false;
   };
 
   const stepsList = [
@@ -415,8 +477,31 @@ export default function GuidedReception({
       </div>
 
       {receptionError && (
-        <div data-testid="reception-error-message" className="mx-6 mt-4 p-3 bg-red-50 text-red-700   border border-red-200 rounded-lg text-xs font-bold">
+        <div data-testid="reception-error-message" className="mx-6 mt-4 p-3 bg-red-50 text-red-700   border border-red-200 rounded-lg text-xs font-bold animate-pulse">
           {receptionError}
+        </div>
+      )}
+
+      {/* Missing Pieces Alert Banner */}
+      {dossiers.filter(d =>
+        d.statut === DossierStatus.BLOQUE &&
+        (d.bloqueRaison?.includes("Attente pièce") || d.bloqueSparePartRef || d.bloqueSparePartEta)
+      ).length > 0 && (
+        <div data-testid="alert-missing-pieces" className="mx-6 mt-4 bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-xs space-y-2">
+          <div className="flex items-center gap-2 font-bold uppercase">
+            <AlertTriangle className="w-4.5 h-4.5 text-amber-600" />
+            Alerte pièces manquantes ({dossiers.filter(d => d.statut === DossierStatus.BLOQUE && (d.bloqueRaison?.includes("Attente pièce") || d.bloqueSparePartRef || d.bloqueSparePartEta)).length})
+          </div>
+          <ul className="list-disc list-inside space-y-1 font-semibold">
+            {dossiers.filter(d => d.statut === DossierStatus.BLOQUE && (d.bloqueRaison?.includes("Attente pièce") || d.bloqueSparePartRef || d.bloqueSparePartEta)).map(d => (
+              <li key={d.id}>
+                Dossier <strong className="font-mono text-slate-900 hover:underline cursor-pointer" onClick={() => onSelectDossier && onSelectDossier(d.id)}>{d.id}</strong> ({d.vehiculeMarque} {d.vehiculeModele} - {d.vehiculeImmatriculation}) :
+                bloqué pour "Attente pièce"
+                {d.bloqueSparePartRef && ` (Réf: ${d.bloqueSparePartRef})`}
+                {d.bloqueSparePartEta && ` (Date estimée: ${new Date(d.bloqueSparePartEta).toLocaleDateString("fr-FR")})`}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -606,8 +691,8 @@ export default function GuidedReception({
                             </div>
                             <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
                               <span>Client : <strong className="text-slate-700">{vehicle.customerName || "Inconnu"}</strong></span>
-                              {canViewVehicleSensitiveFields(currentUserRole) && vehicle.customerPhone && (
-                                <span>Tél : <strong className="text-slate-700 font-mono" data-testid={`vehicle-result-phone-${vehicle.id}`}>{vehicle.customerPhone}</strong></span>
+                              {vehicle.customerPhone && (
+                                <span>Tél : <strong className="text-slate-700 font-mono" data-testid={`vehicle-result-phone-${vehicle.id}`}>{canViewVehicleSensitiveFields(currentUserRole) ? vehicle.customerPhone : maskPhoneNumber(vehicle.customerPhone)}</strong></span>
                               )}
                             </div>
                             {hints.lastServiceInfo && (
@@ -829,7 +914,10 @@ export default function GuidedReception({
                   data-testid="reception-mileage"
                   className="w-full p-2.5 bg-slate-50  border border-slate-200  rounded-lg text-xs font-bold focus:outline-none " 
                   value={vehiculeKilometrage}
-                  onChange={(e) => setVehiculeKilometrage(Number(e.target.value))}
+                  onChange={(e) => {
+                    setVehiculeKilometrage(Number(e.target.value));
+                    setMileageConfirmed(false);
+                  }}
                 />
               </div>
 
@@ -1327,35 +1415,89 @@ export default function GuidedReception({
 
       {/* Navigation action buttons bottom */}
       {currentStep < 5 && (
-        <div className="p-4 bg-slate-50  border-t border-slate-200  flex justify-between">
-          <button
-            onClick={() => {
-              setReceptionError(null);
-              setCurrentStep(prev => Math.max(1, prev - 1));
-            }}
-            disabled={currentStep === 1}
-            data-testid="reception-previous"
-            className={`px-4 py-2 bg-white  border border-slate-200  rounded-lg text-xs font-bold hover:bg-slate-100  text-slate-700  flex items-center gap-1.5 transition ${
-              currentStep === 1 ? "opacity-40 cursor-not-allowed" : ""
-            }`}
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Retour
-          </button>
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setReceptionError(null);
+                setCurrentStep(prev => Math.max(1, prev - 1));
+              }}
+              disabled={currentStep === 1}
+              data-testid="reception-previous"
+              className={`px-4 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-100 text-slate-700 flex items-center gap-1.5 transition ${
+                currentStep === 1 ? "opacity-40 cursor-not-allowed" : ""
+              }`}
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Retour
+            </button>
+
+            {currentStep > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const isSomeFieldFilled = clientNom || clientTelephone || vehiculeImmatriculation || vehiculeVIN || plainteClient;
+                  if (isSomeFieldFilled) {
+                    setShowCancelConfirmModal(true);
+                  } else {
+                    resetReceptionForm();
+                  }
+                }}
+                data-testid="reception-cancel"
+                className="px-4 py-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 font-bold rounded-lg text-xs transition cursor-pointer"
+              >
+                Annuler la saisie
+              </button>
+            )}
+          </div>
 
           {currentStep < 4 ? (
             <button
-               onClick={() => {
-                // If required fields are omitted with placeholder checks
-                if (currentStep === 1 && !clientNom) {
-                  setReceptionError("Veuillez saisir le nom du client.");
-                  return;
-                }
-                if (currentStep === 2 && (!vehiculeModele || !vehiculeImmatriculation)) {
-                  setReceptionError("Veuillez remplir le modèle et l'immatriculation.");
-                  return;
-                }
+              onClick={() => {
                 setReceptionError(null);
+                if (currentStep === 1) {
+                  if (!validateCustomerName(clientNom)) {
+                    setReceptionError("Le nom du client doit comporter au moins 2 caractères.");
+                    return;
+                  }
+                  if (!validateTunisianPhone(clientTelephone)) {
+                    setReceptionError("Numéro de téléphone tunisien invalide (8 chiffres requis).");
+                    return;
+                  }
+                  if (deposantTelephone && !validateTunisianPhone(deposantTelephone)) {
+                    setReceptionError("Numéro de téléphone du déposant invalide.");
+                    return;
+                  }
+                }
+                if (currentStep === 2) {
+                  if (!vehiculeModele.trim()) {
+                    setReceptionError("Le modèle du véhicule est obligatoire.");
+                    return;
+                  }
+                  if (!validatePlateNumber(vehiculeImmatriculation)) {
+                    setReceptionError("Numéro d'immatriculation invalide (au moins 3 caractères).");
+                    return;
+                  }
+                  if (vehiculeVIN && !validateVin(vehiculeVIN)) {
+                    setReceptionError("Numéro VIN invalide (17 caractères requis, sans I, O, Q).");
+                    return;
+                  }
+                  const milCheck = validateMileage(vehiculeKilometrage);
+                  if (!milCheck.valid) {
+                    setReceptionError(milCheck.reason || "Kilométrage invalide.");
+                    return;
+                  }
+                  if (milCheck.mustConfirm && !mileageConfirmed) {
+                    setShowMileageConfirmModal(true);
+                    return;
+                  }
+                }
+                if (currentStep === 3) {
+                  if (!validateComplaintText(plainteClient)) {
+                    setReceptionError("Le motif / plainte du client doit faire au moins 10 caractères.");
+                    return;
+                  }
+                }
                 setCurrentStep(prev => prev + 1);
               }}
               data-testid="reception-next"
@@ -1377,7 +1519,7 @@ export default function GuidedReception({
                 if (duplicate) {
                   setActiveDuplicateDossier(duplicate);
                 } else {
-                  handleFormSubmit();
+                  setShowSubmitConfirmModal(true);
                 }
               }}
               data-testid="reception-submit"
@@ -1553,6 +1695,115 @@ export default function GuidedReception({
                   Ouvrir le dossier existant
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* High Mileage Confirmation Modal */}
+      {showMileageConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Kilométrage très élevé</h3>
+                <p className="text-slate-500 text-xs mt-1">
+                  Le kilométrage saisi dépasse 500 000 km. Confirmez-vous la plausibilité de cette valeur ?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowMileageConfirmModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Corriger le kilométrage
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMileageConfirmed(true);
+                  setShowMileageConfirmModal(false);
+                  setCurrentStep(3); // proceed
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition cursor-pointer"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {showCancelConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Abandonner la saisie</h3>
+                <p className="text-slate-500 text-xs mt-1">
+                  Des données ont été saisies. Êtes-vous sûr de vouloir annuler la saisie et perdre vos modifications ?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowCancelConfirmModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Continuer la saisie
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCancelConfirmModal(false);
+                  resetReceptionForm();
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition cursor-pointer"
+              >
+                Abandonner
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submit Confirmation Modal */}
+      {showSubmitConfirmModal && (
+        <div data-testid="reception-submit-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-6 h-6 text-green-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Créer le dossier</h3>
+                <p className="text-slate-500 text-xs mt-1">
+                  Confirmez-vous la création de ce dossier SAV ?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="reception-submit-cancel"
+                onClick={() => setShowSubmitConfirmModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="reception-submit-confirm"
+                onClick={() => handleFormSubmit()}
+                disabled={isSubmittingReception}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isSubmittingReception ? "Création..." : "Confirmer"}
+              </button>
             </div>
           </div>
         </div>

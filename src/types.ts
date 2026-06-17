@@ -339,6 +339,9 @@ export interface DossierSAV {
   
   // Custom states
   bloqueRaison?: string;
+  bloqueSparePartRef?: string;
+  bloqueSparePartEta?: string;
+  retourQualite?: boolean;
   prochaineActionRecommended: string;
   dateDernierStatut: string;
   avancementGlobal: number; // progress indicator 0 - 100

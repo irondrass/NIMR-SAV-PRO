@@ -1,6 +1,6 @@
-# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 5F-5
+# Rapport de Validation NIMR SAV PRO v1.1.0 — Lots 1 à 6E
 
-Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3, 5F-3B, 5F-4A, 5F-4B et 5F-5) de l'application **NIMR SAV PRO**.
+Ce document résume l'implémentation et la validation des modifications apportées dans la version **v1.1.0** (Lots 1, 2, 3, 4A, 4C, 5, 5B, 5C, 5D, 5E, 5F-1, 5F-2, 5F-3, 5F-3B, 5F-4A, 5F-4B, 5F-5, 6, 6B, 6C et 6E) de l'application **NIMR SAV PRO**.
 
 ---
 
@@ -118,7 +118,7 @@ Nous avons développé et intégré la planification visuelle et robuste pour le
 
 Pour clore le cycle de stabilisation locale de la v1.1.0, nous avons structuré la base de code :
 * **Permissions Centralisées** : Création du module `src/permissions.ts` regroupant 14 fonctions d'habilitations métiers. Toutes les vérifications de permissions inline dans `App.tsx`, `DossierDetail.tsx` et `SettingsView.tsx` y ont été substituées.
-* **Sécurité & TTL de Session** : Implémentation d'un TTL de session glissant de 8 heures basé sur `lastActivityAt`. La session est touchée à chaque action importante ou navigation.
+* **Sécurité & TTL de Session** : Implémentation initiale d'un TTL de session glissant basé sur `lastActivityAt`. Ce délai est resserré à 30 minutes au Lot 6E, avec rafraîchissement sur activité utilisateur.
 * **Rate Limiting Local** : Limitation à 5 tentatives de connexion incorrectes par nom d'utilisateur (`username`). En cas de dépassement, l'utilisateur est verrouillé pour 5 minutes, empêchant toute tentative d'authentification brutale.
 * **Refactoring Kanban** : Extraction de la vue Kanban de `App.tsx` vers un composant dédié `src/components/KanbanBoard.tsx` utilisant des `useMemo` optimisés pour filtrer les colonnes et alléger le rendu de `App.tsx`.
 * **Accessibilité et Nettoyage** : Ajout de rôles ARIA standard (`role="navigation"`, `aria-live="polite"`, `aria-label`), de l'`autoFocus` sur le champ de saisie de login, et suppression du code mort relié au `darkMode` pour forcer le thème clair de manière uniforme.
@@ -467,21 +467,37 @@ Nous avons résolu toutes les anomalies terrain persistantes identifiées lors d
 
 ---
 
-## 16. Résultats de la Validation Globale
+## 16. Lot 6E : Hardening métier pré-RC
 
-Le pipeline complet de validation locale a été ré-exécuté avec succès après intégration des corrections :
+Le Lot 6E renforce les parcours critiques avant Release Candidate sans introduire de périmètre finance, ERP, stock réel ou données réelles :
+* **Validations métier** : contrôle strict du téléphone, VIN, immatriculation, kilométrage, client, plainte réception et diagnostic technicien via `src/field-validations.ts`.
+* **Neutralisation XSS locale** : sanitization des champs libres réception, réclamations et diagnostic avant stockage et affichage.
+* **Anti double-clic** : garde pur `src/action-guard.ts` et verrous UI sur création dossier, clôture technicien, décision QC et livraison.
+* **Confirmations obligatoires** : modals internes pour réception, validation/refus QC, validation détail dossier et confirmation livraison, sans `prompt()` natif.
+* **Bloc atelier structuré** : diagnostic technicien final obligatoire, lisible et contextualisé avant passage en contrôle qualité.
+* **Refus QC et livraison** : commentaires obligatoires sur refus/blocage, kilométrage de sortie contrôlé et signature/checklist de restitution exigée.
+* **Documents imprimables internes** : bons réception, ordre de réparation, contrôle qualité et livraison disponibles depuis le dossier, sans vocabulaire financier ni stock réel.
+* **Audit trail** : journal structuré horodaté pour actions sensibles (authentification, dossiers, QC, livraison, import/export, utilisateurs, planning).
+* **Session 30 minutes** : expiration locale après inactivité, rafraîchie au clic/clavier/navigation, avec retour login et message clair.
+* **Lecture seule nettoyée** : actions critiques masquées ou bloquées selon rôle.
+
+---
+
+## 17. Résultats de la Validation Globale
+
+Le pipeline complet de validation locale a été ré-exécuté avec succès après intégration du hardening Lot 6E :
 
 | Étape de Validation | Commande | Statut | Résultat |
 | :--- | :--- | :--- | :--- |
 | **Vérification des Types** | `npm run lint` | **RÉUSSI** | Zéro erreur de typage ou avertissement du compilateur TypeScript. |
-| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | **24 suites de tests** au vert, incluant les calculs de charge, exclusions et permissions. |
-| **Build de Production** | `npm run build` | **RÉUSSI** | Compiles cleanly. Bundle de production Vite généré sans erreurs. |
-| **Tests E2E Playwright** | `npm run test:e2e` | **RÉUSSI** | **303 tests E2E Playwright validés** sur Desktop, Tablette et Mobile (dont Lot 6C). |
-| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 102/102 invariants validés** (incluant les 102 contrôles QA). |
+| **Tests Unitaires Core** | `npm test` | **RÉUSSI** | Toutes les suites unitaires au vert, incluant validations champs, audit trail, anti double-clic et documents imprimables Lot 6E. |
+| **Build de Production** | `npm run build` | **RÉUSSI** | Bundle de production Vite généré sans erreurs. Avertissement de taille de chunks non bloquant conservé. |
+| **Tests E2E Playwright** | `npm run test:e2e -- --reporter=line` | **RÉUSSI** | **318 tests E2E Playwright validés** sur Desktop, Tablette et Mobile, incluant Lot 6E. |
+| **Agent QA Fonctionnel** | `npm run qa:agent` | **RÉUSSI** | **RÉUSSI — 116/116 invariants validés**. |
 
 ---
 
-## 17. Nouveaux Tests E2E Playwright (Lot 6, Lot 6B & Lot 6C)
+## 18. Nouveaux Tests E2E Playwright (Lot 6, Lot 6B, Lot 6C & Lot 6E)
 
 La suite E2E a été complétée avec les spécifications suivantes :
 1. `e2e/23-sav-reports.spec.ts` : Valide l'accès aux rapports par rôle, les filtres de période, l'exportation et l'absence stricte de données financières.
@@ -489,15 +505,15 @@ La suite E2E a été complétée avec les spécifications suivantes :
 3. `e2e/25-delivery-view.spec.ts` : Valide le module Livraison dédié (checklist, km de sortie >= km d'entrée, confirmation).
 4. `e2e/26-lot6b-recette.spec.ts` : Valide le bouton démarrer technicien protégé contre les clics forcés, l'occupation dashboard > 0% si des charges existent, et les délais mesurables sur le dossier démo.
 5. `e2e/27-lot6c-terrain-fixes.spec.ts` : Valide la charge des techniciens/ponts non nulle, l'occupation cohérente, l'harmonisation des horaires, l'absence du sélecteur compagnon pour les techniciens standards, le bouton Démarrer bloqué et le message non dupliqué.
+6. `e2e/28-hardening-pre-rc.spec.ts` : Valide les contrôles réception, diagnostic technicien, documents imprimables et expiration de session 30 minutes.
 
 ---
 
-## 18. Décision Finale avant Tag v1.1.0
+## 19. Décision Finale avant Tag v1.1.0
 
 **Décision :**
-Les Lots 1 à 6C sont entièrement validés en environnement de test local.
-Cependant, conformément aux exigences obligatoires du Lot 6C, **le tag v1.1.0 reste suspendu** jusqu'à la recette terrain finale par l'équipe cliente post-déploiement.
+Les Lots 1 à 6E sont entièrement validés en environnement de test local.
+Conformément aux exigences du Lot 6E, **aucun tag Git `v1.1.0` n'est créé à ce stade**.
 Aucune donnée réelle n'a été committée, et aucun tag Git `v1.1.0` n'a été créé.
-
 
 

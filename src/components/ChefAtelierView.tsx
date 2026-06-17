@@ -35,13 +35,15 @@ interface ChefAtelierViewProps {
   techniciens: TechnicienResource[];
   onSelectDossier: (id: string) => void;
   onUpdateDossier: (updated: DossierSAV) => void;
+  activeRole: UserRole;
 }
 
 export default function ChefAtelierView({ 
   dossiers, 
   techniciens, 
   onSelectDossier, 
-  onUpdateDossier 
+  onUpdateDossier,
+  activeRole
 }: ChefAtelierViewProps) {
   
   const [selectedZoneFilter, setSelectedZoneFilter] = useState<string>("Toutes");
@@ -49,6 +51,19 @@ export default function ChefAtelierView({
   // Modal states for Lot 1
   const [modalActive, setModalActive] = useState<boolean>(false);
   const [modalTargetDossierId, setModalTargetDossierId] = useState<string | null>(null);
+
+  // Generic Confirm Modal State
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
 
   // Get active files
   const activeFolders = dossiers.filter(d => d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE);
@@ -62,11 +77,25 @@ export default function ChefAtelierView({
   // Ready for QC
   const readyForQCFolders = activeFolders.filter(d => d.statut === DossierStatus.CONTROLE_QUALITE);
 
+  const dossiersAttentePiece = dossiers.filter(d =>
+    d.statut === DossierStatus.BLOQUE &&
+    (d.bloqueRaison?.includes("Attente pièce") || d.bloqueSparePartRef || d.bloqueSparePartEta)
+  );
+
   const handleQuickAssign = (dossierId: string, techId: string) => {
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
+    const tech = techniciens.find(t => t.id === techId);
+    const techName = tech ? tech.nom : techId;
 
-    onUpdateDossier(assignTechnicianToDossier(original, techId));
+    setConfirmModal({
+      isOpen: true,
+      title: "Affectation de technicien",
+      message: `Êtes-vous sûr de vouloir affecter le dossier ${dossierId} à ${techName} ?`,
+      onConfirm: () => {
+        onUpdateDossier(assignTechnicianToDossier(original, techId));
+      }
+    });
   };
 
   const handleQuickBlock = (dossierId: string) => {
@@ -77,13 +106,13 @@ export default function ChefAtelierView({
     setModalActive(true);
   };
 
-  const handleBlockConfirm = (reason: string, details: string) => {
+  const handleBlockConfirm = (reason: string, details: string, sparePartRef?: string, sparePartEta?: string) => {
     const fullReason = details ? `${reason} : ${details}` : reason;
     if (modalTargetDossierId) {
       const original = dossiers.find(d => d.id === modalTargetDossierId);
       if (original) {
         const logMessage = `[${UserRole.CHEF_ATELIER}] - Blocage Dossier - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
-        const nextDossier = blockDossier(original, fullReason);
+        const nextDossier = blockDossier(original, fullReason, new Date(), sparePartRef, sparePartEta);
         const updatedLogs = [
           `${new Date().toISOString()} - ${logMessage}`,
           ...(nextDossier.historiqueLogs || [])
@@ -102,7 +131,14 @@ export default function ChefAtelierView({
     const original = dossiers.find(d => d.id === dossierId);
     if (!original) return;
 
-    onUpdateDossier(finishWorksForQuality(original));
+    setConfirmModal({
+      isOpen: true,
+      title: "Fin des travaux vers Contrôle Qualité",
+      message: `Confirmez-vous la fin des travaux du dossier ${dossierId} et son envoi au contrôle qualité ?`,
+      onConfirm: () => {
+        onUpdateDossier(finishWorksForQuality(original));
+      }
+    });
   };
 
   return (
@@ -134,6 +170,26 @@ export default function ChefAtelierView({
           </div>
         </div>
       </div>
+
+      {/* Missing Pieces Banner Alert */}
+      {dossiersAttentePiece.length > 0 && (
+        <div data-testid="alert-missing-pieces" className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-xs space-y-2">
+          <div className="flex items-center gap-2 font-bold uppercase">
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            Alerte pièces manquantes ({dossiersAttentePiece.length})
+          </div>
+          <ul className="list-disc list-inside space-y-1 font-semibold">
+            {dossiersAttentePiece.map(d => (
+              <li key={d.id}>
+                Dossier <strong className="font-mono text-slate-900 hover:underline cursor-pointer" onClick={() => onSelectDossier(d.id)}>{d.id}</strong> ({d.vehiculeMarque} {d.vehiculeModele} - {d.vehiculeImmatriculation}) :
+                bloqué pour "Attente pièce"
+                {d.bloqueSparePartRef && ` (Réf: ${d.bloqueSparePartRef})`}
+                {d.bloqueSparePartEta && ` (Date estimée: ${new Date(d.bloqueSparePartEta).toLocaleDateString("fr-FR")})`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Grid of quick summary metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs font-semibold">
@@ -214,22 +270,26 @@ export default function ChefAtelierView({
                   {/* Assign dropdown */}
                   <div className="pt-2 border-t border-slate-200  flex items-center gap-2">
                     <span className="text-[10px] text-zinc-400 block font-bold">Attribuer à :</span>
-                    <select
-                      className="p-1 px-1.5 bg-white  border rounded font-bold text-[10px]  text-slate-700 flex-1 focus:outline-none"
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          handleQuickAssign(doss.id, e.target.value);
-                        }
-                      }}
-                      defaultValue=""
-                    >
-                      <option value="" disabled>-- Choisir Compagnon --</option>
-                      {techniciens.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.nom} ({t.disponibilite === "disponible" ? "Dispo" : "Occupé"})
-                        </option>
-                      ))}
-                    </select>
+                    {activeRole !== UserRole.LECTURE_SEULE ? (
+                      <select
+                        className="p-1 px-1.5 bg-white  border rounded font-bold text-[10px]  text-slate-700 flex-1 focus:outline-none"
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleQuickAssign(doss.id, e.target.value);
+                          }
+                        }}
+                        defaultValue=""
+                      >
+                        <option value="" disabled>-- Choisir Compagnon --</option>
+                        {techniciens.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.nom} ({t.disponibilite === "disponible" ? "Dispo" : "Occupé"})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="font-bold text-zinc-500 italic">Lecture seule</span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -282,34 +342,38 @@ export default function ChefAtelierView({
                       Avancement : {doss.avancementGlobal}%
                     </div>
 
-                    <div className="flex gap-1">
-                      {doss.statut !== DossierStatus.BLOQUE ? (
-                        <button 
-                          onClick={() => handleQuickBlock(doss.id)}
-                          className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-[10px]"
-                        >
-                          Signaler blocage
-                        </button>
-                      ) : (
-                        <button 
-                          onClick={() => {
-                            onUpdateDossier(releaseDossierBlock(doss));
-                          }}
-                          className="px-2 py-1 bg-green-600 text-white bg-green-600 rounded font-bold text-[10px]"
-                        >
-                          Débloquer
-                        </button>
-                      )}
+                    {activeRole !== UserRole.LECTURE_SEULE ? (
+                      <div className="flex gap-1">
+                        {doss.statut !== DossierStatus.BLOQUE ? (
+                          <button
+                            onClick={() => handleQuickBlock(doss.id)}
+                            className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-[10px]"
+                          >
+                            Signaler blocage
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              onUpdateDossier(releaseDossierBlock(doss));
+                            }}
+                            className="px-2 py-1 bg-green-600 text-white bg-green-600 rounded font-bold text-[10px]"
+                          >
+                            Débloquer
+                          </button>
+                        )}
 
-                      {doss.statut === DossierStatus.EN_TRAVAUX && (
-                        <button 
-                          onClick={() => handleQuickEndWorks(doss.id)}
-                          className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-[10px] cursor-pointer"
-                        >
-                          Fin Travaux → QC
-                        </button>
-                      )}
-                    </div>
+                        {doss.statut === DossierStatus.EN_TRAVAUX && (
+                          <button
+                            onClick={() => handleQuickEndWorks(doss.id)}
+                            className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-[10px] cursor-pointer"
+                          >
+                            Fin Travaux → QC
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="font-bold text-zinc-500 italic">Lecture seule</span>
+                    )}
                   </div>
                 </div>
               );
@@ -337,6 +401,40 @@ export default function ChefAtelierView({
         ]}
         testIdPrefix="modal-task-block"
       />
+
+      {/* Confirm Modal Overlay */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">{confirmModal.title}</h3>
+                <p className="text-slate-500 text-xs mt-1">{confirmModal.message}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  confirmModal.onConfirm();
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition cursor-pointer animate-pulse"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

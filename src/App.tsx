@@ -57,6 +57,7 @@ import { APP_NAME, APP_VERSION } from "./app-identity";
 import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
 import { getDefaultWorkshopSchedule } from "./workshop-availability";
+import { logAuditEvent } from "./audit-trail";
 
 // Views
 import DirectorDashboard from "./components/DirectorDashboard";
@@ -203,6 +204,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [currentSession, setCurrentSession] = useState<UserSession | null>(null);
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string | null>(null);
 
   const handleTouchSession = () => {
     if (currentSession) {
@@ -230,24 +232,48 @@ export default function App() {
 
   // Detailed selected folder id
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
+  const currentUser = currentSession ? users.find(user => user.id === currentSession.userId) ?? null : null;
+  const activeRole = currentUser?.role ?? currentSession?.role ?? UserRole.LECTURE_SEULE;
+  const recordAudit = (event: Omit<Parameters<typeof logAuditEvent>[0], "user" | "role" | "source"> & { source?: string }) => {
+    logAuditEvent({
+      ...event,
+      user: currentUser?.displayName ?? currentSession?.displayName ?? activeRole,
+      role: activeRole,
+      source: event.source ?? "local-ui",
+    });
+  };
 
   // Vehicle master local database
   const [vehicleMasterRecords, setVehicleMasterRecords] = useState<VehicleMasterRecord[]>([]);
   const [vehicleMasterLastImport, setVehicleMasterLastImport] = useState<string | null>(null);
 
   const handleUpdateVehicleMaster = (records: VehicleMasterRecord[]) => {
+    handleTouchSession();
     setVehicleMasterRecords(records);
     localStorage.setItem(STORAGE_KEYS.vehicleMaster, JSON.stringify(records));
     const importTime = new Date().toISOString();
     setVehicleMasterLastImport(importTime);
     localStorage.setItem(STORAGE_KEYS.vehicleMasterLastImport, importTime);
+    recordAudit({
+      module: "vehicules",
+      action: "import_referentiel",
+      commentaire: `${records.length} véhicules importés dans le référentiel local`,
+      source: "vehicle-master",
+    });
   };
 
   const handleClearVehicleMaster = () => {
+    handleTouchSession();
     setVehicleMasterRecords([]);
     localStorage.removeItem(STORAGE_KEYS.vehicleMaster);
     setVehicleMasterLastImport(null);
     localStorage.removeItem(STORAGE_KEYS.vehicleMasterLastImport);
+    recordAudit({
+      module: "vehicules",
+      action: "purge_referentiel",
+      commentaire: "Référentiel véhicules local vidé",
+      source: "vehicle-master",
+    });
   };
 
   // Import feedback states
@@ -260,8 +286,6 @@ export default function App() {
   const [priorityFilter, setPriorityFilter] = useState<string>("Toutes");
   const [dossierViewMode, setDossierViewMode] = useState<"standard" | "vehicles">("standard");
   const [dossierOperationalFilter, setDossierOperationalFilter] = useState<DossierOperationalFilter>("active");
-  const currentUser = currentSession ? users.find(user => user.id === currentSession.userId) ?? null : null;
-  const activeRole = currentUser?.role ?? currentSession?.role ?? UserRole.LECTURE_SEULE;
 
   // Load initial states or restore from local storage
   useEffect(() => {
@@ -297,6 +321,9 @@ export default function App() {
         setActiveTab(getDefaultTabForRole(storedSession!.role));
       } else {
         localStorage.removeItem(STORAGE_KEYS.session);
+        if (storedSession) {
+          setSessionExpiredMessage("Session expirée après 30 minutes d'inactivité.");
+        }
       }
       setAuthReady(true);
     };
@@ -343,6 +370,14 @@ export default function App() {
       const newLogs = [newLog, ...activityLogs];
       setActivityLogs(newLogs);
       writeLocalStorageJSON(STORAGE_KEYS.logs, newLogs);
+      recordAudit({
+        module: "dossiers",
+        action: "changement_statut",
+        dossierId: updatedDossier.id,
+        ancienStatut: original.statut,
+        nouveauStatut: updatedDossier.statut,
+        commentaire: `Dossier marqué comme ${updatedDossier.statut}`,
+      });
     }
 
     const nextDossiers = dossiers.map(item => item.id === updatedDossier.id ? updatedDossier : item);
@@ -365,6 +400,13 @@ export default function App() {
     const newLogs = [newLog, ...activityLogs];
     setActivityLogs(newLogs);
     writeLocalStorageJSON(STORAGE_KEYS.logs, newLogs);
+    recordAudit({
+      module: "reception",
+      action: "creation_dossier",
+      dossierId: newDossier.id,
+      nouveauStatut: newDossier.statut,
+      commentaire: `Création dossier ${newDossier.id}`,
+    });
 
     saveDossiersToStorage(nextDossiers);
   };
@@ -374,6 +416,13 @@ export default function App() {
     const nextRecs = [newRec, ...reclamations];
     setReclamations(nextRecs);
     writeLocalStorageJSON(STORAGE_KEYS.reclamations, nextRecs);
+    recordAudit({
+      module: "reclamations",
+      action: "creation_reclamation",
+      dossierId: newRec.dossierId,
+      commentaire: `Réclamation ${newRec.id}`,
+      source: "complaints",
+    });
   };
 
   const handleUpdateReclamation = (updatedRec: ReclammationClient) => {
@@ -381,18 +430,37 @@ export default function App() {
     const nextRecs = reclamations.map(r => r.id === updatedRec.id ? updatedRec : r);
     setReclamations(nextRecs);
     writeLocalStorageJSON(STORAGE_KEYS.reclamations, nextRecs);
+    recordAudit({
+      module: "reclamations",
+      action: "mise_a_jour_reclamation",
+      dossierId: updatedRec.dossierId,
+      commentaire: `Réclamation ${updatedRec.id} - statut ${updatedRec.statut}`,
+      source: "complaints",
+    });
   };
 
   const handleUpdateReservations = (nextRes: WorkshopReservation[]) => {
     handleTouchSession();
     setReservations(nextRes);
     writeLocalStorageJSON(STORAGE_KEYS.reservations, nextRes);
+    recordAudit({
+      module: "atelier",
+      action: "mise_a_jour_reservations",
+      commentaire: `${nextRes.length} réservation(s) atelier enregistrée(s)`,
+      source: "workshop-planning",
+    });
   };
 
   const handleUpdateAvailabilityConfig = (nextConfig: WorkshopAvailabilityConfig) => {
     handleTouchSession();
     setAvailabilityConfig(nextConfig);
     writeLocalStorageJSON(STORAGE_KEYS.availability, nextConfig);
+    recordAudit({
+      module: "atelier",
+      action: "mise_a_jour_disponibilites",
+      commentaire: `${nextConfig.exceptions.length} exception(s), ${nextConfig.absences.length} absence(s), ${nextConfig.bayUnavailabilities.length} indisponibilité(s) baie`,
+      source: "workshop-availability",
+    });
   };
 
   // State Import/Export logic
@@ -406,6 +474,12 @@ export default function App() {
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    recordAudit({
+      module: "import_export",
+      action: "export_json",
+      commentaire: `${dossiers.length} dossiers exportés`,
+      source: "backup-json",
+    });
   };
 
   const handleImportDataJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -446,6 +520,12 @@ export default function App() {
             writeLocalStorageJSON(STORAGE_KEYS.reservations, validation.data.reservations);
           }
           setImportSuccessMessage("Base restaurée avec succès !");
+          recordAudit({
+            module: "import_export",
+            action: "import_json",
+            commentaire: `${validation.data.dossiers.length} dossiers restaurés depuis sauvegarde`,
+            source: "backup-json",
+          });
         } catch (err) {
           setImportErrorMessage("Erreur de format de fichier de sauvegarde.");
         }
@@ -526,11 +606,28 @@ export default function App() {
       writeLocalStorageJSON(STORAGE_KEYS.session, result.session);
       setSelectedDossierId(null);
       setActiveTab(getDefaultTabForRole(result.session.role));
+      setSessionExpiredMessage(null);
+      logAuditEvent({
+        user: result.session.displayName,
+        role: result.session.role,
+        module: "auth",
+        action: "connexion",
+        commentaire: "Connexion locale réussie",
+        source: "login",
+      });
     }
     return result;
   };
 
   const handleLogout = () => {
+    if (currentSession) {
+      recordAudit({
+        module: "auth",
+        action: "deconnexion",
+        commentaire: "Déconnexion locale",
+        source: "logout",
+      });
+    }
     try {
       localStorage.removeItem(STORAGE_KEYS.session);
     } catch {
@@ -554,6 +651,12 @@ export default function App() {
     }
     const nextUser = await createUser(input, users);
     persistUsers([...users, nextUser]);
+    recordAudit({
+      module: "utilisateurs",
+      action: "creation_utilisateur",
+      commentaire: `${nextUser.username} - ${nextUser.role}`,
+      source: "user-management",
+    });
     return { ok: true, message: "Utilisateur créé." };
   };
 
@@ -564,6 +667,12 @@ export default function App() {
     if (result.ok === false) return result;
     persistUsers(result.users);
     syncSessionWithUsers(result.users);
+    recordAudit({
+      module: "utilisateurs",
+      action: "mise_a_jour_utilisateur",
+      commentaire: `${userId} - ${changes.role}`,
+      source: "user-management",
+    });
     return { ok: true, message: "Utilisateur mis à jour." };
   };
 
@@ -574,6 +683,12 @@ export default function App() {
     if (result.ok === false) return result;
     persistUsers(result.users);
     syncSessionWithUsers(result.users);
+    recordAudit({
+      module: "utilisateurs",
+      action: active ? "activation_utilisateur" : "desactivation_utilisateur",
+      commentaire: userId,
+      source: "user-management",
+    });
     return { ok: true, message: active ? "Utilisateur activé." : "Utilisateur désactivé." };
   };
 
@@ -583,8 +698,71 @@ export default function App() {
     const result = await resetUserPin(users, userId, pin);
     if (result.ok === false) return result;
     persistUsers(result.users);
+    recordAudit({
+      module: "utilisateurs",
+      action: "reinitialisation_pin",
+      commentaire: userId,
+      source: "user-management",
+    });
     return { ok: true, message: "PIN réinitialisé." };
   };
+
+  useEffect(() => {
+    if (!currentSession) return;
+
+    let lastRefresh = 0;
+    const expireSession = () => {
+      setSessionExpiredMessage("Session expirée après 30 minutes d'inactivité.");
+      recordAudit({
+        module: "auth",
+        action: "expiration_session",
+        commentaire: "Inactivité supérieure à 30 minutes",
+        source: "session-timeout",
+      });
+      handleLogout();
+    };
+
+    const validateCurrentSession = () => {
+      if (!isSessionValid(currentSession, users)) {
+        expireSession();
+      }
+    };
+
+    const refreshActivity = () => {
+      const now = Date.now();
+      if (now - lastRefresh < 1000) return;
+      lastRefresh = now;
+
+      if (!isSessionValid(currentSession, users)) {
+        expireSession();
+        return;
+      }
+
+      const touched = touchSession(currentSession);
+      setCurrentSession(touched);
+      writeLocalStorageJSON(STORAGE_KEYS.session, touched);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        validateCurrentSession();
+      }
+    };
+
+    window.addEventListener("click", refreshActivity);
+    window.addEventListener("keydown", refreshActivity);
+    window.addEventListener("popstate", refreshActivity);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const intervalId = window.setInterval(validateCurrentSession, 15000);
+
+    return () => {
+      window.removeEventListener("click", refreshActivity);
+      window.removeEventListener("keydown", refreshActivity);
+      window.removeEventListener("popstate", refreshActivity);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [currentSession, users]);
 
   if (!authReady) {
     return (
@@ -595,7 +773,19 @@ export default function App() {
   }
 
   if (!currentSession || !currentUser) {
-    return <LoginView onLogin={handleLogin} />;
+    return (
+      <>
+        {sessionExpiredMessage && (
+          <div
+            data-testid="session-expired-message"
+            className="fixed left-1/2 top-6 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-center text-xs font-bold text-amber-800 shadow-sm"
+          >
+            {sessionExpiredMessage}
+          </div>
+        )}
+        <LoginView onLogin={handleLogin} />
+      </>
+    );
   }
 
   return (
@@ -985,6 +1175,7 @@ export default function App() {
                   techniciens={techList}
                   onSelectDossier={(id) => setSelectedDossierId(id)}
                   onUpdateDossier={handleUpdateDossier}
+                  activeRole={activeRole}
                 />
               )}
 

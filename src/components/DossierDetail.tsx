@@ -6,6 +6,7 @@
 import React, { useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
 import QuoteImportModal from "./QuoteImportModal";
+import PrintDocuments from "./PrintDocuments";
 import { applyQuoteImportPreview } from "../quote-import";
 import { 
   DossierSAV, 
@@ -62,7 +63,8 @@ import {
   Play,
   RotateCcw,
   CheckCircle2,
-  FileCheck
+  FileCheck,
+  Printer
 } from "lucide-react";
 import { StatusBadge, PriorityBadge, LicencePlate, FuelIndicator, MiniProgress, InterventionTypeBadge } from "./UIParts";
 
@@ -86,6 +88,7 @@ export default function DossierDetail({
   techniciensList
 }: DossierDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("resume");
+  const [printType, setPrintType] = useState<"reception" | "or" | "qc" | "delivery" | null>(null);
   
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
@@ -102,10 +105,20 @@ export default function DossierDetail({
   const [qcError, setQcError] = useState<string | null>(null);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
   const [signatureCaptured, setSignatureCaptured] = useState(false);
+  const [showQCValidationConfirm, setShowQCValidationConfirm] = useState(false);
+  const [showDeliveryValidationConfirm, setShowDeliveryValidationConfirm] = useState(false);
 
   // Modal states for Lot 1
   const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | "task-unblock" | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
+
+  const handlePrintDocument = (type: "reception" | "or" | "qc" | "delivery") => {
+    setPrintType(type);
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => setPrintType(null), 750);
+    }, 50);
+  };
 
   const updateDossierState = (changes: Partial<DossierSAV>) => {
     const updated = {
@@ -277,6 +290,15 @@ export default function DossierDetail({
     onUpdateDossier(submitQualityControl(dossier, userRole, globVal, comment));
   };
 
+  const handleQCValidationRequest = () => {
+    if (!isChecklistComplete) {
+      setQcError("Impossible de valider le QC sans checklist complète.");
+      return;
+    }
+    setQcError(null);
+    setShowQCValidationConfirm(true);
+  };
+
   // 5. Handover / Delivery functions
   const handleDeliveryConfirm = () => {
     const deliveryGate = canDeliverDossier(dossier);
@@ -284,6 +306,16 @@ export default function DossierDetail({
       setDeliveryError(deliveryGate.reasons.join(" "));
       return;
     }
+    if (!signatureCaptured) {
+      setDeliveryError("Signature client obligatoire avant restitution.");
+      return;
+    }
+    setDeliveryError(null);
+    setShowDeliveryValidationConfirm(true);
+  };
+
+  const confirmDeliveryRequest = () => {
+    setShowDeliveryValidationConfirm(false);
     setDeliveryError(null);
     onUpdateDossier(confirmDelivery(dossier));
   };
@@ -467,6 +499,7 @@ export default function DossierDetail({
           { key: "repair-orders", label: "Ordres Travaux", icon: Wrench },
           { key: "photos", label: "Dossier Photos", icon: Camera },
           { key: "complements", label: "Compléments & Accords", icon: ThumbsUp },
+          { key: "documents", label: "Documents", icon: Printer },
           { key: "quality-control", label: "Checklist Qualité", icon: CheckCircle2 },
           { key: "deliveries", label: "Livraison Véhicule", icon: FileCheck }
         ].map((tab) => {
@@ -1250,6 +1283,36 @@ export default function DossierDetail({
           </div>
         )}
 
+        {/* Tab 6: Documents internes */}
+        {activeTab === "documents" && (
+          <div className="space-y-4">
+            <div className="border-b pb-2">
+              <h3 className="font-bold text-sm text-slate-800">Documents opérationnels internes</h3>
+              <p className="text-slate-400 text-xs">Sorties papier atelier sans données financières ni stock réel.</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              {[
+                { type: "reception" as const, label: "Fiche réception" },
+                { type: "or" as const, label: "OR interne" },
+                { type: "qc" as const, label: "Fiche QC" },
+                { type: "delivery" as const, label: "Bon restitution" },
+              ].map((doc) => (
+                <button
+                  key={doc.type}
+                  type="button"
+                  data-testid={`print-${doc.type}`}
+                  onClick={() => handlePrintDocument(doc.type)}
+                  className="flex min-h-20 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-4 text-xs font-extrabold text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <Printer className="h-4 w-4" />
+                  {doc.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Tab 6: Contrôle qualité */}
         {activeTab === "quality-control" && (
           <div className="space-y-6">
@@ -1316,7 +1379,7 @@ export default function DossierDetail({
                     
                     <div className="flex gap-2">
                       <button 
-                        onClick={() => handleQCSubmit("valide")}
+                        onClick={handleQCValidationRequest}
                         data-testid="qc-accept"
                         className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
                       >
@@ -1433,7 +1496,7 @@ export default function DossierDetail({
               <div className="space-y-4">
                 <div className="p-4 bg-emerald-50  border border-emerald-200  rounded-lg text-xs space-y-1 text-emerald-800 ">
                   <span className="font-bold block">✓ Véhicule remis en main propre au client. Clôture en transit.</span>
-                  <p className="font-medium text-slate-600 ">Restitution confirmée et signée. Le dossier doit être transmis à l'ERP NIMR pour facturation définitive.</p>
+                  <p className="font-medium text-slate-600 ">Restitution confirmée et signée. Le dossier passe au suivi administratif interne.</p>
                 </div>
 
                 {canDeliverVehicle && (
@@ -1442,7 +1505,7 @@ export default function DossierDetail({
                     data-testid="delivery-billing"
                     className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition cursor-pointer"
                   >
-                    Marquer "Prêt pour facturation ERP" (Clôture Opérationnelle)
+                    Clôturer opérationnellement le dossier
                   </button>
                 )}
               </div>
@@ -1452,6 +1515,73 @@ export default function DossierDetail({
               </p>
             )}
 
+          </div>
+        )}
+
+        {showQCValidationConfirm && (
+          <div data-testid="modal-qc-validate-detail" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+            <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <h3 className="font-black text-slate-900">Confirmer la validation QC</h3>
+                  <p className="mt-1 font-semibold text-slate-600">Le dossier sera déclaré conforme et prêt à livrer.</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  data-testid="modal-qc-validate-detail-cancel"
+                  onClick={() => setShowQCValidationConfirm(false)}
+                  className="rounded-lg bg-slate-100 px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-200"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  data-testid="modal-qc-validate-detail-confirm"
+                  onClick={() => {
+                    setShowQCValidationConfirm(false);
+                    handleQCSubmit("valide");
+                  }}
+                  className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showDeliveryValidationConfirm && (
+          <div data-testid="modal-delivery-confirm-detail" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+            <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <h3 className="font-black text-slate-900">Confirmer la restitution</h3>
+                  <p className="mt-1 font-semibold text-slate-600">La signature client est capturée et le dossier passera au statut livré.</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  data-testid="modal-delivery-confirm-detail-cancel"
+                  onClick={() => setShowDeliveryValidationConfirm(false)}
+                  className="rounded-lg bg-slate-100 px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-200"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  data-testid="modal-delivery-confirm-detail-confirm"
+                  onClick={confirmDeliveryRequest}
+                  className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1528,6 +1658,10 @@ export default function DossierDetail({
           testIdPrefix="modal-task-unblock"
         />
 
+      </div>
+
+      <div id="nimr-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!printType}>
+        {printType && <PrintDocuments type={printType} dossier={dossier} clientPhoneToShow={dossier.clientTelephone} />}
       </div>
 
       {showQuoteImport && (

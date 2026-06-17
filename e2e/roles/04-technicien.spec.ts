@@ -153,9 +153,9 @@ test.describe("Rôle : Technicien", () => {
     const confirmBtn = page.locator('[data-testid="modal-task-block-confirm"]');
     await expect(confirmBtn).toBeDisabled();
 
-    // 5. Select "Autre (saisie libre)"
+    // 5. Select "Autre"
     const select = page.locator('[data-testid="modal-task-block-select"]');
-    await select.selectOption("Autre (saisie libre)");
+    await select.selectOption("Autre");
 
     // 6. Confirm button should still be disabled because details are empty
     await expect(confirmBtn).toBeDisabled();

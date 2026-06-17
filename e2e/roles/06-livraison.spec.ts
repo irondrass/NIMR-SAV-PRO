@@ -65,7 +65,7 @@ test.describe("Rôle : Livraison", () => {
     await expect(reasons).toHaveText(/qualité/i);
   });
 
-  test("Livraison réussie après signature client et clôture facturation", async ({ page }) => {
+  test("Livraison réussie après signature client et clôture opérationnelle", async ({ page }) => {
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${dossierReady.id}`));
     await humanClick(page, page.locator('[data-testid="tab-deliveries"]'));
@@ -76,6 +76,8 @@ test.describe("Rôle : Livraison", () => {
 
     // Click deliver
     await humanClick(page, page.locator('[data-testid="delivery-submit"]'));
+    await expect(page.locator('[data-testid="modal-delivery-confirm-detail"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="modal-delivery-confirm-detail-confirm"]'));
 
     // Verify dossier status transitioned to Livré
     await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: "Livré" })).toBeVisible();

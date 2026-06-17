@@ -77,6 +77,17 @@ import {
 } from "../src/types";
 import { INITIAL_DOSSIERS } from "../src/data";
 import { buildDirectorDashboardKpis, extractDossierTiming } from "../src/dashboard-kpis";
+import { clearAuditTrail, getAuditTrail, logAuditEvent } from "../src/audit-trail";
+import {
+  maskPhoneNumber,
+  sanitizeFreeText,
+  validateComplaintText,
+  validateMileage,
+  validatePlateNumber,
+  validateTechnicianDiagnostic,
+  validateTunisianPhone,
+  validateVin,
+} from "../src/field-validations";
 
 
 interface QACheck {
@@ -1960,13 +1971,16 @@ registerCheck("Lot 6B Invariants", "Livraison a module dédié", () => {
 
 registerCheck("Lot 6B Invariants", "refus QC exige motif", () => {
   const viewContent = fs.readFileSync("src/components/ControleQualiteView.tsx", "utf8");
-  assert.ok(viewContent.includes("refusalComment.trim()"), "ControleQualiteView doit valider le motif de refus");
+  const modalContent = fs.readFileSync("src/components/StandardReasonModal.tsx", "utf8");
+  assert.ok(viewContent.includes("modal-qc-refuse"), "ControleQualiteView doit utiliser un modal de refus QC standardisé");
+  assert.ok(modalContent.includes('testIdPrefix === "modal-qc-refuse"'), "StandardReasonModal doit rendre le commentaire obligatoire pour le refus QC");
 });
 
 registerCheck("Lot 6B Invariants", "livraison exige km sortie valide", () => {
   const viewContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
   assert.ok(viewContent.includes("vehiculeKilometrage"), "LivraisonView doit valider le kilométrage d'entrée");
   assert.ok(viewContent.includes("parsedExitKm"), "LivraisonView doit valider le kilométrage de sortie");
+  assert.ok(viewContent.includes("validateMileage(parsedExitKm)"), "LivraisonView doit appliquer validateMileage au kilométrage de sortie");
 });
 
 registerCheck("Lot 6B Invariants", "technicien ne peut pas démarrer tâche désactivée", () => {
@@ -2094,6 +2108,100 @@ registerCheck("Lot 6D-bis Invariants", "Le focus-out de l'immatriculation décle
   assert.ok(content.includes("onBlur={handleImmatriculationBlur}"), "L'input immatriculation doit associer handleImmatriculationBlur");
 });
 
+registerCheck("Lot 6E Invariants", "validations métier bloquent les entrées invalides", () => {
+  assert.equal(validateTunisianPhone("+216 20 000 001"), true);
+  assert.equal(validateTunisianPhone("+216 XX 000 001"), false);
+  assert.equal(validateVin("1HGCM82633A004352"), true);
+  assert.equal(validateVin("1HGCM82633A00435Q"), false);
+  assert.equal(validatePlateNumber("123 TU 456"), true);
+  assert.equal(validateMileage(-1).valid, false);
+  assert.equal(validateMileage(500001).mustConfirm, true);
+  assert.equal(validateMileage(1000001).valid, false);
+  assert.equal(validateComplaintText("Bruit moteur à froid"), true);
+  assert.equal(validateComplaintText("RAS"), false);
+  assert.equal(validateTechnicianDiagnostic("ok"), false);
+  assert.equal(maskPhoneNumber("+216 55 111 001"), "+216 ** *** 001");
+});
+
+registerCheck("Lot 6E Invariants", "champs libres neutralisent script et balises", () => {
+  const sanitized = sanitizeFreeText("<script>alert(1)</script><b>Diagnostic exploitable</b> javascript:alert(1)");
+  assert.equal(sanitized.includes("<"), false);
+  assert.equal(sanitized.includes("script"), false);
+  assert.equal(sanitized.includes("javascript:"), false);
+});
+
+registerCheck("Lot 6E Invariants", "audit trail horodaté pour actions sensibles", () => {
+  clearAuditTrail();
+  const entry = logAuditEvent({
+    user: "QA",
+    role: UserRole.DIRECTEUR_SAV,
+    module: "dossiers",
+    action: "changement_statut",
+    dossierId: "NIMR-QA-6E",
+    ancienStatut: DossierStatus.CONTROLE_QUALITE,
+    nouveauStatut: DossierStatus.PRET_A_LIVRER,
+    commentaire: "<b>validation</b>",
+    source: "qa-agent",
+  });
+  assert.ok(!Number.isNaN(Date.parse(entry.timestamp)));
+  assert.equal(entry.commentaire, "validation");
+  assert.equal(getAuditTrail()[0].id, entry.id);
+  clearAuditTrail();
+});
+
+registerCheck("Lot 6E Invariants", "session locale expire après 30 minutes et se rafraîchit sur activité", () => {
+  const authContent = fs.readFileSync("src/auth.ts", "utf8");
+  const appContent = fs.readFileSync("src/App.tsx", "utf8");
+  assert.ok(authContent.includes("30 * 60 * 1000"), "auth.ts doit définir une expiration de 30 minutes");
+  assert.ok(appContent.includes('window.addEventListener("click"'), "App doit rafraîchir la session au clic");
+  assert.ok(appContent.includes('window.addEventListener("keydown"'), "App doit rafraîchir la session au clavier");
+  assert.ok(appContent.includes("session-expired-message"), "App doit afficher un message de session expirée");
+});
+
+registerCheck("Lot 6E Invariants", "anti double-clic présent sur actions critiques", () => {
+  const guardContent = fs.readFileSync("src/action-guard.ts", "utf8");
+  const modalContent = fs.readFileSync("src/components/StandardReasonModal.tsx", "utf8");
+  const receptionContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  const qcContent = fs.readFileSync("src/components/ControleQualiteView.tsx", "utf8");
+  const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  assert.ok(guardContent.includes("already-running"), "createActionGuard doit empêcher une action déjà en cours");
+  assert.ok(modalContent.includes("isSubmitting"), "StandardReasonModal doit désactiver confirmation pendant soumission");
+  assert.ok(receptionContent.includes("receptionSubmitRef"), "Réception doit bloquer la double création");
+  assert.ok(qcContent.includes("qcSubmitRef"), "QC doit bloquer la double décision");
+  assert.ok(deliveryContent.includes("deliveryConfirmRef"), "Livraison doit bloquer la double restitution");
+});
+
+registerCheck("Lot 6E Invariants", "confirmations obligatoires QC et livraison", () => {
+  const qcContent = fs.readFileSync("src/components/ControleQualiteView.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  assert.ok(qcContent.includes("modal-qc-validate"), "Le module QC doit confirmer une validation complète");
+  assert.ok(qcContent.includes("modal-qc-refuse"), "Le module QC doit confirmer un refus avec motif");
+  assert.ok(detailContent.includes("modal-qc-validate-detail"), "Le détail dossier doit confirmer une validation QC");
+  assert.ok(detailContent.includes("modal-delivery-confirm-detail"), "Le détail dossier doit confirmer une restitution");
+  assert.ok(deliveryContent.includes("showConfirmModal"), "Le module livraison doit demander une confirmation finale");
+  assert.ok(deliveryContent.includes("hasSigned"), "La livraison doit exiger une signature ou confirmation client");
+});
+
+registerCheck("Lot 6E Invariants", "documents imprimables internes et sans finance réelle", () => {
+  const printContent = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  for (const expected of ["Fiche Réception", "Ordre de Réparation Interne", "Fiche Contrôle Qualité", "Bon de Restitution"]) {
+    assert.ok(printContent.includes(expected), `Document manquant: ${expected}`);
+  }
+  assert.ok(detailContent.includes("nimr-print-container"), "Le détail dossier doit intégrer le conteneur d'impression");
+  for (const forbidden of ["caisse", "paiement", "marge", "facture réelle", "stock réel"]) {
+    assert.equal(printContent.toLowerCase().includes(forbidden), false, `Document imprimable contient ${forbidden}`);
+  }
+});
+
+registerCheck("Lot 6E Invariants", "lecture seule sans actions critiques visibles", () => {
+  const chefContent = fs.readFileSync("src/components/ChefAtelierView.tsx", "utf8");
+  assert.equal(isReadOnlyRole(UserRole.LECTURE_SEULE), true);
+  assert.equal(canManageUsers(UserRole.LECTURE_SEULE), false);
+  assert.ok(chefContent.includes("activeRole !== UserRole.LECTURE_SEULE"), "ChefAtelierView doit masquer les actions en lecture seule");
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -2117,7 +2225,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 6 - Historique & Rapports SAV opérationnels)
+- **Version** : v1.1.0 (Lot 6E - Hardening métier pré-RC)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 
