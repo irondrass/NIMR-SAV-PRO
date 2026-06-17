@@ -516,4 +516,86 @@ Les Lots 1 à 6E sont entièrement validés en environnement de test local.
 Conformément aux exigences du Lot 6E, **aucun tag Git `v1.1.0` n'est créé à ce stade**.
 Aucune donnée réelle n'a été committée, et aucun tag Git `v1.1.0` n'a été créé.
 
+---
+
+## 20. Recette finale v1.1.0-rc1
+
+Recette exécutée sur l'état courant de `main` après validation des Lots 1 à 6E.
+
+| Contrôle RC | Résultat | Détail |
+| :--- | :--- | :--- |
+| **Hash recetté** | **OK** | `830342b Add Lot 6E pre-RC business hardening` |
+| **Statut Git** | **OK** | `main...origin/main`, workspace propre avant modification du présent rapport. |
+| **Tags Git `v1.1.0` / `v1.1.0-rc1`** | **NON CONFIRMÉ** | La commande `git tag --list` est bloquée par l'environnement d'approbation. Aucun tag n'a été créé pendant cette recette. |
+| **Fichiers sensibles / générés** | **OK** | Aucun `.env` réel, aucun `Liste Vehicule.xlsx`, aucun PDF réel détecté. `.env.example` seul présent. `dist/`, `node_modules/`, `playwright-report/` et `test-results/` sont locaux/ignorés et non dans le statut suivi. |
+| **GitHub Pages** | **OK** | `https://irondrass.github.io/NIMR-SAV-PRO/` répond `200 OK`, titre publié `NIMR SAV PRO v1.1.0`, bundle distant `assets/index-C_Nsmykf.js` aligné avec le build local. |
+| **Cache / manifest / service worker** | **OK** | Aucun `manifest.webmanifest` ni `sw.js` publié ; aucune ancienne version PWA détectée. |
+| **Zéro finance** | **OK** | Aucun CA, marge, paiement, caisse, facture réelle, montant client, solde ou stock réel ajouté aux parcours opérationnels et documents internes. |
+| **Aucune donnée réelle** | **OK** | Données de recette fictives uniquement ; pas de fichier véhicule réel ni PDF réel committé. |
+
+### Résultats des validations rejouées
+
+| Commande | Statut | Résultat |
+| :--- | :--- | :--- |
+| `npm run lint` | **RÉUSSI** | TypeScript sans erreur. |
+| `npm test` | **RÉUSSI** | Suites unitaires au vert, incluant validations, audit, anti double-clic et impressions. |
+| `npm run build` | **RÉUSSI** | Build Vite généré. Warning chunk size `> 500 kB` noté comme non bloquant. |
+| `npm run test:e2e -- --reporter=line` | **RÉUSSI** | **318/318 tests Playwright** sur Desktop, Mobile et Tablette. |
+| `npm run qa:agent` | **NON REJOUÉ EN FINAL** | Dernier `qa-report.md` connu : **116/116 OK**. La relance finale est bloquée par l'environnement d'approbation après l'E2E complet. |
+
+### Validation stress test réception
+
+Statut : **OK via E2E + tests unitaires**.
+Les scénarios couvrent l'import/recherche base véhicules, le bouton "Utiliser ce véhicule", le pré-remplissage focus-out immatriculation, le blocage de doublon actif VIN/immatriculation, les validations téléphone/VIN/kilométrage/plainte, la confirmation de création et l'anti double-clic.
+
+### Validation stress test atelier
+
+Statut : **OK via E2E + tests unitaires**.
+Les scénarios couvrent affectation, suggestion planning, démarrage/pause/reprise, bouton démarrer désactivé non exécutable, diagnostic final `"ok"` refusé, diagnostic valide accepté, blocage avec motif/commentaire, alerte pièces manquantes, Gantt, charges techniciens/ponts, absence de `NaN` et absence de `0h/0h` incohérent.
+
+### Validation stress test contrôle qualité
+
+Statut : **OK via E2E**.
+Les scénarios couvrent checklist obligatoire, validation QC, refus sans motif/commentaire bloqué, refus avec motif/commentaire, retour atelier, badge/état qualité et historique QC.
+
+### Validation stress test livraison
+
+Statut : **OK via E2E**.
+Les scénarios couvrent accès module Livraison, refus avant QC validé, checklist obligatoire, kilométrage sortie obligatoire et cohérent, blocage si km sortie < km entrée, signature client, confirmation finale et historique de livraison.
+
+### Validation lecture seule
+
+Statut : **OK via E2E**.
+Login `lecture / 9999` validé, badge Lecture seule visible, gestion utilisateurs masquée et actions critiques de modification/affectation/démarrage/blocage/terminaison/QC/livraison/suppression cachées ou interdites. Téléphone masqué pour les rôles non autorisés.
+
+### Validation impressions
+
+Statut : **OK via E2E + tests unitaires**.
+Les documents disponibles sont :
+1. Fiche réception.
+2. Ordre de réparation interne.
+3. Fiche contrôle qualité.
+4. Bon de restitution / livraison.
+
+Chaque document affiche `Document interne NIMR SAV PRO`, date/heure, dossier, client, véhicule, VIN, immatriculation et kilométrage. Le CSS `@media print` masque l'application et imprime uniquement `#nimr-print-container`.
+
+### Validation sécurité locale
+
+Statut : **OK via tests unitaires + QA connu**.
+Les entrées `<script>alert(1)</script>` sont neutralisées par `sanitizeFreeText`, aucun `dangerouslySetInnerHTML` n'est présent dans `src`, et le test de session timeout via `window.__TEST_SESSION_TIMEOUT__` est couvert en E2E.
+
+### Validation audit trail
+
+Statut : **OK via tests unitaires + inspection code**.
+Les actions critiques journalisées couvrent création dossier, changement de statut, import/export, référentiel véhicules, réclamations, réservations/disponibilités atelier, utilisateurs, auth/session, QC et livraison via `logAuditEvent`.
+
+### Décision RC
+
+**Décision : non prêt pour création immédiate du tag `v1.1.0-rc1` dans cet environnement.**
+
+Raison : la recette applicative est verte jusqu'à l'E2E complet, mais deux contrôles obligatoires restent non confirmés localement :
+1. absence effective des tags `v1.1.0` et `v1.1.0-rc1` via `git tag --list` ;
+2. relance finale de `npm run qa:agent` après l'E2E complet.
+
+Recommandation : créer le tag `v1.1.0-rc1` uniquement après confirmation de ces deux points. Ne pas créer `v1.1.0` final.
 
