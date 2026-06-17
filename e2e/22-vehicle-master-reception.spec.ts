@@ -183,4 +183,168 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     // Panel should indicate 0 records
     await expect(togglePanelBtn).toContainText("0 véhicule(s) en local");
   });
+
+  test("Focus-out immatriculation auto-fill and active duplicate dossier blocking", async ({ page }) => {
+    // 1. Setup localStorage directly to bypass the importer duplicate-plate validations
+    const mockVehicles = [
+      {
+        id: "VINBLUR123",
+        vin: "VINBLUR123",
+        plateNumber: "888 TU 888",
+        customerName: "Charlie",
+        customerPhone: "+216 88 888 888",
+        brand: "Dongfeng",
+        model: "Shine Max",
+        version: "Luxury",
+        deliveryDate: "2026-06-15",
+        circulationDate: "2026-06-15",
+        warrantyPartsEndDate: "2029-06-15",
+        warrantyLaborEndDate: "2029-06-15",
+        lastServiceDate: "2027-06-15",
+        lastServiceMileage: 15000,
+        energy: "essence",
+        source: "import",
+        importedAt: new Date().toISOString()
+      },
+      {
+        id: "VINBLUR456",
+        vin: "VINBLUR456",
+        plateNumber: "888 TU 888",
+        customerName: "David",
+        customerPhone: "+216 77 777 777",
+        brand: "DFSK",
+        model: "Glory 500",
+        version: "Premium",
+        deliveryDate: "2026-06-15",
+        circulationDate: "2026-06-15",
+        warrantyPartsEndDate: "2029-06-15",
+        warrantyLaborEndDate: "2029-06-15",
+        lastServiceDate: "2027-06-15",
+        lastServiceMileage: 15000,
+        energy: "essence",
+        source: "import",
+        importedAt: new Date().toISOString()
+      },
+      {
+        id: "VINUNIQUE777",
+        vin: "VINUNIQUE777",
+        plateNumber: "777 TU 777",
+        customerName: "Emma",
+        customerPhone: "+216 66 666 666",
+        brand: "Dongfeng",
+        model: "Shine",
+        version: "Luxury",
+        deliveryDate: "2026-06-15",
+        circulationDate: "2026-06-15",
+        warrantyPartsEndDate: "2029-06-15",
+        warrantyLaborEndDate: "2029-06-15",
+        lastServiceDate: "2027-06-15",
+        lastServiceMileage: 15000,
+        energy: "essence",
+        source: "import",
+        importedAt: new Date().toISOString()
+      }
+    ];
+
+    await page.goto("/");
+    await page.evaluate((records) => {
+      localStorage.clear();
+      localStorage.setItem("nimr-sav-pro-vehicle-master-v1", JSON.stringify(records));
+      localStorage.setItem("nimr-sav-pro-vehicle-master-last-import", new Date().toISOString());
+    }, mockVehicles);
+    await page.reload();
+
+    // 2. Login as Réceptionnaire
+    await changeUserRole(page, "role-option-receptionnaire");
+
+    // 3. Open Reception tab
+    const tabSelector = '[data-testid="nav-reception"]';
+    await page.waitForSelector(tabSelector, { state: "visible" });
+    await humanClick(page, page.locator(tabSelector));
+
+    // 4. Verify that we have 3 vehicles in local DB
+    const togglePanelBtn = page.locator('[data-testid="vehicle-master-panel-toggle"]');
+    await expect(togglePanelBtn).toContainText("3 véhicule(s) en local");
+
+    // 5. Test Case 1: Focus-out (blur) with multiple matches
+    const clientNameInput = page.locator('[data-testid="reception-client-name"]');
+    const clientPhoneInput = page.locator('[data-testid="reception-client-phone"]');
+    await clientNameInput.fill("Temporary client");
+    
+    const nextBtn = page.locator('[data-testid="reception-next"]');
+    await humanClick(page, nextBtn); // Step 1 -> Step 2
+
+    const plateInput = page.locator('[data-testid="reception-plate"]');
+    await plateInput.fill("888 TU 888");
+    await plateInput.blur();
+
+    // Verify multiple matches modal appears
+    await expect(page.locator('[data-testid="close-multiple-matches"]')).toBeVisible();
+
+    // Select David (the second match, which has index 1)
+    await humanClick(page, page.locator('[data-testid="select-matching-vehicle-1"]'));
+
+    // Verify confirmation overwrite modal is shown (since client name was "Temporary client")
+    await expect(page.locator('[data-testid="vehicle-overwrite-confirm"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="vehicle-overwrite-confirm"]'));
+
+    // Step back to Step 1 to verify client data is populated
+    const prevBtn = page.locator('[data-testid="reception-previous"]');
+    await humanClick(page, prevBtn); // Step 2 -> Step 1
+    await expect(clientNameInput).toHaveValue("David");
+    await expect(clientPhoneInput).toHaveValue("+216 77 777 777");
+
+    // 6. Complete creation to establish an active dossier
+    await humanClick(page, nextBtn); // Step 1 -> Step 2
+    await humanClick(page, nextBtn); // Step 2 -> Step 3
+    const presetComplaint = page.locator('[data-testid="preset-complaint-voyant-moteur"]');
+    await humanClick(page, presetComplaint);
+    await humanClick(page, nextBtn); // Step 3 -> Step 4
+
+    const submitBtn = page.locator('[data-testid="reception-submit"]');
+    await humanClick(page, submitBtn); // Step 4 -> Success Screen
+
+    // 7. Test Case 2: Create a second dossier for the SAME vehicle and verify duplicate blocking
+    const newBtn = page.locator('[data-testid="reception-new-btn"]');
+    await expect(newBtn).toBeVisible();
+    await humanClick(page, newBtn);
+
+    // Fill client name
+    await clientNameInput.fill("Emma");
+    await humanClick(page, nextBtn); // Step 1 -> Step 2
+
+    // Blur on the plate of the duplicate vehicle
+    await plateInput.fill("888 TU 888");
+    await plateInput.blur();
+
+    // It has multiple matches. Let's select David again
+    await expect(page.locator('[data-testid="close-multiple-matches"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="select-matching-vehicle-1"]'));
+
+    // Overwrite confirm
+    await expect(page.locator('[data-testid="vehicle-overwrite-confirm"]')).toBeVisible();
+    await humanClick(page, page.locator('[data-testid="vehicle-overwrite-confirm"]'));
+
+    // Advance to final step
+    await humanClick(page, nextBtn); // Step 2 -> Step 3
+    await humanClick(page, presetComplaint);
+    await humanClick(page, nextBtn); // Step 3 -> Step 4
+
+    // Attempt to submit
+    await humanClick(page, submitBtn);
+
+    // Verify duplicate active dossier warning modal is shown
+    const duplicateWarning = page.locator('[data-testid="duplicate-warning-message"]');
+    await expect(duplicateWarning).toBeVisible();
+    await expect(duplicateWarning).toContainText("Un dossier est déjà en cours pour ce véhicule.");
+
+    const openExistingBtn = page.locator('[data-testid="open-existing-dossier"]');
+    await expect(openExistingBtn).toBeVisible();
+
+    // Click "Ouvrir le dossier existant"
+    await humanClick(page, openExistingBtn);
+
+    // Detailed view should open, showing Bob's / David's vehicle details
+    await expect(page.locator('text=VINBLUR456')).toBeVisible();
+  });
 });

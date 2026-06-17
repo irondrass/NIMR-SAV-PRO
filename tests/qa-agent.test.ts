@@ -2081,6 +2081,19 @@ registerCheck("Lot 6D Invariants", "Aucune donnée réelle committée ni CA/marg
   }
 });
 
+registerCheck("Lot 6D-bis Invariants", "La détection de doublons bloque la création directe de dossiers actifs pour le même VIN ou immatriculation", () => {
+  const content = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  assert.ok(content.includes("isActiveDossier"), "GuidedReception doit implémenter isActiveDossier");
+  assert.ok(content.includes("setActiveDuplicateDossier"), "GuidedReception doit pouvoir définir activeDuplicateDossier");
+  assert.ok(content.includes("open-existing-dossier"), "GuidedReception doit proposer un bouton d'ouverture du dossier existant");
+});
+
+registerCheck("Lot 6D-bis Invariants", "Le focus-out de l'immatriculation déclenche la recherche et remplit le formulaire si match unique", () => {
+  const content = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  assert.ok(content.includes("handleImmatriculationBlur"), "GuidedReception doit implémenter handleImmatriculationBlur");
+  assert.ok(content.includes("onBlur={handleImmatriculationBlur}"), "L'input immatriculation doit associer handleImmatriculationBlur");
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------

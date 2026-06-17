@@ -796,6 +796,7 @@ export default function App() {
 
               {activeTab === "reception-rapide" && (
                 <GuidedReception 
+                  dossiers={dossiers}
                   existingDossierIds={dossiers.map(d => d.id)}
                   onAddDossier={handleAddDossier}
                   onNavigateToTab={(tab) => {
@@ -806,6 +807,9 @@ export default function App() {
                   onUpdateVehicleMaster={handleUpdateVehicleMaster}
                   onClearVehicleMaster={handleClearVehicleMaster}
                   currentUserRole={activeRole}
+                  onSelectDossier={(id) => {
+                    setSelectedDossierId(id);
+                  }}
                 />
               )}
 

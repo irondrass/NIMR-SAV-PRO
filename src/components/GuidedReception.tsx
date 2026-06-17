@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import {
   CameraPhoto,
   DossierSAV,
+  DossierStatus,
   DossierPriority,
   InterventionType,
   PHOTO_CATEGORIES,
@@ -50,6 +51,7 @@ import {
 } from "../vehicle-master";
 
 interface GuidedReceptionProps {
+  dossiers: DossierSAV[];
   existingDossierIds: string[];
   onAddDossier: (dossier: DossierSAV) => void;
   onNavigateToTab: (tab: string) => void;
@@ -58,6 +60,7 @@ interface GuidedReceptionProps {
   onUpdateVehicleMaster: (records: VehicleMasterRecord[]) => void;
   onClearVehicleMaster: () => void;
   currentUserRole: UserRole;
+  onSelectDossier?: (id: string) => void;
 }
 
 const PRESET_CLIENTS = [
@@ -89,6 +92,7 @@ const PRESET_COMPLAINTS = [
 ];
 
 export default function GuidedReception({
+  dossiers,
   existingDossierIds,
   onAddDossier,
   onNavigateToTab,
@@ -96,7 +100,8 @@ export default function GuidedReception({
   vehicleMasterLastImport,
   onUpdateVehicleMaster,
   onClearVehicleMaster,
-  currentUserRole
+  currentUserRole,
+  onSelectDossier
 }: GuidedReceptionProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [receptionError, setReceptionError] = useState<string | null>(null);
@@ -110,6 +115,8 @@ export default function GuidedReception({
   const [showOverwriteConfirmation, setShowOverwriteConfirmation] = useState(false);
   const [pendingVehicleToUse, setPendingVehicleToUse] = useState<VehicleMasterRecord | null>(null);
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
+  const [plateMultipleMatches, setPlateMultipleMatches] = useState<VehicleMasterRecord[]>([]);
+  const [activeDuplicateDossier, setActiveDuplicateDossier] = useState<DossierSAV | null>(null);
 
   const handleSearchVehicle = (q: string) => {
     setSearchQuery(q);
@@ -187,6 +194,62 @@ export default function GuidedReception({
       setShowOverwriteConfirmation(true);
     } else {
       handleUseVehicleMasterRecord(vehicle);
+    }
+  };
+
+  const isActiveDossier = (dossier: DossierSAV): boolean => {
+    const activeStatuses = [
+      DossierStatus.NOUVEAU,
+      DossierStatus.EN_ATTENTE_RECEPTION,
+      DossierStatus.VEHICULE_RECU,
+      DossierStatus.EN_ATTENTE_ACCORD,
+      DossierStatus.TRAVAUX_PLANIFIES,
+      DossierStatus.EN_TRAVAUX,
+      DossierStatus.BLOQUE,
+      DossierStatus.CONTROLE_QUALITE,
+      DossierStatus.PRET_A_LIVRER,
+      DossierStatus.PRET_FACTURATION,
+      DossierStatus.LIVRE
+    ];
+    return activeStatuses.includes(dossier.statut);
+  };
+
+  const handleImmatriculationBlur = () => {
+    const rawVal = vehiculeImmatriculation.trim();
+    if (!rawVal) return;
+
+    // Normaliser la plaque dans l'input
+    const normalizedPlate = rawVal.toUpperCase().replace(/\s+/g, " ").trim();
+    setVehiculeImmatriculation(normalizedPlate);
+
+    // Rechercher dans vehicleMasterRecords par plaque normalisée (sans espaces pour la comparaison stricte)
+    const cleanPlateForSearch = normalizedPlate.replace(/\s+/g, "");
+    const matches = vehicleMasterRecords.filter(r => {
+      if (!r.plateNumber) return false;
+      const cleanRecordPlate = r.plateNumber.toUpperCase().replace(/\s+/g, "");
+      return cleanRecordPlate === cleanPlateForSearch;
+    });
+
+    if (matches.length === 1) {
+      const matchedVehicle = matches[0];
+      const isFormFilled = 
+        clientNom.trim() !== "" ||
+        clientTelephone.trim() !== "" ||
+        vehiculeModele.trim() !== "" ||
+        vehiculeVIN.trim() !== "" ||
+        vehiculeVersion.trim() !== "" ||
+        vehiculeDateLivraison.trim() !== "" ||
+        vehiculeDateMiseCirculation.trim() !== "" ||
+        vehiculeDernierEntretien.trim() !== "";
+
+      if (isFormFilled) {
+        setPendingVehicleToUse(matchedVehicle);
+        setShowOverwriteConfirmation(true);
+      } else {
+        handleUseVehicleMasterRecord(matchedVehicle);
+      }
+    } else if (matches.length > 1) {
+      setPlateMultipleMatches(matches);
     }
   };
   
@@ -720,6 +783,7 @@ export default function GuidedReception({
                   placeholder="Ex: 000 TU 0001"
                   value={vehiculeImmatriculation}
                   onChange={(e) => setVehiculeImmatriculation(e.target.value)}
+                  onBlur={handleImmatriculationBlur}
                 />
               </div>
             </div>
@@ -1244,6 +1308,7 @@ export default function GuidedReception({
                   setPhotoCategory("réception avant");
                   setCurrentStep(1);
                 }}
+                data-testid="reception-new-btn"
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800    rounded-lg text-xs font-bold transition cursor-pointer"
               >
                 Nouvelle Réception
@@ -1303,7 +1368,17 @@ export default function GuidedReception({
             <button
               onClick={() => {
                 setReceptionError(null);
-                handleFormSubmit();
+                const duplicate = dossiers.find(d => {
+                  if (!isActiveDossier(d)) return false;
+                  const matchVin = d.vehiculeVIN && vehiculeVIN && d.vehiculeVIN.toUpperCase().replace(/\s+/g, "") === vehiculeVIN.toUpperCase().replace(/\s+/g, "");
+                  const matchImmat = d.vehiculeImmatriculation && vehiculeImmatriculation && d.vehiculeImmatriculation.toUpperCase().replace(/\s+/g, "") === vehiculeImmatriculation.toUpperCase().replace(/\s+/g, "");
+                  return matchVin || matchImmat;
+                });
+                if (duplicate) {
+                  setActiveDuplicateDossier(duplicate);
+                } else {
+                  handleFormSubmit();
+                }
               }}
               data-testid="reception-submit"
               className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer hover:scale-105"
@@ -1390,6 +1465,94 @@ export default function GuidedReception({
               >
                 Confirmer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Multiple Matches Modal */}
+      {plateMultipleMatches.length > 0 && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-md w-full shadow-xl space-y-4">
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm">Plusieurs véhicules trouvés</h3>
+              <p className="text-slate-500 text-xs mt-1">
+                Plusieurs fiches de véhicules correspondent à cette immatriculation. Veuillez en choisir une :
+              </p>
+            </div>
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+              {plateMultipleMatches.map((vehicle, idx) => (
+                <div 
+                  key={idx}
+                  className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-between text-xs transition"
+                >
+                  <div>
+                    <div className="font-bold text-slate-800">{vehicle.brand} {vehicle.model} {vehicle.version}</div>
+                    <div className="text-slate-500 text-[10px]">VIN: {vehicle.vin} | Client: {vehicle.customerName}</div>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid={`select-matching-vehicle-${idx}`}
+                    onClick={() => {
+                      handleUseVehicleClick(vehicle);
+                      setPlateMultipleMatches([]);
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md transition cursor-pointer"
+                  >
+                    Choisir
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end text-xs pt-2">
+              <button
+                type="button"
+                data-testid="close-multiple-matches"
+                onClick={() => setPlateMultipleMatches([])}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Continuer manuellement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Active Dossier Guard Modal */}
+      {activeDuplicateDossier && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">Dossier en cours</h3>
+                <p className="text-slate-500 text-xs mt-1" data-testid="duplicate-warning-message">
+                  Un dossier est déjà en cours pour ce véhicule.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="duplicate-close"
+                onClick={() => setActiveDuplicateDossier(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Fermer
+              </button>
+              {onSelectDossier && (
+                <button
+                  type="button"
+                  data-testid="open-existing-dossier"
+                  onClick={() => {
+                    onSelectDossier(activeDuplicateDossier.id);
+                    setActiveDuplicateDossier(null);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition cursor-pointer"
+                >
+                  Ouvrir le dossier existant
+                </button>
+              )}
             </div>
           </div>
         </div>
