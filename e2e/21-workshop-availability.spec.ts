@@ -38,6 +38,25 @@ const dossier = createMockDossier({
 test.describe("Workshop Availability and Absence Management", () => {
   test("Chef Atelier manages workshop availability and constraints", async ({ page }) => {
     // 1. Setup mock database
+    await page.addInitScript(() => {
+      const mockDate = new Date("2026-06-15T07:00:00");
+      const _Date = Date;
+      class MockDate extends _Date {
+        constructor(...args: any[]) {
+          if (args.length === 0) {
+            super(mockDate.getTime());
+          } else {
+            // @ts-ignore
+            super(...args);
+          }
+        }
+        static now() {
+          return mockDate.getTime();
+        }
+      }
+      // @ts-ignore
+      window.Date = MockDate;
+    });
     await page.goto("/");
     await page.evaluate(({ keys, data }) => {
       localStorage.clear();

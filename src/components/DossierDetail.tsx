@@ -704,6 +704,34 @@ export default function DossierDetail({
                   <span className="text-zinc-400 font-normal block">Kilométrage relevé :</span>
                   <span className="text-slate-800  font-bold block">{dossier.vehiculeKilometrage.toLocaleString()} km</span>
                 </div>
+                <div>
+                  <span className="text-zinc-400 font-normal block">Version :</span>
+                  <span className="text-slate-800 font-bold block" data-testid="detail-vehicle-version">{dossier.vehiculeVersion || "N/A"}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400 font-normal block">Date livraison :</span>
+                  <span className="text-slate-800 font-bold block" data-testid="detail-delivery-date">{dossier.dateLivraison || "N/A"}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400 font-normal block">Mise en circulation :</span>
+                  <span className="text-slate-800 font-bold block" data-testid="detail-circulation-date">{dossier.dateMiseCirculation || "N/A"}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400 font-normal block">Garantie :</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase inline-block ${
+                    dossier.statutGarantie === "Garantie active" 
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                      : dossier.statutGarantie === "Garantie expirée"
+                      ? "bg-rose-50 text-rose-700 border border-rose-200"
+                      : "bg-slate-100 text-slate-600 border border-slate-200"
+                  }`} data-testid="detail-warranty-status">
+                    {dossier.statutGarantie || "Garantie inconnue"}
+                  </span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-zinc-400 font-normal block">Dernier entretien :</span>
+                  <span className="text-slate-800 font-bold block font-mono text-[11px]" data-testid="detail-last-service">{dossier.dernierEntretien || "Aucun entretien enregistré"}</span>
+                </div>
               </div>
 
               {/* Fuel and paint panel */}

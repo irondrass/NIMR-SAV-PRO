@@ -93,6 +93,11 @@ export interface ReceptionDossierInput {
     autresNotes: string;
   };
   objetsLaisses: string[];
+  vehiculeVersion?: string;
+  dateLivraison?: string;
+  dateMiseCirculation?: string;
+  statutGarantie?: string;
+  dernierEntretien?: string;
 }
 
 export interface ReclamationInput {
@@ -228,6 +233,11 @@ export function createReceptionDossier(
     vehiculeVIN: input.vehiculeVIN.trim() || "17-VIN-PLACEHOLDER",
     vehiculeKilometrage: Math.max(0, safeKilometrage),
     vehiculeCouleur: input.vehiculeCouleur.trim() || "Non spécifiée",
+    vehiculeVersion: input.vehiculeVersion || "",
+    dateLivraison: input.dateLivraison || "",
+    dateMiseCirculation: input.dateMiseCirculation || "",
+    statutGarantie: input.statutGarantie || "Garantie inconnue",
+    dernierEntretien: input.dernierEntretien || "",
     typeDossier: input.typeDossier,
     priorite: input.priorite,
     plainteClient: input.plainteClient.trim() || "R.A.S. - Entretien périodique",

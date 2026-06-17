@@ -63,6 +63,28 @@ const dossierNonReservable = createMockDossier({
 });
 
 test.describe("Workshop Reservations Flow", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      const mockDate = new Date("2026-06-15T07:00:00");
+      const _Date = Date;
+      class MockDate extends _Date {
+        constructor(...args: any[]) {
+          if (args.length === 0) {
+            super(mockDate.getTime());
+          } else {
+            // @ts-ignore
+            super(...args);
+          }
+        }
+        static now() {
+          return mockDate.getTime();
+        }
+      }
+      // @ts-ignore
+      window.Date = MockDate;
+    });
+  });
+
   test("Chef Atelier workshop reservations workflow", async ({ page }) => {
     // 1. Setup localStorage and go to homepage
     await page.goto("/");

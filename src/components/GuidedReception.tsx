@@ -140,13 +140,28 @@ export default function GuidedReception({
     e.target.value = "";
   };
 
-  const executeUseVehicle = (vehicle: VehicleMasterRecord) => {
+  const handleUseVehicleMasterRecord = (vehicle: VehicleMasterRecord) => {
+    const maskedPhone = vehicle.customerPhone 
+      ? vehicle.customerPhone.substring(0, 4) + "****" + vehicle.customerPhone.substring(vehicle.customerPhone.length - 3) 
+      : "aucun";
+    console.debug(`[VehicleMaster] Utilisation du véhicule VIN: ${vehicle.vin}, Client: ${vehicle.customerName}, Tél: ${maskedPhone}`);
+
+    const hints = getVehicleReceptionHints(vehicle, new Date());
+
     updateClientNom(vehicle.customerName || "");
     updateClientTelephone(vehicle.customerPhone || "");
     setVehiculeMarque(vehicle.brand || "Dongfeng");
     setVehiculeModele(vehicle.model || "");
+    setVehiculeVersion(vehicle.version || "");
     setVehiculeVIN(vehicle.vin || "");
     setVehiculeImmatriculation(vehicle.plateNumber || "");
+    setVehiculeDateLivraison(vehicle.deliveryDate || "");
+    setVehiculeDateMiseCirculation(vehicle.circulationDate || "");
+    setVehiculeStatutGarantie(hints.warrantyStatus || "Garantie inconnue");
+    setVehiculeDernierEntretien(hints.lastServiceInfo || vehicle.lastServiceDate || "");
+
+    setVehicleMasterSelected(vehicle);
+    setWarrantyHint(hints.recommendedService || null);
 
     setSearchQuery("");
     setSearchResults([]);
@@ -161,13 +176,17 @@ export default function GuidedReception({
       clientTelephone.trim() !== "" ||
       vehiculeModele.trim() !== "" ||
       vehiculeVIN.trim() !== "" ||
-      vehiculeImmatriculation.trim() !== "";
+      vehiculeImmatriculation.trim() !== "" ||
+      vehiculeVersion.trim() !== "" ||
+      vehiculeDateLivraison.trim() !== "" ||
+      vehiculeDateMiseCirculation.trim() !== "" ||
+      vehiculeDernierEntretien.trim() !== "";
 
     if (isFormFilled) {
       setPendingVehicleToUse(vehicle);
       setShowOverwriteConfirmation(true);
     } else {
-      executeUseVehicle(vehicle);
+      handleUseVehicleMasterRecord(vehicle);
     }
   };
   
@@ -212,6 +231,13 @@ export default function GuidedReception({
   const [vehiculeVIN, setVehiculeVIN] = useState("");
   const [vehiculeKilometrage, setVehiculeKilometrage] = useState<number>(15000);
   const [vehiculeCouleur, setVehiculeCouleur] = useState("");
+  const [vehiculeVersion, setVehiculeVersion] = useState("");
+  const [vehiculeDateLivraison, setVehiculeDateLivraison] = useState("");
+  const [vehiculeDateMiseCirculation, setVehiculeDateMiseCirculation] = useState("");
+  const [vehiculeStatutGarantie, setVehiculeStatutGarantie] = useState("Garantie inconnue");
+  const [vehiculeDernierEntretien, setVehiculeDernierEntretien] = useState("");
+  const [vehicleMasterSelected, setVehicleMasterSelected] = useState<VehicleMasterRecord | null>(null);
+  const [warrantyHint, setWarrantyHint] = useState<string | null>(null);
   
   const [typeDossier, setTypeDossier] = useState<InterventionType>(InterventionType.ENTRETIEN_RAPIDE);
   const [priorite, setPriorite] = useState<DossierPriority>(DossierPriority.NORMALE);
@@ -289,7 +315,12 @@ export default function GuidedReception({
         jantesAbimees,
         autresNotes
       },
-      objetsLaisses: objets
+      objetsLaisses: objets,
+      vehiculeVersion,
+      dateLivraison: vehiculeDateLivraison,
+      dateMiseCirculation: vehiculeDateMiseCirculation,
+      statutGarantie: vehiculeStatutGarantie,
+      dernierEntretien: vehiculeDernierEntretien
     }, existingDossierIds);
 
     onAddDossier(newDossier);
@@ -764,6 +795,89 @@ export default function GuidedReception({
                 </div>
               </div>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Version du Véhicule</label>
+                <input 
+                  type="text" 
+                  data-testid="reception-vehicle-version"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none" 
+                  placeholder="EX: Luxury, Comfort, Premium"
+                  value={vehiculeVersion}
+                  onChange={(e) => setVehiculeVersion(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Date de livraison</label>
+                <input 
+                  type="date" 
+                  data-testid="reception-delivery-date"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none font-mono" 
+                  value={vehiculeDateLivraison}
+                  onChange={(e) => setVehiculeDateLivraison(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Date de mise en circulation</label>
+                <input 
+                  type="date" 
+                  data-testid="reception-circulation-date"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none font-mono" 
+                  value={vehiculeDateMiseCirculation}
+                  onChange={(e) => setVehiculeDateMiseCirculation(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Statut Garantie</label>
+                <div className="flex items-center gap-2">
+                  <select 
+                    data-testid="reception-warranty-status"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none"
+                    value={vehiculeStatutGarantie}
+                    onChange={(e) => setVehiculeStatutGarantie(e.target.value)}
+                  >
+                    <option value="Garantie inconnue">Garantie inconnue</option>
+                    <option value="Garantie active">Garantie active</option>
+                    <option value="Garantie expirée">Garantie expirée</option>
+                  </select>
+                  <span 
+                    data-testid="reception-warranty-badge"
+                    className={`px-3 py-2.5 rounded-lg text-xs font-extrabold uppercase shrink-0 ${
+                      vehiculeStatutGarantie === "Garantie active" 
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                        : vehiculeStatutGarantie === "Garantie expirée"
+                        ? "bg-rose-50 text-rose-700 border border-rose-200"
+                        : "bg-slate-100 text-slate-600 border border-slate-200"
+                    }`}
+                  >
+                    {vehiculeStatutGarantie}
+                  </span>
+                </div>
+                {warrantyHint && (
+                  <p className="text-[10px] text-amber-600 font-bold mt-1" data-testid="reception-warranty-hint">
+                    {warrantyHint}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Dernier Entretien</label>
+                <input 
+                  type="text" 
+                  data-testid="reception-last-service"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none" 
+                  placeholder="EX: Dernier entretien le 2027-06-15 à 15000 km"
+                  value={vehiculeDernierEntretien}
+                  onChange={(e) => setVehiculeDernierEntretien(e.target.value)}
+                />
+              </div>
+            </div>
           </div>
         )}
 
@@ -1229,7 +1343,7 @@ export default function GuidedReception({
               <button
                 type="button"
                 data-testid="vehicle-overwrite-confirm"
-                onClick={() => executeUseVehicle(pendingVehicleToUse)}
+                onClick={() => pendingVehicleToUse && handleUseVehicleMasterRecord(pendingVehicleToUse)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition cursor-pointer"
               >
                 Confirmer

@@ -11,6 +11,7 @@ import {
   isOperationalActiveDossier,
   startRepairOrder,
   shouldShowDossierForTechnician,
+  createReceptionDossier,
 } from "../src/sav-core";
 import {
   canAccessTab,
@@ -1972,6 +1973,112 @@ registerCheck("Lot 6B Invariants", "technicien ne peut pas démarrer tâche dés
   const techViewContent = fs.readFileSync("src/components/TechnicianView.tsx", "utf8");
   assert.ok(techViewContent.includes("canStartLine"), "TechnicianView doit contenir la variable canStartLine");
   assert.ok(techViewContent.includes("if (canStartLine)"), "Le bouton de démarrage doit vérifier canStartLine avant de déclencher l'action");
+});
+
+registerCheck("Lot 6D Invariants", "Une base véhicules importée peut pré-remplir une réception, remplit le client et les identifiants, et ces champs restent optionnels", () => {
+  const csvContent = 
+    `Chassis,Immatriculation,Sell-to Customer Name,Customer Phone,Marque,Description,Version,Delivery Date,Warranty End Date\n` +
+    `VIN1234567,123 TU 456,Mhadhbi Salah,+216 55 111 001,Dongfeng,Shine Max,Luxury,15/06/2026,15/06/2029`;
+  
+  const parsed = parseVehicleMasterCsv(csvContent);
+  assert.equal(parsed.importedCount, 1);
+  const v = parsed.records[0];
+  assert.equal(v.vin, "VIN1234567");
+  assert.equal(v.plateNumber, "123 TU 456");
+  assert.equal(v.customerName, "Mhadhbi Salah");
+  assert.equal(v.customerPhone, "+216 55 111 001");
+  assert.equal(v.brand, "Dongfeng");
+  assert.equal(v.model, "Shine Max");
+  assert.equal(v.version, "Luxury");
+  assert.equal(v.deliveryDate, "2026-06-15");
+  assert.equal(v.warrantyPartsEndDate, "2029-06-15");
+  
+  const dossierInput = {
+    clientNom: v.customerName,
+    clientTelephone: v.customerPhone || "",
+    deposantNom: v.customerName,
+    deposantTelephone: v.customerPhone || "",
+    vehiculeMarque: v.brand || "Dongfeng",
+    vehiculeModele: v.model || "",
+    vehiculeImmatriculation: v.plateNumber || "",
+    vehiculeVIN: v.vin || "",
+    vehiculeKilometrage: 10000,
+    vehiculeCouleur: "Gris",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Entretien",
+    observationsReception: "RAS",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, autresNotes: "" },
+    objetsLaisses: [],
+    vehiculeVersion: v.version,
+    dateLivraison: v.deliveryDate,
+    dateMiseCirculation: v.circulationDate,
+    statutGarantie: "Garantie active",
+    dernierEntretien: "Aucun"
+  };
+  
+  const dossier = createReceptionDossier(dossierInput, []);
+  assert.equal(dossier.clientNom, "Mhadhbi Salah");
+  assert.equal(dossier.vehiculeVIN, "VIN1234567");
+  assert.equal(dossier.vehiculeVersion, "Luxury");
+  assert.equal(dossier.dateLivraison, "2026-06-15");
+  
+  const inputMinimal = {
+    clientNom: "Bob",
+    clientTelephone: "+216 99 999 999",
+    deposantNom: "Bob",
+    deposantTelephone: "+216 99 999 999",
+    vehiculeMarque: "Dongfeng",
+    vehiculeModele: "Shine",
+    vehiculeImmatriculation: "123 TU 456",
+    vehiculeVIN: "VIN123",
+    vehiculeKilometrage: 10000,
+    vehiculeCouleur: "Gris",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Plainte",
+    observationsReception: "",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, autresNotes: "" },
+    objetsLaisses: []
+  };
+  const dossierMin = createReceptionDossier(inputMinimal, []);
+  assert.equal(dossierMin.vehiculeVersion, "");
+  assert.equal(dossierMin.dateLivraison, "");
+});
+
+registerCheck("Lot 6D Invariants", "Utiliser ce véhicule ne crée pas de dossier automatiquement", () => {
+  const viewContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  assert.ok(viewContent.includes("handleUseVehicleMasterRecord"), "handleUseVehicleMasterRecord doit être défini");
+  
+  const funcBodyStart = viewContent.indexOf("const handleUseVehicleMasterRecord");
+  const funcBodyEnd = viewContent.indexOf("const handleUseVehicleClick");
+  const funcBody = viewContent.substring(funcBodyStart, funcBodyEnd);
+  
+  assert.ok(!funcBody.includes("onAddDossier"), "handleUseVehicleMasterRecord ne doit pas ajouter directement un dossier");
+  assert.ok(!funcBody.includes("createReceptionDossier"), "handleUseVehicleMasterRecord ne doit pas créer directement de dossier");
+});
+
+registerCheck("Lot 6D Invariants", "Aucun écrasement de saisie manuelle sans confirmation", () => {
+  const viewContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  assert.ok(viewContent.includes("isFormFilled"), "GuidedReception doit vérifier si le formulaire est rempli");
+  assert.ok(viewContent.includes("setShowOverwriteConfirmation(true)"), "GuidedReception doit afficher un dialogue de confirmation d'écrasement");
+});
+
+registerCheck("Lot 6D Invariants", "Aucune donnée réelle committée ni CA/marge/paiement/stock réel ajouté", () => {
+  assert.ok(!fs.existsSync("Liste Vehicule.xlsx"), "Le fichier réel Liste Vehicule.xlsx ne doit pas être committé");
+  
+  const coreContent = fs.readFileSync("src/sav-core.ts", "utf8");
+  const receptionContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  
+  const forbidden = ["chiffre d'affaires", "chiffre d’affaires", "marge commerciale", "paiement caisse", "stock reel", "facturation reelle"];
+  for (const word of forbidden) {
+    assert.ok(!coreContent.toLowerCase().includes(word), `Le fichier sav-core.ts ne doit pas inclure la notion de ${word}`);
+    assert.ok(!receptionContent.toLowerCase().includes(word), `Le fichier GuidedReception.tsx ne doit pas inclure la notion de ${word}`);
+  }
 });
 
 // -----------------------------------------------------------------

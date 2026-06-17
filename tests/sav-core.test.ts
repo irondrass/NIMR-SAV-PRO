@@ -679,6 +679,8 @@ function testAdvancedPlanningHelpers() {
   };
   assert.equal(calculateTechnicianDailyLoad("tech_02", "2026-06-15", [splitLoadDossier]), 3);
 
+  const testNow = new Date(2026, 5, 15, 8, 0, 0);
+
   const planningTechCollision = validatePlanningAssignment({
     dossiers: mockDossiers,
     dossierId: "NIMR-PLAN-NEW",
@@ -687,7 +689,7 @@ function testAdvancedPlanningHelpers() {
     bayId: "bay_02",
     start: new Date(2026, 5, 15, 10, 0, 0),
     end: new Date(2026, 5, 15, 11, 0, 0),
-  });
+  }, testNow);
   assert.equal(planningTechCollision.allowed, false);
   assert.ok(planningTechCollision.codes.includes("planning-collision-tech"));
 
@@ -699,7 +701,7 @@ function testAdvancedPlanningHelpers() {
     bayId: "bay_01",
     start: new Date(2026, 5, 15, 10, 0, 0),
     end: new Date(2026, 5, 15, 11, 0, 0),
-  });
+  }, testNow);
   assert.equal(planningBayCollision.allowed, false);
   assert.ok(planningBayCollision.codes.includes("planning-collision-bay"));
 
@@ -728,7 +730,7 @@ function testAdvancedPlanningHelpers() {
     bayId: "bay_04",
     start: new Date(2026, 5, 15, 16, 0, 0),
     end: new Date(2026, 5, 15, 17, 0, 0),
-  });
+  }, testNow);
   assert.equal(planningOverload.allowed, false);
   assert.ok(planningOverload.codes.includes("planning-collision-overload"));
 
@@ -740,7 +742,7 @@ function testAdvancedPlanningHelpers() {
     bayId: "bay_01",
     start: new Date(2026, 5, 20, 13, 0, 0),
     end: new Date(2026, 5, 20, 14, 0, 0),
-  });
+  }, testNow);
   assert.equal(saturdayAfternoon.allowed, false);
   assert.ok(saturdayAfternoon.codes.includes("planning-collision-saturday-afternoon"));
 
@@ -752,7 +754,7 @@ function testAdvancedPlanningHelpers() {
     bayId: "bay_01",
     start: new Date(2026, 5, 21, 9, 0, 0),
     end: new Date(2026, 5, 21, 10, 0, 0),
-  });
+  }, testNow);
   assert.equal(sundayClosed.allowed, false);
   assert.ok(sundayClosed.codes.includes("planning-collision-sunday"));
 
@@ -765,12 +767,12 @@ function testAdvancedPlanningHelpers() {
     start: taskStart,
     end: taskEnd,
   };
-  assert.equal(canSavePlanningAssignment(lunchSplit), true);
+  assert.equal(canSavePlanningAssignment(lunchSplit, testNow), true);
 
   const invalidLunchBlock = validatePlanningAssignment({
     ...lunchSplit,
     planningSegments: [{ start: taskStart.toISOString(), end: taskEnd.toISOString() }],
-  });
+  }, testNow);
   assert.equal(invalidLunchBlock.allowed, false);
   assert.ok(invalidLunchBlock.codes.includes("planning-collision-lunch"));
 }

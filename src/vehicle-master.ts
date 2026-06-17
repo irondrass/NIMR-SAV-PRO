@@ -11,31 +11,93 @@ import {
 } from "./types";
 
 const MAPPED_KEYS = {
-  vin: ["vin", "chassis", "n chassis", "no chassis"],
-  plateNumber: ["immatriculation", "n immat", "plate", "matricule"],
-  customerName: ["client", "nom client", "customer name"],
-  customerPhone: ["telephone", "tel", "phone"],
+  vin: [
+    "vin",
+    "chassis",
+    "n chassis",
+    "no chassis",
+    "num chassis",
+    "serial no",
+    "serial no."
+  ],
+  plateNumber: [
+    "immatriculation",
+    "n immat",
+    "no immat",
+    "plate",
+    "matricule",
+    "registration no",
+    "registration no."
+  ],
+  customerName: [
+    "client",
+    "nom client",
+    "customer name",
+    "sell to customer name",
+    "sell-to customer name",
+    "bill to name",
+    "bill-to name",
+    "nom du client"
+  ],
+  customerPhone: [
+    "telephone",
+    "tel",
+    "phone",
+    "mobile",
+    "customer phone",
+    "n telephone",
+    "n° telephone"
+  ],
   brand: ["brand", "marque"],
-  model: ["modele", "model", "description", "designation", "description modele"],
+  model: [
+    "modele",
+    "model",
+    "description",
+    "designation",
+    "description modele",
+    "item description",
+    "vehicle description"
+  ],
   version: ["version"],
-  itemNo: ["code article", "item no"],
+  itemNo: ["code article", "item no", "n article", "article"],
   deliveryDate: ["date livraison", "delivery date"],
-  circulationDate: ["date mise en circulation", "prem immat", "circulation date"],
+  circulationDate: [
+    "date mise en circulation",
+    "prem immat",
+    "circulation date"
+  ],
   saleDate: ["date vente", "sale date"],
-  warrantyPartsEndDate: ["date fin garantie pieces", "warranty parts end date"],
-  warrantyLaborEndDate: ["date fin garantie mo", "warranty labor end date"],
+  warrantyPartsEndDate: [
+    "date fin garantie pieces",
+    "warranty parts end date",
+    "warranty end date"
+  ],
+  warrantyLaborEndDate: [
+    "date fin garantie mo",
+    "warranty labor end date",
+    "warranty end date"
+  ],
   lastServiceDate: ["dernier entretien", "last service date"],
   lastServiceMileage: ["kilometrage dernier entretien", "last service mileage"]
 };
 
 function normalizeHeader(h: string): string {
-  return (h || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  if (!h) return "";
+  let clean = h.toLowerCase();
+  
+  // Normalise les accents
+  clean = clean.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  
+  // Remplacer explicitement °, ., apostrophes, tirets par des espaces
+  clean = clean.replace(/['’\-°\.]/g, " ");
+  
+  // Conserver uniquement les caractères alphanumériques et les espaces
+  clean = clean.replace(/[^a-z0-9\s]/g, "");
+  
+  // Espaces multiples -> espace unique
+  clean = clean.replace(/\s+/g, " ");
+  
+  return clean.trim();
 }
 
 function findMappedField(header: string): string | null {
@@ -120,8 +182,13 @@ export function normalizeVehicleMasterRecord(row: any): VehicleMasterRecord {
   const deliveryDate = normalizeDate(row.deliveryDate);
   const circulationDate = normalizeDate(row.circulationDate);
   const saleDate = normalizeDate(row.saleDate);
-  const warrantyPartsEndDate = normalizeDate(row.warrantyPartsEndDate);
-  const warrantyLaborEndDate = normalizeDate(row.warrantyLaborEndDate);
+  let warrantyPartsEndDate = normalizeDate(row.warrantyPartsEndDate);
+  let warrantyLaborEndDate = normalizeDate(row.warrantyLaborEndDate);
+  if (warrantyPartsEndDate && !warrantyLaborEndDate) {
+    warrantyLaborEndDate = warrantyPartsEndDate;
+  } else if (warrantyLaborEndDate && !warrantyPartsEndDate) {
+    warrantyPartsEndDate = warrantyLaborEndDate;
+  }
   const lastServiceDate = normalizeDate(row.lastServiceDate);
 
   let lastServiceMileage: number | undefined;

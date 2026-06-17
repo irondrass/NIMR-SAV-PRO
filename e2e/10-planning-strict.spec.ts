@@ -182,6 +182,25 @@ async function readPercent(locator: ReturnType<Page["locator"]>, prop: "left" | 
 
 test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      const mockDate = new Date("2026-06-15T07:00:00");
+      const _Date = Date;
+      class MockDate extends _Date {
+        constructor(...args: any[]) {
+          if (args.length === 0) {
+            super(mockDate.getTime());
+          } else {
+            // @ts-ignore
+            super(...args);
+          }
+        }
+        static now() {
+          return mockDate.getTime();
+        }
+      }
+      // @ts-ignore
+      window.Date = MockDate;
+    });
     await page.goto("/");
     await page.evaluate(({ dossierKey, techKey, dossiers, techs }) => {
       localStorage.clear();

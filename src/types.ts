@@ -302,6 +302,11 @@ export interface DossierSAV {
   vehiculeVIN: string;
   vehiculeKilometrage: number;
   vehiculeCouleur: string;
+  vehiculeVersion?: string;
+  dateLivraison?: string;
+  dateMiseCirculation?: string;
+  statutGarantie?: string;
+  dernierEntretien?: string;
   typeDossier: InterventionType;
   priorite: DossierPriority;
   plainteClient: string;

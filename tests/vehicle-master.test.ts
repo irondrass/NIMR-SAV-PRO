@@ -130,4 +130,38 @@ console.log("Démarrage des tests vehicle-master...");
   assert.strictEqual(normalizeDate("15/06/26"), "2026-06-15");
 }
 
+// 9. Renforcement du mapping de colonnes avec CSV fictif (Lot 6D)
+{
+  const csvContent = 
+    `Item No.,Description,Chassis,Immatriculation,Sell-to Customer Name,Customer Phone,Delivery Date,Warranty End Date\n` +
+    `ART-100,Dongfeng Shine Max, VINNORMALISE123 , 123 TU 456 , Jean Dupont , +216 22 222 222 , 15/06/2026 , 15/06/2029 `;
+
+  const result = parseVehicleMasterCsv(csvContent);
+  assert.strictEqual(result.importedCount, 1);
+  const rec = result.records[0];
+  
+  // VIN normalisé (majuscules, sans espaces)
+  assert.strictEqual(rec.vin, "VINNORMALISE123");
+  // immatriculation normalisée
+  assert.strictEqual(rec.plateNumber, "123 TU 456");
+  // client importé
+  assert.strictEqual(rec.customerName, "Jean Dupont");
+  // téléphone importé
+  assert.strictEqual(rec.customerPhone, "+216 22 222 222");
+  // modèle/description importé
+  assert.strictEqual(rec.model, "Dongfeng Shine Max");
+  // code article importé
+  assert.strictEqual(rec.itemNo, "ART-100");
+  // dates normalisées
+  assert.strictEqual(rec.deliveryDate, "2026-06-15");
+  assert.strictEqual(rec.warrantyPartsEndDate, "2029-06-15");
+  assert.strictEqual(rec.warrantyLaborEndDate, "2029-06-15");
+  
+  // garantie calculée
+  const todayActive = new Date("2026-06-14");
+  const todayExpired = new Date("2030-06-14");
+  assert.strictEqual(getVehicleWarrantyStatus(rec, todayActive), "Garantie active");
+  assert.strictEqual(getVehicleWarrantyStatus(rec, todayExpired), "Garantie expirée");
+}
+
 console.log("Tous les tests de vehicle-master ont réussi !");
