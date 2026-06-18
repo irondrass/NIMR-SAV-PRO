@@ -13,12 +13,20 @@ import {
 const MAPPED_KEYS = {
   vin: [
     "vin",
+    "no chassis vin",
+    "chassis vin",
     "chassis",
+    "châssis",
     "n chassis",
+    "n chassis vin",
     "no chassis",
     "num chassis",
+    "numero chassis",
+    "numero chassis vin",
     "serial no",
-    "serial no."
+    "serial no.",
+    "serial number",
+    "vehicle identification number"
   ],
   plateNumber: [
     "immatriculation",
@@ -30,22 +38,29 @@ const MAPPED_KEYS = {
     "registration no."
   ],
   customerName: [
+    "nom",
     "client",
     "nom client",
+    "customer",
     "customer name",
     "sell to customer name",
     "sell-to customer name",
     "bill to name",
     "bill-to name",
-    "nom du client"
+    "nom du client",
+    "proprietaire",
+    "owner",
+    "societe"
   ],
   customerPhone: [
+    "n telephone",
+    "no telephone",
     "telephone",
     "tel",
     "phone",
     "mobile",
+    "gsm",
     "customer phone",
-    "n telephone",
     "n° telephone"
   ],
   brand: ["brand", "marque"],
@@ -59,12 +74,14 @@ const MAPPED_KEYS = {
     "vehicle description"
   ],
   version: ["version"],
-  itemNo: ["code article", "item no", "n article", "article"],
-  deliveryDate: ["date livraison", "delivery date"],
+  itemNo: ["code article", "item no", "n article", "no article", "article"],
+  deliveryDate: ["date livraison", "date de livraison", "delivery date"],
   circulationDate: [
     "date mise en circulation",
+    "mise en circulation",
     "prem immat",
-    "circulation date"
+    "circulation date",
+    "date mec"
   ],
   saleDate: ["date vente", "sale date"],
   warrantyPartsEndDate: [
@@ -79,17 +96,19 @@ const MAPPED_KEYS = {
   ],
   lastServiceDate: ["dernier entretien", "last service date"],
   lastServiceMileage: ["kilometrage dernier entretien", "last service mileage"]
-};
+} as const;
 
-function normalizeHeader(h: string): string {
+const EMPTY_VIN_VALUES = new Set(["", "PAS DE VIN", "N/A", "NA", "-"]);
+
+export function normalizeHeader(h: string): string {
   if (!h) return "";
-  let clean = h.toLowerCase();
+  let clean = h.replace(/^\uFEFF/, "").toLowerCase();
   
   // Normalise les accents
   clean = clean.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   
-  // Remplacer explicitement °, ., apostrophes, tirets par des espaces
-  clean = clean.replace(/['’\-°\.]/g, " ");
+  // Remplacer ponctuation et séparateurs fréquents des exports DMS par des espaces.
+  clean = clean.replace(/[°º'’`´\-_.()[\]{}\\/|,:;]/g, " ");
   
   // Conserver uniquement les caractères alphanumériques et les espaces
   clean = clean.replace(/[^a-z0-9\s]/g, "");
@@ -100,15 +119,60 @@ function normalizeHeader(h: string): string {
   return clean.trim();
 }
 
-function findMappedField(header: string): string | null {
+export function findMappedField(header: string): keyof VehicleMasterRecord | null {
   const norm = normalizeHeader(header);
   if (!norm) return null;
   for (const [field, aliases] of Object.entries(MAPPED_KEYS)) {
     if (aliases.some(alias => normalizeHeader(alias) === norm)) {
-      return field;
+      return field as keyof VehicleMasterRecord;
     }
   }
+
+  const has = (term: string) => norm.split(" ").includes(term);
+  if ((has("chassis") && has("vin")) || has("chassis") || norm.includes("vehicle identification number") || norm.includes("serial number")) {
+    return "vin";
+  }
+  if (norm === "nom" || norm.includes("customer name") || norm.includes("sell to customer name") || norm.includes("bill to name")) {
+    return "customerName";
+  }
+  if (has("telephone") || has("tel") || has("phone") || has("mobile") || has("gsm")) {
+    return "customerPhone";
+  }
+  if (norm === "matricule" || has("immatriculation") || norm.includes("immat") || norm.includes("registration") || has("plate")) {
+    return "plateNumber";
+  }
+  if ((has("n") || has("no") || has("code")) && has("article")) {
+    return "itemNo";
+  }
+  if (has("description") || has("modele") || has("model") || has("designation")) {
+    return "model";
+  }
+  if (norm.includes("mise en circulation") || norm.includes("circulation date") || norm.includes("date mec")) {
+    return "circulationDate";
+  }
+  if (norm.includes("date livraison") || norm.includes("delivery date")) {
+    return "deliveryDate";
+  }
   return null;
+}
+
+function countReplacementCharacters(text: string): number {
+  return (text.match(/\uFFFD/g) || []).length;
+}
+
+export function decodeVehicleMasterCsvBuffer(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const candidates = ["utf-8", "windows-1252", "iso-8859-1"].map(encoding => {
+    try {
+      const text = new TextDecoder(encoding, { fatal: false }).decode(bytes);
+      return { encoding, text, invalidCount: countReplacementCharacters(text) };
+    } catch {
+      return { encoding, text: "", invalidCount: Number.MAX_SAFE_INTEGER };
+    }
+  });
+
+  candidates.sort((a, b) => a.invalidCount - b.invalidCount);
+  return candidates[0]?.text || "";
 }
 
 export function parseCsvRaw(text: string): string[][] {
@@ -153,31 +217,88 @@ export function normalizeDate(dStr: string | undefined): string | undefined {
     const p1 = parts[1].trim();
     const p2 = parts[2].trim();
 
-    if (p0.length === 2 && p1.length === 2) {
-      if (p2.length === 4) {
-        return `${p2}-${p1.padStart(2, "0")}-${p0.padStart(2, "0")}`;
-      } else if (p2.length === 2) {
-        const year = Number(p2) > 50 ? `19${p2}` : `20${p2}`;
-        return `${year}-${p1.padStart(2, "0")}-${p0.padStart(2, "0")}`;
-      }
-    } else if (p0.length === 4 && p1.length === 2 && p2.length === 2) {
-      return `${p0}-${p1.padStart(2, "0")}-${p2.padStart(2, "0")}`;
+    const buildDate = (year: string, month: number, day: number) => {
+      if (!year || !Number.isFinite(month) || !Number.isFinite(day)) return undefined;
+      if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    };
+
+    if (p0.length === 4) {
+      const parsed = buildDate(p0, Number(p1), Number(p2));
+      if (parsed) return parsed;
+    } else if (p2.length === 4 || p2.length === 2) {
+      const year = p2.length === 4 ? p2 : Number(p2) > 50 ? `19${p2}` : `20${p2}`;
+      const first = Number(p0);
+      const second = Number(p1);
+      const separator = trimmed.includes("/") ? "/" : "-";
+      const month = first > 12 ? second : second > 12 ? first : separator === "/" ? first : second;
+      const day = first > 12 ? first : second > 12 ? second : separator === "/" ? second : first;
+      const parsed = buildDate(year, month, day);
+      if (parsed) return parsed;
     }
   }
 
   return trimmed;
 }
 
+function normalizeVin(value: unknown): string | undefined {
+  const vin = String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  return EMPTY_VIN_VALUES.has(vin) ? undefined : vin;
+}
+
+function normalizePhone(value: unknown): string | undefined {
+  const phone = String(value ?? "").replace(/\s+/g, " ").trim();
+  return phone || undefined;
+}
+
+function normalizeTextValue(value: unknown): string | undefined {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text || undefined;
+}
+
+export function inferVehicleBrandAndModel(description?: string, explicitBrand?: string): { brand?: string; model?: string } {
+  const rawDescription = normalizeTextValue(description);
+  const rawBrand = normalizeTextValue(explicitBrand);
+  if (!rawDescription) {
+    return { brand: rawBrand, model: undefined };
+  }
+
+  const upper = rawDescription.toUpperCase();
+  const rules: Array<{ prefix: string; brand: string; displayModel?: string }> = [
+    { prefix: "DONGFENG BOX EV 430", brand: "Dongfeng", displayModel: "BOX EV 430" },
+    { prefix: "DONGFENG ", brand: "Dongfeng" },
+    { prefix: "DFSK GLORY 580", brand: "DFSK", displayModel: "Glory 580" },
+    { prefix: "DFSK ", brand: "DFSK" },
+    { prefix: "FORTHING T5 EVO", brand: "Forthing", displayModel: "T5 EVO" },
+    { prefix: "FORTHING ", brand: "Forthing" }
+  ];
+
+  for (const rule of rules) {
+    if (upper.startsWith(rule.prefix)) {
+      const model = rule.displayModel || rawDescription.slice(rule.prefix.length).trim();
+      return { brand: rawBrand || rule.brand, model: model || rawDescription };
+    }
+  }
+
+  if (rawBrand && upper.startsWith(rawBrand.toUpperCase())) {
+    const stripped = rawDescription.slice(rawBrand.length).trim();
+    return { brand: rawBrand, model: stripped || rawDescription };
+  }
+
+  return { brand: rawBrand, model: rawDescription };
+}
+
 export function normalizeVehicleMasterRecord(row: any): VehicleMasterRecord {
-  const vin = row.vin ? row.vin.toUpperCase().replace(/\s+/g, "") : undefined;
-  const plateNumber = row.plateNumber ? row.plateNumber.toUpperCase().replace(/\s+/g, " ").trim() : undefined;
-  const customerPhone = row.customerPhone ? row.customerPhone.replace(/\s+/g, " ").trim() : undefined;
-  const customerName = row.customerName ? row.customerName.replace(/\s+/g, " ").trim() : undefined;
-  const brand = row.brand ? row.brand.trim() : undefined;
-  const model = row.model ? row.model.trim() : undefined;
-  const version = row.version ? row.version.trim() : undefined;
-  const itemNo = row.itemNo ? row.itemNo.trim() : undefined;
-  const energy = row.energy ? row.energy.trim() : undefined;
+  const vin = normalizeVin(row.vin);
+  const plateNumber = row.plateNumber ? String(row.plateNumber).toUpperCase().replace(/\s+/g, " ").trim() : undefined;
+  const customerPhone = normalizePhone(row.customerPhone);
+  const customerName = normalizeTextValue(row.customerName);
+  const inferred = inferVehicleBrandAndModel(row.model, row.brand);
+  const brand = inferred.brand;
+  const model = inferred.model;
+  const version = normalizeTextValue(row.version);
+  const itemNo = normalizeTextValue(row.itemNo);
+  const energy = normalizeTextValue(row.energy);
 
   const deliveryDate = normalizeDate(row.deliveryDate);
   const circulationDate = normalizeDate(row.circulationDate);
@@ -355,20 +476,44 @@ export function parseVehicleMasterCsv(text: string): VehicleMasterImportResult {
 }
 
 export function searchVehicleMaster(records: VehicleMasterRecord[], query: string): VehicleMasterRecord[] {
-  const cleanQuery = query.toLowerCase().trim();
+  const cleanQuery = normalizeSearchText(query);
   if (!cleanQuery) return [];
 
   return records.filter(r => {
-    return (
-      (r.vin && r.vin.toLowerCase().includes(cleanQuery)) ||
-      (r.plateNumber && r.plateNumber.toLowerCase().includes(cleanQuery)) ||
-      (r.customerName && r.customerName.toLowerCase().includes(cleanQuery)) ||
-      (r.customerPhone && r.customerPhone.toLowerCase().includes(cleanQuery)) ||
-      (r.model && r.model.toLowerCase().includes(cleanQuery)) ||
-      (r.brand && r.brand.toLowerCase().includes(cleanQuery)) ||
-      (r.itemNo && r.itemNo.toLowerCase().includes(cleanQuery))
-    );
+    const searchable = [
+      r.vin,
+      r.plateNumber,
+      r.id,
+      r.itemNo,
+      r.model,
+      r.brand,
+      r.customerName,
+      r.customerPhone,
+      r.circulationDate,
+      r.deliveryDate
+    ];
+    return searchable.some(value => normalizeSearchText(value).includes(cleanQuery));
   });
+}
+
+export function normalizeSearchText(value: unknown): string {
+  return String(value ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s\-\/\\.]+/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+export function getVehicleMasterStats(records: VehicleMasterRecord[]) {
+  return {
+    total: records.length,
+    withVin: records.filter(r => !!normalizeVin(r.vin)).length,
+    withClient: records.filter(r => !!normalizeTextValue(r.customerName)).length,
+    withPhone: records.filter(r => !!normalizePhone(r.customerPhone)).length,
+    withPlate: records.filter(r => !!normalizeTextValue(r.plateNumber)).length,
+    withModel: records.filter(r => !!normalizeTextValue(r.model)).length
+  };
 }
 
 export function findVehicleByVin(records: VehicleMasterRecord[], vin: string): VehicleMasterRecord | undefined {

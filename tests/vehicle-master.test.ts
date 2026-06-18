@@ -5,10 +5,15 @@
 
 import assert from "node:assert/strict";
 import {
+  decodeVehicleMasterCsvBuffer,
+  findMappedField,
+  getVehicleMasterStats,
+  normalizeHeader,
   parseCsvRaw,
   parseVehicleMasterCsv,
   normalizeDate,
   normalizeVehicleMasterRecord,
+  normalizeSearchText,
   searchVehicleMaster,
   getVehicleWarrantyStatus,
   getVehicleReceptionHints
@@ -149,7 +154,8 @@ console.log("Démarrage des tests vehicle-master...");
   // téléphone importé
   assert.strictEqual(rec.customerPhone, "+216 22 222 222");
   // modèle/description importé
-  assert.strictEqual(rec.model, "Dongfeng Shine Max");
+  assert.strictEqual(rec.brand, "Dongfeng");
+  assert.strictEqual(rec.model, "Shine Max");
   // code article importé
   assert.strictEqual(rec.itemNo, "ART-100");
   // dates normalisées
@@ -162,6 +168,63 @@ console.log("Démarrage des tests vehicle-master...");
   const todayExpired = new Date("2030-06-14");
   assert.strictEqual(getVehicleWarrantyStatus(rec, todayActive), "Garantie active");
   assert.strictEqual(getVehicleWarrantyStatus(rec, todayExpired), "Garantie expirée");
+}
+
+// 10. Lot 6G - CSV réel-like Liste Vehicule avec headers terrain
+{
+  assert.strictEqual(normalizeHeader("No Chassis (VIN)"), "no chassis vin");
+  assert.strictEqual(normalizeHeader("N° article"), "n article");
+  assert.strictEqual(normalizeHeader("N° téléphone"), "n telephone");
+  assert.strictEqual(normalizeHeader("Date Mise en Circulation"), "date mise en circulation");
+  assert.strictEqual(findMappedField("No Chassis (VIN)"), "vin");
+  assert.strictEqual(findMappedField("Nom"), "customerName");
+  assert.strictEqual(findMappedField("N° téléphone"), "customerPhone");
+
+  const csvContent =
+    `No Chassis (VIN),N° article,Description,Matricule,N° client,Nom,N° téléphone,Date Mise en Circulation,Date Livraison\n` +
+    `LDP43A961SS112183,BOX EV 430 BLANC,DONGFENG BOX EV 430,2318TU259,CLT-DEMO-001,Client Demo,+21622222222,2/25/2026,3/4/2026`;
+
+  const result = parseVehicleMasterCsv(csvContent);
+  assert.strictEqual(result.importedCount, 1);
+  const rec = result.records[0];
+  assert.strictEqual(rec.vin, "LDP43A961SS112183");
+  assert.strictEqual(rec.itemNo, "BOX EV 430 BLANC");
+  assert.strictEqual(rec.customerName, "Client Demo");
+  assert.strictEqual(rec.customerPhone, "+21622222222");
+  assert.strictEqual(rec.plateNumber, "2318TU259");
+  assert.strictEqual(rec.brand, "Dongfeng");
+  assert.strictEqual(rec.model, "BOX EV 430");
+  assert.strictEqual(rec.circulationDate, "2026-02-25");
+  assert.strictEqual(rec.deliveryDate, "2026-03-04");
+
+  assert.strictEqual(searchVehicleMaster(result.records, "2318TU259").length, 1);
+  assert.strictEqual(searchVehicleMaster(result.records, "2318 TU 259").length, 1);
+  assert.strictEqual(searchVehicleMaster(result.records, "LDP43A961SS112183").length, 1);
+  assert.strictEqual(searchVehicleMaster(result.records, "112183").length, 1);
+  assert.strictEqual(searchVehicleMaster(result.records, "client dem").length, 1);
+  assert.strictEqual(searchVehicleMaster(result.records, "BOX EV 430").length, 1);
+  assert.strictEqual(normalizeSearchText("2318 TU-259/."), "2318TU259");
+
+  const stats = getVehicleMasterStats(result.records);
+  assert.deepStrictEqual(stats, {
+    total: 1,
+    withVin: 1,
+    withClient: 1,
+    withPhone: 1,
+    withPlate: 1,
+    withModel: 1
+  });
+}
+
+// 11. Lot 6G - décodage Windows-1252 conserve N° et téléphone
+{
+  const windows1252Csv = Uint8Array.from([
+    0x4e, 0xb0, 0x20, 0x74, 0xe9, 0x6c, 0xe9, 0x70, 0x68, 0x6f, 0x6e, 0x65, 0x0a,
+    0x2b, 0x32, 0x31, 0x36, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32
+  ]);
+  const decoded = decodeVehicleMasterCsvBuffer(windows1252Csv);
+  assert.ok(decoded.includes("N° téléphone"));
+  assert.ok(decoded.includes("+21622222222"));
 }
 
 console.log("Tous les tests de vehicle-master ont réussi !");

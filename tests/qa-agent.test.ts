@@ -34,6 +34,9 @@ import {
   buildPlanningReport,
 } from "../src/sav-reports";
 import {
+  findMappedField,
+  getVehicleMasterStats,
+  normalizeHeader,
   parseVehicleMasterCsv,
   searchVehicleMaster,
   getVehicleWarrantyStatus,
@@ -2336,6 +2339,85 @@ registerCheck("Lot 6F Invariants", "aucun tag v1.1.0 final créé et aucune donn
   assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
 });
 
+registerCheck("Lot 6G Invariants", "headers CSV réel-like mappés vers VIN, client et téléphone", () => {
+  assert.equal(normalizeHeader("No Chassis (VIN)"), "no chassis vin");
+  assert.equal(normalizeHeader("N° article"), "n article");
+  assert.equal(normalizeHeader("N° téléphone"), "n telephone");
+  assert.equal(findMappedField("No Chassis (VIN)"), "vin");
+  assert.equal(findMappedField("Nom"), "customerName");
+  assert.equal(findMappedField("N° téléphone"), "customerPhone");
+});
+
+registerCheck("Lot 6G Invariants", "CSV réel-like ne perd pas VIN, client ni téléphone", () => {
+  const csvContent =
+    `No Chassis (VIN),N° article,Description,Matricule,N° client,Nom,N° téléphone,Date Mise en Circulation,Date Livraison\n` +
+    `LDP43A961SS112183,BOX EV 430 BLANC,DONGFENG BOX EV 430,2318TU259,CLT-DEMO-001,Client Demo,+21622222222,2/25/2026,3/4/2026`;
+  const parsed = parseVehicleMasterCsv(csvContent);
+  assert.equal(parsed.importedCount, 1);
+  const vehicle = parsed.records[0];
+  assert.equal(vehicle.vin, "LDP43A961SS112183");
+  assert.equal(vehicle.customerName, "Client Demo");
+  assert.equal(vehicle.customerPhone, "+21622222222");
+  assert.equal(vehicle.plateNumber, "2318TU259");
+  assert.equal(vehicle.brand, "Dongfeng");
+  assert.equal(vehicle.model, "BOX EV 430");
+  assert.equal(vehicle.circulationDate, "2026-02-25");
+  assert.equal(vehicle.deliveryDate, "2026-03-04");
+  assert.deepEqual(getVehicleMasterStats(parsed.records), {
+    total: 1,
+    withVin: 1,
+    withClient: 1,
+    withPhone: 1,
+    withPlate: 1,
+    withModel: 1
+  });
+});
+
+registerCheck("Lot 6G Invariants", "recherche VIN complet, VIN partiel, plaque et client fonctionne", () => {
+  const parsed = parseVehicleMasterCsv(
+    `No Chassis (VIN),Description,Matricule,Nom,N° téléphone\n` +
+    `LDP43A961SS112183,DONGFENG BOX EV 430,2318TU259,Client Demo,+21622222222`
+  );
+  assert.equal(searchVehicleMaster(parsed.records, "LDP43A961SS112183").length, 1);
+  assert.equal(searchVehicleMaster(parsed.records, "112183").length, 1);
+  assert.equal(searchVehicleMaster(parsed.records, "2318 TU 259").length, 1);
+  assert.equal(searchVehicleMaster(parsed.records, "Client Dem").length, 1);
+  assert.equal(searchVehicleMaster(parsed.records, "BOX EV 430").length, 1);
+});
+
+registerCheck("Lot 6G Invariants", "GuidedReception importe en ArrayBuffer et pré-remplit sans écraser par vide", () => {
+  const viewContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  const funcBodyStart = viewContent.indexOf("const handleUseVehicleMasterRecord");
+  const funcBodyEnd = viewContent.indexOf("const handleUseVehicleClick");
+  const funcBody = viewContent.substring(funcBodyStart, funcBodyEnd);
+  assert.ok(viewContent.includes("readAsArrayBuffer"), "L'import doit lire le CSV en ArrayBuffer");
+  assert.ok(viewContent.includes("decodeVehicleMasterCsvBuffer"), "L'import doit choisir un décodage CSV robuste");
+  assert.ok(funcBody.includes("if (vehicle.customerName) updateClientNom(vehicle.customerName)"), "Client doit être pré-rempli si disponible");
+  assert.ok(funcBody.includes("if (vehicle.customerPhone) updateClientTelephone(vehicle.customerPhone)"), "Téléphone doit être pré-rempli si disponible");
+  assert.ok(funcBody.includes("if (validVin) setVehiculeVIN(validVin)"), "VIN valide doit être pré-rempli");
+  assert.ok(funcBody.includes("if (vehicle.plateNumber) setVehiculeImmatriculation(vehicle.plateNumber)"), "Immatriculation doit être pré-remplie");
+  assert.ok(funcBody.includes("if (inferred.model) setVehiculeModele(inferred.model)"), "Modèle doit être pré-rempli");
+});
+
+registerCheck("Lot 6G Invariants", "diagnostic base véhicules affiche les compteurs et messages utiles", () => {
+  const viewContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  assert.ok(viewContent.includes("vehicle-master-diagnostics"), "Le panneau doit afficher les compteurs de base");
+  assert.ok(viewContent.includes("withVin"), "Le diagnostic doit compter les VIN");
+  assert.ok(viewContent.includes("withClient"), "Le diagnostic doit compter les clients");
+  assert.ok(viewContent.includes("Cette base locale ne contient pas les VIN."), "Message VIN absent requis");
+  assert.ok(viewContent.includes("Cette base locale ne contient pas les noms clients."), "Message client absent requis");
+});
+
+registerCheck("Lot 6G Invariants", "aucun tag créé et aucune donnée réelle Liste Vehicule committée", () => {
+  const packedRefs = fs.existsSync(".git/packed-refs") ? fs.readFileSync(".git/packed-refs", "utf8") : "";
+  const hasForbiddenTag = packedRefs.split(/\r?\n/).some(line => /\srefs\/tags\/v1\.1\.0$|\srefs\/tags\/v1\.1\.1$/.test(line));
+  assert.equal(fs.existsSync(".git/refs/tags/v1.1.0"), false);
+  assert.equal(fs.existsSync(".git/refs/tags/v1.1.1"), false);
+  assert.equal(hasForbiddenTag, false);
+  assert.equal(fs.existsSync("Liste Vehicule.csv"), false);
+  assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -2359,7 +2441,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6F - Correctifs post-RC critiques)
+- **Version** : v1.1.1 (Lot 6G - Import CSV réel-like véhicules)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

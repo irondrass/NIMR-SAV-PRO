@@ -353,4 +353,63 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     // Detailed view should open, showing Bob's / David's vehicle details
     await expect(page.locator('text=3HGCM82633A004352')).toBeVisible();
   });
+
+  test("Import CSV réel-like Liste Vehicule remplit VIN, client, téléphone et réception", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => {
+      localStorage.clear();
+    });
+    await page.reload();
+
+    await changeUserRole(page, "role-option-receptionnaire");
+    await page.waitForSelector('[data-testid="nav-reception"]', { state: "visible" });
+    await humanClick(page, page.locator('[data-testid="nav-reception"]'));
+
+    const togglePanelBtn = page.locator('[data-testid="vehicle-master-panel-toggle"]');
+    await expect(togglePanelBtn).toBeVisible();
+    await humanClick(page, togglePanelBtn);
+
+    const csvContent =
+      `No Chassis (VIN),N° article,Description,Matricule,N° client,Nom,N° téléphone,Date Mise en Circulation,Date Livraison\n` +
+      `LDP43A961SS112183,BOX EV 430 BLANC,DONGFENG BOX EV 430,2318TU259,CLT-DEMO-001,Client Demo,+21622222222,2/25/2026,3/4/2026`;
+
+    await page.locator('[data-testid="vehicle-master-import-input"]').setInputFiles({
+      name: "vehicles-real-like.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csvContent, "utf-8"),
+    });
+
+    const resultBlock = page.locator('[data-testid="vehicle-master-import-result"]');
+    await expect(resultBlock).toBeVisible();
+    await expect(resultBlock).toContainText("Véhicules importés : 1");
+    const diagnostics = page.locator('[data-testid="vehicle-master-diagnostics"]');
+    await expect(diagnostics).toContainText("Avec VIN : 1");
+    await expect(diagnostics).toContainText("Avec client : 1");
+    await expect(diagnostics).toContainText("Avec téléphone : 1");
+    await expect(page.locator('[data-testid="vehicle-master-search-capabilities"]')).toContainText("Recherche VIN disponible");
+
+    const searchInput = page.locator('[data-testid="vehicle-master-search-input"]');
+    const resultRow = page.locator('[data-testid^="vehicle-result-row-"]');
+
+    for (const query of ["2318TU259", "2318 TU 259", "LDP43A961SS112183", "112183", "Client Demo", "BOX EV 430"]) {
+      await searchInput.fill(query);
+      await expect(resultRow).toBeVisible();
+      await expect(resultRow).toContainText("Client Demo");
+    }
+
+    await expect(page.locator('[data-testid^="vehicle-result-vin-"]')).toContainText("LDP43A961SS112183");
+    await expect(page.locator('[data-testid^="vehicle-result-phone-"]')).toContainText("+21622222222");
+    await humanClick(page, page.locator('[data-testid^="vehicle-use-btn-"]'));
+
+    await expect(page.locator('[data-testid="reception-client-name"]')).toHaveValue("Client Demo");
+    await expect(page.locator('[data-testid="reception-client-phone"]')).toHaveValue("+21622222222");
+
+    await humanClick(page, page.locator('[data-testid="reception-next"]'));
+    await expect(page.locator('[data-testid="reception-vehicle-brand"]')).toHaveValue("Dongfeng");
+    await expect(page.locator('[data-testid="reception-vehicle-model"]')).toHaveValue("BOX EV 430");
+    await expect(page.locator('[data-testid="reception-plate"]')).toHaveValue("2318TU259");
+    await expect(page.locator('[data-testid="reception-vin"]')).toHaveValue("LDP43A961SS112183");
+    await expect(page.locator('[data-testid="reception-circulation-date"]')).toHaveValue("2026-02-25");
+    await expect(page.locator('[data-testid="reception-delivery-date"]')).toHaveValue("2026-03-04");
+  });
 });

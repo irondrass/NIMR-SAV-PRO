@@ -44,6 +44,10 @@ import {
   canViewVehicleSensitiveFields
 } from "../permissions";
 import {
+  decodeVehicleMasterCsvBuffer,
+  getVehicleMasterStats,
+  inferVehicleBrandAndModel,
+  normalizeSearchText,
   parseVehicleMasterCsv,
   searchVehicleMaster,
   getVehicleWarrantyStatus,
@@ -163,6 +167,25 @@ export default function GuidedReception({
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
   const [plateMultipleMatches, setPlateMultipleMatches] = useState<VehicleMasterRecord[]>([]);
   const [activeDuplicateDossier, setActiveDuplicateDossier] = useState<DossierSAV | null>(null);
+  const vehicleMasterStats = getVehicleMasterStats(vehicleMasterRecords);
+
+  const getVehicleMasterNotFoundMessage = () => {
+    const normalizedQuery = normalizeSearchText(searchQuery);
+    const hasLetters = /[A-Z]/.test(normalizedQuery);
+    const hasDigits = /\d/.test(normalizedQuery);
+    const looksLikeVin = hasLetters && hasDigits && normalizedQuery.length >= 6;
+    const looksLikePhone = /^\d{8,}$/.test(normalizedQuery);
+    if (looksLikeVin && vehicleMasterStats.withVin === 0) {
+      return "Cette base locale ne contient pas les VIN.";
+    }
+    if (looksLikePhone && vehicleMasterStats.withPhone === 0) {
+      return "Cette base locale ne contient pas les téléphones.";
+    }
+    if (hasLetters && !hasDigits && vehicleMasterStats.withClient === 0) {
+      return "Cette base locale ne contient pas les noms clients.";
+    }
+    return "Véhicule non trouvé dans la base locale. Continuer en saisie manuelle.";
+  };
 
   const handleSearchVehicle = (q: string) => {
     setSearchQuery(q);
@@ -181,14 +204,15 @@ export default function GuidedReception({
     if (files && files[0]) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        const text = event.target?.result as string;
+        const buffer = event.target?.result as ArrayBuffer;
+        const text = decodeVehicleMasterCsvBuffer(buffer);
         const result = parseVehicleMasterCsv(text);
         setImportResult(result);
         if (result.records.length > 0) {
           onUpdateVehicleMaster(result.records);
         }
       };
-      reader.readAsText(files[0]);
+      reader.readAsArrayBuffer(files[0]);
     }
     e.target.value = "";
   };
@@ -200,21 +224,31 @@ export default function GuidedReception({
     console.debug(`[VehicleMaster] Utilisation du véhicule VIN: ${vehicle.vin}, Client: ${vehicle.customerName}, Tél: ${maskedPhone}`);
 
     const hints = getVehicleReceptionHints(vehicle, new Date());
+    const inferred = inferVehicleBrandAndModel(vehicle.model, vehicle.brand);
+    const validVin = vehicle.vin && validateVin(vehicle.vin) ? vehicle.vin : "";
 
-    updateClientNom(vehicle.customerName || "");
-    updateClientTelephone(vehicle.customerPhone || "");
-    setVehiculeMarque(vehicle.brand || "Dongfeng");
-    setVehiculeModele(vehicle.model || "");
-    setVehiculeVersion(vehicle.version || "");
-    setVehiculeVIN(vehicle.vin || "");
-    setVehiculeImmatriculation(vehicle.plateNumber || "");
-    setVehiculeDateLivraison(vehicle.deliveryDate || "");
-    setVehiculeDateMiseCirculation(vehicle.circulationDate || "");
+    if (vehicle.customerName) updateClientNom(vehicle.customerName);
+    if (vehicle.customerPhone) updateClientTelephone(vehicle.customerPhone);
+    if (inferred.brand) setVehiculeMarque(inferred.brand);
+    if (inferred.model) setVehiculeModele(inferred.model);
+    if (vehicle.version) setVehiculeVersion(vehicle.version);
+    if (validVin) setVehiculeVIN(validVin);
+    if (vehicle.plateNumber) setVehiculeImmatriculation(vehicle.plateNumber);
+    if (vehicle.deliveryDate) setVehiculeDateLivraison(vehicle.deliveryDate);
+    if (vehicle.circulationDate) setVehiculeDateMiseCirculation(vehicle.circulationDate);
     setVehiculeStatutGarantie(hints.warrantyStatus || "Garantie inconnue");
     setVehiculeDernierEntretien(hints.lastServiceInfo || vehicle.lastServiceDate || "");
 
     setVehicleMasterSelected(vehicle);
     setWarrantyHint(hints.recommendedService || null);
+    const missingFields = [
+      !vehicle.customerName ? "client" : null,
+      !vehicle.customerPhone ? "téléphone" : null,
+      !validVin ? "VIN" : null,
+      !vehicle.plateNumber ? "immatriculation" : null,
+      !inferred.model ? "modèle" : null
+    ].filter(Boolean);
+    setReceptionWarning(missingFields.length > 0 ? `Données véhicule partielles : ${missingFields.join(", ")} absent(s) ou invalide(s).` : null);
 
     setSearchQuery("");
     setSearchResults([]);
@@ -625,6 +659,23 @@ export default function GuidedReception({
                   <p className="text-slate-400 text-[10px] mt-1">
                     Base locale importée par l’utilisateur. Ne pas partager/exporter sans autorisation.
                   </p>
+                  <div data-testid="vehicle-master-diagnostics" className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px] font-bold text-slate-600">
+                    <span>Total : <strong className="text-slate-900">{vehicleMasterStats.total}</strong></span>
+                    <span>Avec VIN : <strong className="text-slate-900">{vehicleMasterStats.withVin}</strong></span>
+                    <span>Avec client : <strong className="text-slate-900">{vehicleMasterStats.withClient}</strong></span>
+                    <span>Avec téléphone : <strong className="text-slate-900">{vehicleMasterStats.withPhone}</strong></span>
+                    <span>Avec immat. : <strong className="text-slate-900">{vehicleMasterStats.withPlate}</strong></span>
+                    <span>Avec modèle : <strong className="text-slate-900">{vehicleMasterStats.withModel}</strong></span>
+                  </div>
+                  {(vehicleMasterStats.withVin > 0 || vehicleMasterStats.withClient > 0 || vehicleMasterStats.withPhone > 0) && (
+                    <p data-testid="vehicle-master-search-capabilities" className="text-[10px] text-emerald-700 font-bold mt-1">
+                      {[
+                        vehicleMasterStats.withVin > 0 ? "Recherche VIN disponible" : null,
+                        vehicleMasterStats.withClient > 0 ? "Recherche client disponible" : null,
+                        vehicleMasterStats.withPhone > 0 ? "Recherche téléphone disponible" : null
+                      ].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
                 </div>
 
                 {canManageVehicleMaster(currentUserRole) && (
@@ -726,7 +777,7 @@ export default function GuidedReception({
                 {hasSearched && searchResults.length === 0 && (
                   <div data-testid="vehicle-master-not-found-alert" className="p-3 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg text-xs font-bold flex items-center gap-1.5">
                     <AlertTriangle className="w-4.5 h-4.5 shrink-0 text-amber-600" />
-                    Véhicule non trouvé dans la base locale. Continuer en saisie manuelle.
+                    {getVehicleMasterNotFoundMessage()}
                   </div>
                 )}
 
