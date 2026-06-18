@@ -1,9 +1,9 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 17/06/2026 13:03:43
-- **Version** : v1.1.0 (Lot 6E - Hardening métier pré-RC)
-- **Contrôles exécutés** : 116
-- **Résultat global** : **OK** (116 OK / 0 KO)
+- **Date** : 18/06/2026 12:38:34
+- **Version** : v1.1.1 (Lot 6F - Correctifs post-RC critiques)
+- **Contrôles exécutés** : 125
+- **Résultat global** : **OK** (125 OK / 0 KO)
 
 
 ## Anomalies détectées
