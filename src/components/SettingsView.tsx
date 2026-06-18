@@ -12,6 +12,8 @@ import * as perm from "../permissions";
 interface SettingsViewProps {
   onExportData: () => void;
   onImportData: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRestoreImportBackup: () => void;
+  hasImportBackup: boolean;
   activeRole: UserRole;
   importSuccessMessage?: string | null;
   importErrorMessage?: string | null;
@@ -20,6 +22,8 @@ interface SettingsViewProps {
 export default function SettingsView({ 
   onExportData, 
   onImportData, 
+  onRestoreImportBackup,
+  hasImportBackup,
   activeRole, 
   importSuccessMessage,
   importErrorMessage
@@ -93,6 +97,19 @@ export default function SettingsView({
               </label>
             )}
           </div>
+
+          {perm.canImportData(activeRole) && (
+            <button
+              type="button"
+              data-testid="restore-import-backup"
+              disabled={!hasImportBackup}
+              onClick={onRestoreImportBackup}
+              className="w-full p-3 bg-amber-50 border border-amber-200 text-amber-800 font-extrabold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <RefreshCcw className="w-4 h-4" />
+              Restaurer la sauvegarde pré-import précédente
+            </button>
+          )}
 
           {importSuccessMessage && (
             <div data-testid="import-success-message" className="p-3 bg-green-50 text-green-700   border border-green-200 rounded-lg">

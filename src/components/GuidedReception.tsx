@@ -54,11 +54,14 @@ import {
   validateTunisianPhone,
   validatePlateNumber,
   validateVin,
+  validateConditionalVin,
+  validateReceptionDates,
   validateMileage,
   validateComplaintText,
   sanitizeFreeText,
   maskPhoneNumber
 } from "../field-validations";
+import { buildAgingAlerts, filterAgingAlerts } from "../aging-alerts";
 
 interface GuidedReceptionProps {
   dossiers: DossierSAV[];
@@ -115,6 +118,7 @@ export default function GuidedReception({
 }: GuidedReceptionProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [receptionError, setReceptionError] = useState<string | null>(null);
+  const [receptionWarning, setReceptionWarning] = useState<string | null>(null);
 
   const [mileageConfirmed, setMileageConfirmed] = useState(false);
   const [showMileageConfirmModal, setShowMileageConfirmModal] = useState(false);
@@ -144,6 +148,7 @@ export default function GuidedReception({
     setPhotoCategory("réception avant");
     setMileageConfirmed(false);
     setReceptionError(null);
+    setReceptionWarning(null);
     setCurrentStep(1);
   };
 
@@ -398,6 +403,31 @@ export default function GuidedReception({
     if (receptionSubmitRef.current) return;
     receptionSubmitRef.current = true;
     setIsSubmittingReception(true);
+    setReceptionError(null);
+    setReceptionWarning(null);
+
+    const vinCheck = getVinValidation();
+    if (vinCheck.blocking) {
+      setReceptionError(vinCheck.reason || "VIN obligatoire ou invalide.");
+      setShowSubmitConfirmModal(false);
+      setIsSubmittingReception(false);
+      receptionSubmitRef.current = false;
+      return;
+    }
+    if (vinCheck.warning) {
+      setReceptionWarning(vinCheck.warning);
+    }
+    const dateCheck = getDateValidation();
+    if (!dateCheck.valid) {
+      setReceptionError(dateCheck.blockingReasons.join(" "));
+      setShowSubmitConfirmModal(false);
+      setIsSubmittingReception(false);
+      receptionSubmitRef.current = false;
+      return;
+    }
+    if (dateCheck.warnings.length > 0) {
+      setReceptionWarning(dateCheck.warnings.join(" "));
+    }
 
     // Sanitize free text inputs to prevent XSS
     const sanitizedClientNom = sanitizeFreeText(clientNom);
@@ -452,6 +482,21 @@ export default function GuidedReception({
     receptionSubmitRef.current = false;
   };
 
+  const getVinValidation = () => validateConditionalVin({
+    vin: vehiculeVIN,
+    typeDossier,
+    vehiculeModele,
+    vehiculeVersion,
+    plainteClient,
+    vehicleMasterVinAvailable: Boolean(vehicleMasterSelected?.vin),
+  });
+
+  const getDateValidation = () => validateReceptionDates({
+    dateLivraison: vehiculeDateLivraison,
+    dateMiseCirculation: vehiculeDateMiseCirculation,
+    typeDossier,
+  });
+
   const stepsList = [
     { num: 1, label: "Client", icon: Users },
     { num: 2, label: "Véhicule", icon: Car },
@@ -459,6 +504,7 @@ export default function GuidedReception({
     { num: 4, label: "État & Photos", icon: Camera },
     { num: 5, label: "Succès", icon: ClipboardCheck }
   ];
+  const receptionAgingAlerts = filterAgingAlerts(buildAgingAlerts(dossiers), "reception");
 
   return (
     <div data-testid="reception-start" className="bg-white  border border-slate-200  rounded-lg shadow-sm overflow-hidden max-w-4xl mx-auto">
@@ -479,6 +525,29 @@ export default function GuidedReception({
       {receptionError && (
         <div data-testid="reception-error-message" className="mx-6 mt-4 p-3 bg-red-50 text-red-700   border border-red-200 rounded-lg text-xs font-bold animate-pulse">
           {receptionError}
+        </div>
+      )}
+
+      {receptionWarning && (
+        <div data-testid="reception-warning-message" className="mx-6 mt-4 p-3 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold">
+          {receptionWarning}
+        </div>
+      )}
+
+      {receptionAgingAlerts.length > 0 && (
+        <div data-testid="aging-alerts-reception" className="mx-6 mt-4 bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl text-xs space-y-2">
+          <div className="flex items-center gap-2 font-bold uppercase">
+            <AlertTriangle className="w-4.5 h-4.5 text-rose-600" />
+            Alertes réception ({receptionAgingAlerts.length})
+          </div>
+          <ul className="space-y-1 font-semibold">
+            {receptionAgingAlerts.slice(0, 5).map(alert => (
+              <li key={`${alert.kind}-${alert.dossierId}`}>
+                <strong className="font-mono text-slate-900 hover:underline cursor-pointer" onClick={() => onSelectDossier && onSelectDossier(alert.dossierId)}>{alert.dossierId}</strong>
+                {" "}{alert.title} - {alert.detail}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -1041,6 +1110,7 @@ export default function GuidedReception({
               <div>
                 <label className="block text-xs font-bold text-slate-600  uppercase mb-1">Type de Dossier SAV *</label>
                 <select 
+                  data-testid="reception-type"
                   className="w-full p-2.5 bg-slate-50  border border-slate-200  rounded-lg text-xs font-semibold text-slate-700  focus:outline-none"
                   value={typeDossier}
                   onChange={(e) => setTypeDossier(e.target.value as InterventionType)}
@@ -1394,6 +1464,8 @@ export default function GuidedReception({
                   setObservationsReception("");
                   setPhotosPre([]);
                   setPhotoCategory("réception avant");
+                  setReceptionWarning(null);
+                  setReceptionError(null);
                   setCurrentStep(1);
                 }}
                 data-testid="reception-new-btn"
@@ -1455,6 +1527,7 @@ export default function GuidedReception({
             <button
               onClick={() => {
                 setReceptionError(null);
+                setReceptionWarning(null);
                 if (currentStep === 1) {
                   if (!validateCustomerName(clientNom)) {
                     setReceptionError("Le nom du client doit comporter au moins 2 caractères.");
@@ -1478,9 +1551,13 @@ export default function GuidedReception({
                     setReceptionError("Numéro d'immatriculation invalide (au moins 3 caractères).");
                     return;
                   }
-                  if (vehiculeVIN && !validateVin(vehiculeVIN)) {
-                    setReceptionError("Numéro VIN invalide (17 caractères requis, sans I, O, Q).");
+                  const vinCheck = getVinValidation();
+                  if (vinCheck.blocking) {
+                    setReceptionError(vinCheck.reason || "VIN obligatoire ou invalide.");
                     return;
+                  }
+                  if (vehiculeVIN && !validateVin(vehiculeVIN)) {
+                    setReceptionWarning(vinCheck.warning || "VIN invalide non bloquant pour réception rapide simple.");
                   }
                   const milCheck = validateMileage(vehiculeKilometrage);
                   if (!milCheck.valid) {
@@ -1510,6 +1587,23 @@ export default function GuidedReception({
             <button
               onClick={() => {
                 setReceptionError(null);
+                setReceptionWarning(null);
+                const vinCheck = getVinValidation();
+                if (vinCheck.blocking) {
+                  setReceptionError(vinCheck.reason || "VIN obligatoire ou invalide.");
+                  return;
+                }
+                if (vinCheck.warning) {
+                  setReceptionWarning(vinCheck.warning);
+                }
+                const dateCheck = getDateValidation();
+                if (!dateCheck.valid) {
+                  setReceptionError(dateCheck.blockingReasons.join(" "));
+                  return;
+                }
+                if (dateCheck.warnings.length > 0) {
+                  setReceptionWarning(dateCheck.warnings.join(" "));
+                }
                 const duplicate = dossiers.find(d => {
                   if (!isActiveDossier(d)) return false;
                   const matchVin = d.vehiculeVIN && vehiculeVIN && d.vehiculeVIN.toUpperCase().replace(/\s+/g, "") === vehiculeVIN.toUpperCase().replace(/\s+/g, "");

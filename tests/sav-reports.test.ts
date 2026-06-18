@@ -313,6 +313,7 @@ const defaultFilters: SavReportFilters = {
 {
   const dReport = buildDeliveryReport(mockDossiers, defaultFilters);
   assert.strictEqual(dReport.totalDelivered, 1);
+  assert.ok(dReport.restitutionStatuses.some(item => item.status === "Livré sans réserve" && item.count === 1));
   // dateValidation is 2026-06-10T11:00:00Z
   // dateLivraisonReelle is 2026-06-11T10:00:00Z
   // Difference is ~23h = 0.958 days

@@ -5,7 +5,7 @@
 
 import React, { useRef, useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
-import { DossierSAV, PHOTO_CATEGORIES, PhotoCategory, TechnicienResource, UserRole, CameraPhoto } from "../types";
+import { CameraPhoto, DossierSAV, PHOTO_CATEGORIES, PhotoCategory, TaskBlockFollowUpOwner, TechnicienResource, UserRole } from "../types";
 import {
   addPhotoToDossier,
   blockRepairOrder,
@@ -18,7 +18,7 @@ import {
   startRepairOrder
 } from "../sav-core";
 import { fileToCameraPhoto } from "../photo-utils";
-import { sanitizeFreeText, validateTechnicianDiagnostic } from "../field-validations";
+import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { canSimulateTechnicianAccess } from "../permissions";
 import { 
   Play, 
@@ -80,7 +80,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
   const [modalTargetDossierId, setModalTargetDossierId] = useState<string | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
   const [finishModalActive, setFinishModalActive] = useState(false);
-  const [finishDiagnostic, setFinishDiagnostic] = useState("");
+  const [finishCause, setFinishCause] = useState("");
+  const [finishAction, setFinishAction] = useState("");
+  const [finishValidation, setFinishValidation] = useState("");
   const [finishPreset, setFinishPreset] = useState("");
   const [finishTarget, setFinishTarget] = useState<{ dossierId: string; lineId: string } | null>(null);
   const [finishSubmitting, setFinishSubmitting] = useState(false);
@@ -95,6 +97,11 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
 
   const activeTechId = canSimulate ? selectedTechId : (matchedTech ? matchedTech.id : null);
   const activeTech = activeTechId ? techniciens.find(t => t.id === activeTechId) : null;
+  const finishDiagnosticGate = validateStructuredTechnicianDiagnostic({
+    cause: finishCause,
+    action: finishAction,
+    validation: finishValidation,
+  });
 
   // Filter operational tasks specific to this technician.
   const techTasks = activeTechId ? dossiers.filter(d => shouldShowDossierForTechnician(d, activeTechId)) : [];
@@ -147,7 +154,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
 
     if (action === "finish") {
       setFinishTarget({ dossierId, lineId });
-      setFinishDiagnostic("");
+      setFinishCause("");
+      setFinishAction("");
+      setFinishValidation("");
       setFinishPreset("");
       setFinishModalActive(true);
       return;
@@ -167,10 +176,13 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
 
   const handleFinishConfirm = () => {
     if (!finishTarget || finishSubmitRef.current) return;
-    const diagnostic = sanitizeFreeText(finishPreset || finishDiagnostic);
-    const usesPreset = Boolean(finishPreset);
-    if (!validateTechnicianDiagnostic(diagnostic, usesPreset)) {
-      setErrorMsg("Diagnostic invalide : minimum 15 caractères, ou modèle prédéfini, et pas de réponse courte type ok/fait/ras.");
+    const validation = validateStructuredTechnicianDiagnostic({
+      cause: finishCause,
+      action: finishAction,
+      validation: finishValidation,
+    });
+    if (!validation.valid || !validation.diagnostic) {
+      setErrorMsg(validation.reason || "Diagnostic structuré obligatoire avant clôture.");
       return;
     }
 
@@ -178,7 +190,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
     setFinishSubmitting(true);
     setErrorMsg(null);
     setSuccessMsg(null);
-    const result = finishRepairOrder(dossiers, finishTarget.dossierId, finishTarget.lineId, diagnostic);
+    const result = finishRepairOrder(dossiers, finishTarget.dossierId, finishTarget.lineId, validation.diagnostic);
     if (result.ok === false) {
       setErrorMsg(result.error || "Impossible de terminer la tâche.");
       setFinishSubmitting(false);
@@ -189,18 +201,38 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
     setSuccessMsg("Tâche terminée avec diagnostic validé.");
     setFinishModalActive(false);
     setFinishTarget(null);
-    setFinishDiagnostic("");
+    setFinishCause("");
+    setFinishAction("");
+    setFinishValidation("");
     setFinishPreset("");
     setFinishSubmitting(false);
     finishSubmitRef.current = false;
   };
 
-  const handleBlockConfirm = (reason: string, details: string) => {
+  const handleBlockConfirm = (
+    reason: string,
+    details: string,
+    sparePartRef?: string,
+    sparePartEta?: string,
+    followUpOwner?: TaskBlockFollowUpOwner,
+    resolutionEta?: string
+  ) => {
     setErrorMsg(null);
     setSuccessMsg(null);
-    const fullReason = details ? `${reason} : ${details}` : reason;
     if (modalTargetDossierId && modalTargetLineId) {
-      const result = blockRepairOrder(dossiers, modalTargetDossierId, modalTargetLineId, fullReason, UserRole.TECHNICIEN);
+      const result = blockRepairOrder(
+        dossiers,
+        modalTargetDossierId,
+        modalTargetLineId,
+        reason,
+        UserRole.TECHNICIEN,
+        new Date(),
+        sparePartRef,
+        sparePartEta,
+        followUpOwner,
+        resolutionEta,
+        details
+      );
       if (result.ok === false) {
         setErrorMsg(result.error || "Impossible de bloquer la tâche.");
       } else {
@@ -699,8 +731,13 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                 data-testid="modal-task-finish-preset"
                 value={finishPreset}
                 onChange={(e) => {
-                  setFinishPreset(e.target.value);
-                  if (e.target.value) setFinishDiagnostic(e.target.value);
+                  const preset = e.target.value;
+                  setFinishPreset(preset);
+                  if (preset) {
+                    setFinishCause("Constat atelier confirmé sur la tâche affectée au technicien.");
+                    setFinishAction(preset);
+                    setFinishValidation("Contrôle final effectué, résultat conforme sans anomalie résiduelle.");
+                  }
                 }}
                 className="w-full rounded-lg border border-slate-200 bg-white p-2.5 font-semibold text-slate-800"
               >
@@ -711,16 +748,42 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
               </select>
             </div>
             <div className="space-y-2">
-              <label className="block font-bold text-slate-700">Diagnostic technicien</label>
+              <label className="block font-bold text-slate-700">Cause constatée</label>
               <textarea
-                data-testid="modal-task-finish-diagnostic"
-                value={finishDiagnostic}
+                data-testid="modal-task-finish-cause"
+                value={finishCause}
                 onChange={(e) => {
-                  setFinishDiagnostic(e.target.value);
+                  setFinishCause(e.target.value);
                   setFinishPreset("");
                 }}
-                className="min-h-[90px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
-                placeholder="Ex: Filtre remplacé, essai statique OK, aucun bruit résiduel constaté."
+                className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                placeholder="Ex: Usure des plaquettes avant confirmée après contrôle visuel complet."
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700">Action réalisée</label>
+              <textarea
+                data-testid="modal-task-finish-action"
+                value={finishAction}
+                onChange={(e) => {
+                  setFinishAction(e.target.value);
+                  setFinishPreset("");
+                }}
+                className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                placeholder="Ex: Remplacement des pièces concernées et serrage contrôlé selon procédure interne."
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-700">Test / validation finale</label>
+              <textarea
+                data-testid="modal-task-finish-validation"
+                value={finishValidation}
+                onChange={(e) => {
+                  setFinishValidation(e.target.value);
+                  setFinishPreset("");
+                }}
+                className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                placeholder="Ex: Essai statique conforme, aucun bruit ou défaut résiduel constaté."
               />
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
@@ -730,6 +793,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                 onClick={() => {
                   setFinishModalActive(false);
                   setFinishTarget(null);
+                  setFinishCause("");
+                  setFinishAction("");
+                  setFinishValidation("");
                 }}
                 className="rounded-lg bg-slate-100 px-4 py-2 font-extrabold text-slate-700"
               >
@@ -738,7 +804,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
               <button
                 type="button"
                 data-testid="modal-task-finish-confirm"
-                disabled={finishSubmitting || !validateTechnicianDiagnostic(finishPreset || finishDiagnostic, Boolean(finishPreset))}
+                disabled={finishSubmitting || !finishDiagnosticGate.valid}
                 onClick={handleFinishConfirm}
                 className="rounded-lg bg-green-600 px-4 py-2 font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
               >

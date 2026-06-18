@@ -1,7 +1,7 @@
 {
   "name": "nimr-sav-pro",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/sav-core.test.ts && tsx tests/quote-import.test.ts && tsx tests/workshop-reservations.test.ts && tsx tests/complaints-workflow.test.ts && tsx tests/vehicle-status.test.ts && tsx tests/workshop-availability.test.ts && tsx tests/vehicle-master.test.ts && tsx tests/sav-reports.test.ts && tsx tests/dashboard-kpis.test.ts && tsx tests/workshop-planning-load.test.ts && tsx tests/field-validations.test.ts && tsx tests/audit-trail.test.ts && tsx tests/anti-double-click.test.ts && tsx tests/print-documents.test.ts",
+    "test": "tsx tests/sav-core.test.ts && tsx tests/quote-import.test.ts && tsx tests/workshop-reservations.test.ts && tsx tests/complaints-workflow.test.ts && tsx tests/vehicle-status.test.ts && tsx tests/workshop-availability.test.ts && tsx tests/vehicle-master.test.ts && tsx tests/sav-reports.test.ts && tsx tests/dashboard-kpis.test.ts && tsx tests/workshop-planning-load.test.ts && tsx tests/field-validations.test.ts && tsx tests/audit-trail.test.ts && tsx tests/import-export-safety.test.ts && tsx tests/anti-double-click.test.ts && tsx tests/print-documents.test.ts",
     "test:e2e": "playwright test",
     "qa:agent": "tsx tests/qa-agent.test.ts",
     "test:qa": "npm run lint && npm test && npm run build && npm run test:e2e"

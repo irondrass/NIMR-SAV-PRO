@@ -143,6 +143,26 @@ export interface QuoteImportResult {
   historyEntry: string;
 }
 
+export const TASK_BLOCK_FOLLOW_UP_OWNERS = [
+  "Chef Atelier",
+  "Réception",
+  "Garantie",
+  "Support technique",
+  "Client",
+] as const;
+
+export type TaskBlockFollowUpOwner = typeof TASK_BLOCK_FOLLOW_UP_OWNERS[number];
+
+export const DELIVERY_RESTITUTION_STATUSES = [
+  "Client absent",
+  "Livraison reportée",
+  "Réserve client",
+  "Client mécontent",
+  "Livré sans réserve",
+] as const;
+
+export type DeliveryRestitutionStatus = typeof DELIVERY_RESTITUTION_STATUSES[number];
+
 export interface RepairOrderLine {
   id: string;
   designation: string;
@@ -151,6 +171,13 @@ export interface RepairOrderLine {
   status: RepairOrderStatus;
   reopenedReason?: string;
   history?: string[];
+  diagnosticFinal?: string;
+  blockReason?: string;
+  blockComment?: string;
+  blockFollowUpOwner?: TaskBlockFollowUpOwner;
+  blockResolutionEta?: string;
+  blockSparePartRef?: string;
+  blockSparePartEta?: string;
 
   // Lot 5F-3: estimate source and duration validation
   estimateSource?: "manual" | "preset" | "quote-import" | "demo";
@@ -212,6 +239,7 @@ export interface DeliveryProtocole {
   dateLivraisonPrevue: string;
   dateLivraisonReelle?: string;
   remarquesLivraison: string;
+  statutRestitution?: DeliveryRestitutionStatus;
   confirmationReceptionClient: boolean;
   signatureClientUri?: string; // Simulated base64
   clotureInterne: boolean;
@@ -339,6 +367,9 @@ export interface DossierSAV {
   
   // Custom states
   bloqueRaison?: string;
+  bloqueComment?: string;
+  bloqueResponsableSuivi?: TaskBlockFollowUpOwner;
+  bloqueResolutionEta?: string;
   bloqueSparePartRef?: string;
   bloqueSparePartEta?: string;
   retourQualite?: boolean;
@@ -573,6 +604,7 @@ export interface DeliveryReport {
   totalDelivered: number;
   totalPendingClient: number; // client notified or en attente client
   averageQcToDeliveryDays: number; // average duration between last QC approval and delivery
+  restitutionStatuses: Array<{ status: DeliveryRestitutionStatus; count: number }>;
 }
 
 export interface ComplaintReport {
@@ -596,6 +628,5 @@ export interface OperationalKpiReport {
   criticalPriorityDossiersCount: number;
   averageStayDays: number; // average stay duration from reception to delivery/ERP
 }
-
 
 

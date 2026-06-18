@@ -5,13 +5,16 @@ import {
   suggestWorkshopSlot,
   validatePlanningAssignment,
   calculateTechnicianDailyLoad,
+  blockRepairOrder,
   canDeliverDossier,
+  finishRepairOrder,
   getDossierOperationalBucket,
   getVisibleTechnicianTasks,
   isOperationalActiveDossier,
   startRepairOrder,
   shouldShowDossierForTechnician,
   createReceptionDossier,
+  validateBackupPayload,
 } from "../src/sav-core";
 import {
   canAccessTab,
@@ -81,13 +84,23 @@ import { clearAuditTrail, getAuditTrail, logAuditEvent } from "../src/audit-trai
 import {
   maskPhoneNumber,
   sanitizeFreeText,
+  validateConditionalVin,
   validateComplaintText,
+  validateDeliveryRestitutionStatus,
   validateMileage,
   validatePlateNumber,
+  validateStructuredTechnicianDiagnostic,
   validateTechnicianDiagnostic,
   validateTunisianPhone,
   validateVin,
 } from "../src/field-validations";
+import {
+  buildImportSummary,
+  createPreImportBackupPayload,
+  createRoleAwareBackupPayload,
+  isStrongImportConfirmation,
+  STRONG_IMPORT_CONFIRMATION,
+} from "../src/import-export-safety";
 
 
 interface QACheck {
@@ -2202,6 +2215,127 @@ registerCheck("Lot 6E Invariants", "lecture seule sans actions critiques visible
   assert.ok(chefContent.includes("activeRole !== UserRole.LECTURE_SEULE"), "ChefAtelierView doit masquer les actions en lecture seule");
 });
 
+registerCheck("Lot 6F Invariants", "aucune clôture tâche sans diagnostic structuré", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-QA-6F-DIAG",
+    statut: DossierStatus.EN_TRAVAUX,
+    technicienId: "tech_01",
+    ordresReparation: [
+      { id: "ro_diag", designation: "Diagnostic frein", tempsEstime: 1, tempsPasse: 0.2, status: "in_progress" },
+    ],
+  });
+  const invalid = finishRepairOrder([dossier], dossier.id, "ro_diag", "ok");
+  assert.equal(invalid.ok, false);
+
+  const structured = validateStructuredTechnicianDiagnostic({
+    cause: "Usure anormale confirmée après contrôle visuel complet.",
+    action: "Remplacement de la pièce concernée et serrage contrôlé.",
+    validation: "Essai statique conforme sans anomalie résiduelle détectée.",
+  });
+  assert.equal(structured.valid, true);
+  const valid = finishRepairOrder([dossier], dossier.id, "ro_diag", structured.diagnostic!);
+  assert.equal(valid.ok, true);
+});
+
+registerCheck("Lot 6F Invariants", "blocage contient motif commentaire responsable et ETA optionnelle", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-QA-6F-BLOCK",
+    statut: DossierStatus.EN_TRAVAUX,
+    technicienId: "tech_01",
+    ordresReparation: [
+      { id: "ro_block", designation: "Diagnostic", tempsEstime: 1, tempsPasse: 0.1, status: "in_progress" },
+    ],
+  });
+  const missingComment = blockRepairOrder([dossier], dossier.id, "ro_block", "Attente pièce", UserRole.TECHNICIEN);
+  assert.equal(missingComment.ok, false);
+  const blocked = blockRepairOrder(
+    [dossier],
+    dossier.id,
+    "ro_block",
+    "Attente pièce",
+    UserRole.TECHNICIEN,
+    new Date("2026-06-18T09:00:00Z"),
+    "REF-QA",
+    "2026-06-20",
+    "Réception",
+    "2026-06-21",
+    "Pièce demandée, réception suit le retour client."
+  );
+  assert.equal(blocked.ok, true);
+  if (blocked.ok) {
+    assert.equal(blocked.line.blockComment, "Pièce demandée, réception suit le retour client.");
+    assert.equal(blocked.line.blockFollowUpOwner, "Réception");
+    assert.equal(blocked.dossier.bloqueSparePartRef, "REF-QA");
+  }
+});
+
+registerCheck("Lot 6F Invariants", "import JSON protégé par backup et confirmation forte", () => {
+  const dossier = getMockDossier({ id: "NIMR-QA-6F-IMPORT" });
+  const backup = createPreImportBackupPayload([dossier], [], [], [], []);
+  assert.equal(validateBackupPayload(backup).ok, true);
+  const summary = buildImportSummary({ dossiers: [dossier] });
+  assert.equal(summary.dossiers, 1);
+  assert.equal(isStrongImportConfirmation(STRONG_IMPORT_CONFIRMATION), true);
+  assert.equal(isStrongImportConfirmation("Je confirme"), false);
+});
+
+registerCheck("Lot 6F Invariants", "export JSON protégé et téléphone masqué si non autorisé", () => {
+  const dossier = getMockDossier({ id: "NIMR-QA-6F-EXPORT", clientTelephone: "+216 55 111 001", deposantTelephone: "+216 55 111 001" });
+  const masked = createRoleAwareBackupPayload([dossier], [], [], [], [], false);
+  assert.equal(masked.dossiers[0].clientTelephone, "+216 ** *** 001");
+  const full = createRoleAwareBackupPayload([dossier], [], [], [], [], true);
+  assert.equal(full.dossiers[0].clientTelephone, "+216 55 111 001");
+});
+
+registerCheck("Lot 6F Invariants", "statut livraison sensible visible si renseigné", () => {
+  assert.equal(validateDeliveryRestitutionStatus("Réserve client", "").valid, false);
+  assert.equal(validateDeliveryRestitutionStatus("Client mécontent", "Client signale un bruit à contrôler.").valid, true);
+  const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  assert.ok(deliveryContent.includes("DELIVERY_RESTITUTION_STATUSES"));
+  assert.ok(detailContent.includes("delivery-restitution-status-detail"));
+});
+
+registerCheck("Lot 6F Invariants", "VIN obligatoire en garantie", () => {
+  const result = validateConditionalVin({ vin: "", typeDossier: InterventionType.GARANTIE_CONSTRUCTEUR });
+  assert.equal(result.blocking, true);
+  assert.match(result.reason || "", /VIN obligatoire/);
+});
+
+registerCheck("Lot 6F Invariants", "alertes aging affichées sur dashboard chef et réception", () => {
+  assert.ok(fs.readFileSync("src/components/DirectorDashboard.tsx", "utf8").includes("aging-alerts-dashboard"));
+  assert.ok(fs.readFileSync("src/components/ChefAtelierView.tsx", "utf8").includes("aging-alerts-chef"));
+  assert.ok(fs.readFileSync("src/components/GuidedReception.tsx", "utf8").includes("aging-alerts-reception"));
+});
+
+registerCheck("Lot 6F Invariants", "aucune finance ajoutée", () => {
+  const forbidden = ["chiffre d'affaires", "chiffre d’affaires", "marge", "paiement", "caisse", "facture réelle", "montant", "solde", "stock réel", "disponibilité pièce réelle"];
+  const files = [
+    "src/components/DossierDetail.tsx",
+    "src/components/LivraisonView.tsx",
+    "src/components/GuidedReception.tsx",
+    "src/components/ChefAtelierView.tsx",
+    "src/components/DirectorDashboard.tsx",
+    "src/import-export-safety.ts",
+    "src/aging-alerts.ts",
+    "src/field-validations.ts",
+  ];
+  for (const file of files) {
+    const content = fs.readFileSync(file, "utf8").toLowerCase();
+    for (const word of forbidden) {
+      assert.equal(content.includes(word), false, `${file} contient ${word}`);
+    }
+  }
+});
+
+registerCheck("Lot 6F Invariants", "aucun tag v1.1.0 final créé et aucune donnée réelle committée", () => {
+  const packedRefs = fs.existsSync(".git/packed-refs") ? fs.readFileSync(".git/packed-refs", "utf8") : "";
+  const hasPackedFinalTag = packedRefs.split(/\r?\n/).some(line => /\srefs\/tags\/v1\.1\.0$/.test(line));
+  assert.equal(fs.existsSync(".git/refs/tags/v1.1.0"), false);
+  assert.equal(hasPackedFinalTag, false);
+  assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -2225,7 +2359,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.0 (Lot 6E - Hardening métier pré-RC)
+- **Version** : v1.1.1 (Lot 6F - Correctifs post-RC critiques)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

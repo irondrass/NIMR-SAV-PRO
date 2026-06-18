@@ -7,7 +7,7 @@ class DefectReporter implements Reporter {
 
   onBegin() {
     // Initialize or clear the report file at start of run
-    const header = `# Rapport de Défauts Automatiques QA - NIMR SAV PRO v1.1.0
+    const header = `# Rapport de Défauts Automatiques QA - NIMR SAV PRO v1.1.1
 
 Ce rapport répertorie tous les défauts fonctionnels et techniques détectés lors des tests d'intégration E2E.
 

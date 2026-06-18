@@ -19,6 +19,7 @@ import {
   AccordSuivi,
   ReclammationClient,
   UserRole,
+  TaskBlockFollowUpOwner,
   PHOTO_CATEGORIES,
   PhotoCategory
 } from "../types";
@@ -43,6 +44,7 @@ import {
 } from "../sav-core";
 import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
+import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { 
   ArrowLeft, 
   FileText, 
@@ -107,9 +109,14 @@ export default function DossierDetail({
   const [signatureCaptured, setSignatureCaptured] = useState(false);
   const [showQCValidationConfirm, setShowQCValidationConfirm] = useState(false);
   const [showDeliveryValidationConfirm, setShowDeliveryValidationConfirm] = useState(false);
+  const [finishCause, setFinishCause] = useState("");
+  const [finishAction, setFinishAction] = useState("");
+  const [finishValidation, setFinishValidation] = useState("");
+  const [finishValidationError, setFinishValidationError] = useState<string | null>(null);
+  const [finishSubmitting, setFinishSubmitting] = useState(false);
 
   // Modal states for Lot 1
-  const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | "task-unblock" | null>(null);
+  const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | "task-unblock" | "task-finish" | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
 
   const handlePrintDocument = (type: "reception" | "or" | "qc" | "delivery") => {
@@ -208,7 +215,12 @@ export default function DossierDetail({
   };
 
   const handleFinishROLine = (lineId: string) => {
-    applyTaskMutation(finishRepairOrder(dossiers, dossier.id, lineId));
+    setModalTargetLineId(lineId);
+    setFinishCause("");
+    setFinishAction("");
+    setFinishValidation("");
+    setFinishValidationError(null);
+    setModalActive("task-finish");
   };
 
   const handleReopenROLine = (lineId: string) => {
@@ -317,7 +329,7 @@ export default function DossierDetail({
   const confirmDeliveryRequest = () => {
     setShowDeliveryValidationConfirm(false);
     setDeliveryError(null);
-    onUpdateDossier(confirmDelivery(dossier));
+    onUpdateDossier(confirmDelivery(dossier, new Date(), "Livré sans réserve"));
   };
 
   const handleFinalOperationalClose = () => {
@@ -369,10 +381,28 @@ export default function DossierDetail({
     setModalTargetLineId(null);
   };
 
-  const handleBlockConfirm = (reason: string, details: string) => {
-    const fullReason = details ? `${reason} : ${details}` : reason;
+  const handleBlockConfirm = (
+    reason: string,
+    details: string,
+    sparePartRef?: string,
+    sparePartEta?: string,
+    followUpOwner?: TaskBlockFollowUpOwner,
+    resolutionEta?: string
+  ) => {
     if (modalTargetLineId) {
-      const result = blockRepairOrder(dossiers, dossier.id, modalTargetLineId, fullReason, userRole);
+      const result = blockRepairOrder(
+        dossiers,
+        dossier.id,
+        modalTargetLineId,
+        reason,
+        userRole,
+        new Date(),
+        sparePartRef,
+        sparePartEta,
+        followUpOwner,
+        resolutionEta,
+        details
+      );
       if (result.ok === false) {
         setTaskError(result.error);
       } else {
@@ -382,6 +412,40 @@ export default function DossierDetail({
     }
     setModalActive(null);
     setModalTargetLineId(null);
+  };
+
+  const handleFinishConfirm = () => {
+    if (!modalTargetLineId || finishSubmitting) return;
+    const validation = validateStructuredTechnicianDiagnostic({
+      cause: finishCause,
+      action: finishAction,
+      validation: finishValidation,
+    });
+    if (!validation.valid || !validation.diagnostic) {
+      const reason = validation.reason || "Diagnostic structuré obligatoire.";
+      setFinishValidationError(reason);
+      setTaskError(reason);
+      return;
+    }
+
+    setFinishSubmitting(true);
+    setTaskError(null);
+    setFinishValidationError(null);
+    const result = finishRepairOrder(dossiers, dossier.id, modalTargetLineId, validation.diagnostic);
+    if (result.ok === false) {
+      setTaskError(result.error);
+      setFinishValidationError(result.error);
+      setFinishSubmitting(false);
+      return;
+    }
+
+    onUpdateDossier(result.dossier);
+    setModalActive(null);
+    setModalTargetLineId(null);
+    setFinishCause("");
+    setFinishAction("");
+    setFinishValidation("");
+    setFinishSubmitting(false);
   };
 
   const handleUnblockConfirm = (reason: string, details: string) => {
@@ -419,6 +483,11 @@ export default function DossierDetail({
   const linkedComplaints = reclamations
     .map(normalizeComplaint)
     .filter(reclamation => reclamation.dossierId === dossier.id);
+  const finishDiagnosticGate = validateStructuredTechnicianDiagnostic({
+    cause: finishCause,
+    action: finishAction,
+    validation: finishValidation,
+  });
 
   return (
     <div data-testid="dossier-detail-view" className="space-y-6">
@@ -904,6 +973,33 @@ export default function DossierDetail({
                       {line.reopenedReason && (
                         <p className="text-[10px] text-violet-600  font-bold">
                           Motif réouverture : {line.reopenedReason}
+                        </p>
+                      )}
+                      {status === "blocked" && (
+                        <div
+                          data-testid={`task-block-followup-${line.id}`}
+                          className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] font-semibold text-amber-900"
+                        >
+                          <span className="font-black uppercase">Blocage atelier</span>
+                          <span className="block">Motif : {line.blockReason || dossier.bloqueRaison || "Blocage technique"}</span>
+                          {(line.blockComment || dossier.bloqueComment) && (
+                            <span className="block">Commentaire : {line.blockComment || dossier.bloqueComment}</span>
+                          )}
+                          <span className="block">Suivi : {line.blockFollowUpOwner || dossier.bloqueResponsableSuivi || "Chef Atelier"}</span>
+                          {(line.blockResolutionEta || dossier.bloqueResolutionEta) && (
+                            <span className="block">ETA résolution : {line.blockResolutionEta || dossier.bloqueResolutionEta}</span>
+                          )}
+                          {(line.blockSparePartRef || dossier.bloqueSparePartRef) && (
+                            <span className="block">Réf. pièce demandée : {line.blockSparePartRef || dossier.bloqueSparePartRef}</span>
+                          )}
+                          {(line.blockSparePartEta || dossier.bloqueSparePartEta) && (
+                            <span className="block">Réception pièce estimée : {line.blockSparePartEta || dossier.bloqueSparePartEta}</span>
+                          )}
+                        </div>
+                      )}
+                      {line.diagnosticFinal && (
+                        <p data-testid={`task-final-diagnostic-${line.id}`} className="mt-2 whitespace-pre-line text-[10px] font-semibold text-emerald-700">
+                          {line.diagnosticFinal}
                         </p>
                       )}
                     </div>
@@ -1497,6 +1593,16 @@ export default function DossierDetail({
                 <div className="p-4 bg-emerald-50  border border-emerald-200  rounded-lg text-xs space-y-1 text-emerald-800 ">
                   <span className="font-bold block">✓ Véhicule remis en main propre au client. Clôture en transit.</span>
                   <p className="font-medium text-slate-600 ">Restitution confirmée et signée. Le dossier passe au suivi administratif interne.</p>
+                  {dossier.livraison.statutRestitution && (
+                    <p data-testid="delivery-restitution-status-detail" className="font-black text-emerald-900">
+                      Statut restitution : {dossier.livraison.statutRestitution}
+                    </p>
+                  )}
+                  {dossier.livraison.remarquesLivraison && (
+                    <p className="font-semibold text-slate-700">
+                      Commentaire : {dossier.livraison.remarquesLivraison}
+                    </p>
+                  )}
                 </div>
 
                 {canDeliverVehicle && (
@@ -1579,6 +1685,95 @@ export default function DossierDetail({
                   className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700"
                 >
                   Confirmer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {modalActive === "task-finish" && (
+          <div data-testid="modal-detail-task-finish" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+            <div className="w-full max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <h3 className="font-black uppercase text-slate-900">Diagnostic structuré obligatoire</h3>
+                  <p className="mt-1 font-semibold text-slate-600">
+                    La clôture tâche exige une cause, une action réalisée et un test final exploitables.
+                  </p>
+                </div>
+              </div>
+
+              {(finishValidationError || (finishCause || finishAction || finishValidation) && !finishDiagnosticGate.valid) && (
+                <div data-testid="modal-detail-task-finish-error" className="rounded-lg border border-rose-200 bg-rose-50 p-3 font-bold text-rose-700">
+                  {finishValidationError || finishDiagnosticGate.reason}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <label className="block space-y-1.5">
+                  <span className="font-black text-slate-700">Cause constatée</span>
+                  <textarea
+                    data-testid="detail-task-finish-cause"
+                    value={finishCause}
+                    onChange={(e) => {
+                      setFinishCause(e.target.value);
+                      setFinishValidationError(null);
+                    }}
+                    className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                    placeholder="Ex: Usure avancée des plaquettes avant constatée après contrôle visuel."
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="font-black text-slate-700">Action réalisée</span>
+                  <textarea
+                    data-testid="detail-task-finish-action"
+                    value={finishAction}
+                    onChange={(e) => {
+                      setFinishAction(e.target.value);
+                      setFinishValidationError(null);
+                    }}
+                    className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                    placeholder="Ex: Remplacement des plaquettes et contrôle du serrage sur les deux roues avant."
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="font-black text-slate-700">Test / validation finale</span>
+                  <textarea
+                    data-testid="detail-task-finish-validation"
+                    value={finishValidation}
+                    onChange={(e) => {
+                      setFinishValidation(e.target.value);
+                      setFinishValidationError(null);
+                    }}
+                    className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                    placeholder="Ex: Essai statique et freinage progressif conformes, aucun bruit résiduel détecté."
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  data-testid="detail-task-finish-cancel"
+                  onClick={() => {
+                    setModalActive(null);
+                    setModalTargetLineId(null);
+                    setFinishValidationError(null);
+                    setFinishSubmitting(false);
+                  }}
+                  className="rounded-lg bg-slate-100 px-4 py-2 font-extrabold text-slate-700"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  data-testid="detail-task-finish-confirm"
+                  disabled={finishSubmitting || !finishDiagnosticGate.valid}
+                  onClick={handleFinishConfirm}
+                  className="rounded-lg bg-green-600 px-4 py-2 font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
+                >
+                  {finishSubmitting ? "Traitement..." : "Terminer"}
                 </button>
               </div>
             </div>

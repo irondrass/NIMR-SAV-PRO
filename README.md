@@ -1,14 +1,14 @@
-# NIMR SAV PRO v1.1.0
+# NIMR SAV PRO v1.1.1
 
 NIMR SAV PRO est une nouvelle application interne de pilotage SAV, atelier et relation client.
 
 Elle est basée sur l'ancienne application NIMR SAV, mais elle est séparée techniquement :
 
-- version corrective propre : `v1.1.0`
+- version corrective propre : `v1.1.1`
 - nouveau nom de package : `nimr-sav-pro`
 - nouvelle base GitHub Pages : `/NIMR-SAV-PRO/`
 - nouvelles clés `localStorage` préfixées `nimr-sav-pro`
-- cache PWA réservé si un service worker est ajouté : `nimr-sav-pro-v1.1.0`
+- cache PWA réservé si un service worker est ajouté : `nimr-sav-pro-v1.1.1`
 - aucun cache PWA ou service worker partagé avec l'ancienne application
 - données de démonstration fictives uniquement
 

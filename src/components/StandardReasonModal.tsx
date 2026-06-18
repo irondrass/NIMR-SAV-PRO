@@ -5,11 +5,19 @@
 
 import React, { useState, useEffect } from "react";
 import { X, AlertTriangle } from "lucide-react";
+import { TASK_BLOCK_FOLLOW_UP_OWNERS, TaskBlockFollowUpOwner } from "../types";
 
 interface StandardReasonModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (reason: string, details: string, sparePartRef?: string, sparePartEta?: string) => void;
+  onConfirm: (
+    reason: string,
+    details: string,
+    sparePartRef?: string,
+    sparePartEta?: string,
+    followUpOwner?: TaskBlockFollowUpOwner,
+    resolutionEta?: string
+  ) => void;
   title: string;
   description?: string;
   reasons: string[];
@@ -35,6 +43,8 @@ export default function StandardReasonModal({
   const [details, setDetails] = useState<string>("");
   const [sparePartRef, setSparePartRef] = useState<string>("");
   const [sparePartEta, setSparePartEta] = useState<string>("");
+  const [followUpOwner, setFollowUpOwner] = useState<TaskBlockFollowUpOwner>("Chef Atelier");
+  const [resolutionEta, setResolutionEta] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Override reasons if blocking modal
@@ -57,6 +67,8 @@ export default function StandardReasonModal({
       setDetails("");
       setSparePartRef("");
       setSparePartEta("");
+      setFollowUpOwner("Chef Atelier");
+      setResolutionEta("");
       setIsSubmitting(false);
     }
   }, [isOpen]);
@@ -79,7 +91,9 @@ export default function StandardReasonModal({
       selectedReason,
       details.trim(),
       selectedReason === "Attente pièce" ? sparePartRef.trim() : undefined,
-      selectedReason === "Attente pièce" ? sparePartEta : undefined
+      selectedReason === "Attente pièce" ? sparePartEta : undefined,
+      isBlockingModal ? followUpOwner : undefined,
+      isBlockingModal ? resolutionEta : undefined
     );
   };
 
@@ -155,6 +169,34 @@ export default function StandardReasonModal({
                   data-testid="block-spare-part-eta"
                   value={sparePartEta}
                   onChange={(e) => setSparePartEta(e.target.value)}
+                  className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1"
+                />
+              </div>
+            </div>
+          )}
+
+          {isBlockingModal && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-amber-50/70 border border-amber-100 rounded-lg">
+              <div className="space-y-1.5">
+                <label className="block text-slate-700 font-bold">Responsable de suivi :</label>
+                <select
+                  data-testid={`${testIdPrefix}-owner`}
+                  value={followUpOwner}
+                  onChange={(e) => setFollowUpOwner(e.target.value as TaskBlockFollowUpOwner)}
+                  className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1"
+                >
+                  {TASK_BLOCK_FOLLOW_UP_OWNERS.map(owner => (
+                    <option key={owner} value={owner}>{owner}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-slate-700 font-bold">ETA résolution (facultatif) :</label>
+                <input
+                  type="date"
+                  data-testid={`${testIdPrefix}-resolution-eta`}
+                  value={resolutionEta}
+                  onChange={(e) => setResolutionEta(e.target.value)}
                   className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1"
                 />
               </div>

@@ -15,7 +15,7 @@ test.describe("Lot 5B - Connexion et gestion utilisateurs", () => {
     await expect(page.locator("text=Connexion interne SAV")).toBeVisible();
     const loginPage = page.locator('[data-testid="login-page"]');
     await expect(loginPage.locator("h1")).toHaveText("NIMR SAV PRO");
-    await expect(loginPage.locator("text=v1.1.0").first()).toBeVisible();
+    await expect(loginPage.locator("text=v1.1.1").first()).toBeVisible();
 
     await humanFill(page, page.locator('[data-testid="login-username"]'), "directeur");
     await humanFill(page, page.locator('[data-testid="login-pin"]'), "9999");

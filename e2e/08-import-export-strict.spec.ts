@@ -23,19 +23,16 @@ test.describe("Import / Export de base de données strict", () => {
     await humanClick(page, page.locator('[data-testid="nav-settings"]'));
 
     // We can intercept the download event in Playwright
-    const downloadPromise = page.waitForEvent("download");
     await humanClick(page, page.locator('[data-testid="export-json"]'));
+    await expect(page.locator('[data-testid="export-json-confirm-modal"]')).toBeVisible();
+    const downloadPromise = page.waitForEvent("download");
+    await humanClick(page, page.locator('[data-testid="export-json-confirm"]'));
     const download = await downloadPromise;
 
     expect(download.suggestedFilename()).toContain("NIMR_SAV_PRO_BASE_BACKUP.json");
   });
 
   test("Importation d'un JSON invalide : rejet et préservation de la base active", async ({ page }) => {
-    // Setup dialog behavior to dismiss the alert
-    page.on("dialog", async (dialog) => {
-      await dialog.accept();
-    });
-
     await humanClick(page, page.locator('[data-testid="nav-settings"]'));
 
     // 1. Invalid JSON structure (non-object)
@@ -93,6 +90,13 @@ test.describe("Import / Export de base de données strict", () => {
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(validPayload))
     });
+
+    await expect(page.locator('[data-testid="import-json-confirm-modal"]')).toBeVisible();
+    await expect(page.locator('[data-testid="import-json-summary"]')).toContainText(/1 dossier/i);
+    await expect(page.locator('[data-testid="import-json-confirm"]')).toBeDisabled();
+    await page.locator('[data-testid="import-json-confirmation-input"]').fill("Je comprends que l’import remplace les données locales");
+    await expect(page.locator('[data-testid="import-json-confirm"]')).toBeEnabled();
+    await humanClick(page, page.locator('[data-testid="import-json-confirm"]'));
 
     // Verify success banner is displayed
     const successBanner = page.locator('[data-testid="import-success-message"]');

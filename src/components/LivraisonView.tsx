@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef } from "react";
-import { DossierSAV, UserRole, DossierStatus } from "../types";
+import { DELIVERY_RESTITUTION_STATUSES, DeliveryRestitutionStatus, DossierSAV, UserRole, DossierStatus } from "../types";
 import { confirmDelivery } from "../sav-core";
 import { 
   CheckCircle, 
@@ -18,7 +18,7 @@ import {
   FileText
 } from "lucide-react";
 import { LicencePlate } from "./UIParts";
-import { maskPhoneNumber, sanitizeFreeText, validateMileage } from "../field-validations";
+import { maskPhoneNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, validateMileage } from "../field-validations";
 import { canViewVehicleSensitiveFields } from "../permissions";
 
 interface LivraisonViewProps {
@@ -38,6 +38,7 @@ export default function LivraisonView({
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
   const [exitKm, setExitKm] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [restitutionStatus, setRestitutionStatus] = useState<DeliveryRestitutionStatus>("Livré sans réserve");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -131,6 +132,7 @@ export default function LivraisonView({
     setSelectedDossierId(dossier.id);
     setExitKm(dossier.livraison.kilometrageSortie ? String(dossier.livraison.kilometrageSortie) : String(dossier.vehiculeKilometrage));
     setRemarks(dossier.livraison.remarquesLivraison || "");
+    setRestitutionStatus(dossier.livraison.statutRestitution || "Livré sans réserve");
     setValidationError(null);
     setSuccessMsg(null);
 
@@ -188,8 +190,9 @@ export default function LivraisonView({
       return;
     }
 
-    if (!remarks.trim()) {
-      setValidationError("Le commentaire de restitution est obligatoire.");
+    const statusCheck = validateDeliveryRestitutionStatus(restitutionStatus, remarks);
+    if (!statusCheck.valid) {
+      setValidationError(statusCheck.reason || "Statut de restitution invalide.");
       setIsConfirmingDelivery(false);
       deliveryConfirmRef.current = false;
       return;
@@ -211,16 +214,17 @@ export default function LivraisonView({
         clientInforme: clientInformed,
         confirmationReceptionClient: clientReceptionConfirmed,
         remarquesLivraison: safeRemarks,
+        statutRestitution: restitutionStatus,
         kilometrageSortie: parsedExitKm,
         signatureClientUri: signatureUri || undefined,
       }
     };
 
-    const delivered = confirmDelivery(withDeliveryInfo, new Date());
+    const delivered = confirmDelivery(withDeliveryInfo, new Date(), restitutionStatus);
 
     // Add delivery log with actor and details
     const timestamp = new Date().toISOString();
-    const formattedLog = `${timestamp} - [${currentUser.role}] - Restitution validée. KM Sortie: ${parsedExitKm}. Obs: ${safeRemarks || "Aucune"}`;
+    const formattedLog = `${timestamp} - [${currentUser.role}] - Restitution validée. Statut: ${restitutionStatus}. KM Sortie: ${parsedExitKm}. Obs: ${safeRemarks || "Aucune"}`;
     delivered.historiqueLogs = [formattedLog, ...(delivered.historiqueLogs || [])];
 
     onUpdateDossier(delivered);
@@ -473,10 +477,37 @@ export default function LivraisonView({
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase text-slate-400 tracking-wider block">
+                    Statut opérationnel de restitution
+                  </label>
+                  <div data-testid="delivery-status-options" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {DELIVERY_RESTITUTION_STATUSES.map(status => {
+                      const selected = restitutionStatus === status;
+                      const slug = status.toLowerCase().replace(/\s+/g, "-").replace(/[éè]/g, "e");
+                      return (
+                        <button
+                          key={status}
+                          type="button"
+                          data-testid={`delivery-status-${slug}`}
+                          onClick={() => setRestitutionStatus(status)}
+                          className={`rounded-xl border px-3 py-2 text-left text-xs font-extrabold transition ${
+                            selected
+                              ? "border-indigo-300 bg-indigo-50 text-indigo-900"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200"
+                          }`}
+                        >
+                          {status}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Remarks / Remarques de livraison */}
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-slate-400 tracking-wider block">
-                    Observations de livraison / Commentaires (Obligatoire)
+                    Observations de livraison / Commentaires {(restitutionStatus === "Réserve client" || restitutionStatus === "Client mécontent") ? "(Obligatoire)" : "(Optionnel)"}
                   </label>
                   <textarea
                     data-testid="delivery-comment"
@@ -511,8 +542,9 @@ export default function LivraisonView({
                       return;
                     }
 
-                    if (!remarks.trim()) {
-                      setValidationError("Le commentaire de restitution est obligatoire.");
+                    const statusCheck = validateDeliveryRestitutionStatus(restitutionStatus, remarks);
+                    if (!statusCheck.valid) {
+                      setValidationError(statusCheck.reason || "Statut de restitution invalide.");
                       return;
                     }
 
@@ -595,6 +627,7 @@ export default function LivraisonView({
                   <th className="py-2.5 px-3">Véhicule</th>
                   <th className="py-2.5 px-3">Client</th>
                   <th className="py-2.5 px-3">Date Restitution</th>
+                  <th className="py-2.5 px-3">Statut</th>
                   <th className="py-2.5 px-3">KM Entrée</th>
                   <th className="py-2.5 px-3">KM Sortie</th>
                   <th className="py-2.5 px-3">Observations</th>
@@ -616,6 +649,11 @@ export default function LivraisonView({
                       </td>
                       <td className="py-3 px-3 text-slate-600 font-medium">{d.clientNom}</td>
                       <td className="py-3 px-3 text-slate-500">{dateStr}</td>
+                      <td className="py-3 px-3">
+                        <span data-testid={`delivery-history-status-${d.id}`} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-black text-slate-700">
+                          {d.livraison.statutRestitution || "Livré sans réserve"}
+                        </span>
+                      </td>
                       <td className="py-3 px-3 text-slate-500 font-mono">{d.vehiculeKilometrage} km</td>
                       <td className="py-3 px-3 text-indigo-600 font-mono font-bold">
                         {d.livraison.kilometrageSortie ? `${d.livraison.kilometrageSortie} km` : "-"}

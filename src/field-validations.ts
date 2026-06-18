@@ -3,6 +3,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { DELIVERY_RESTITUTION_STATUSES, InterventionType } from "./types";
+
+const FORBIDDEN_SHORT_DIAGNOSTICS = ["ok", "fait", "ras", "done"];
+const STRUCTURED_DIAGNOSTIC_MIN_LENGTH = 15;
+
+export interface StructuredTechnicianDiagnosticInput {
+  cause: string;
+  action: string;
+  validation: string;
+}
+
+export interface ConditionalVinContext {
+  vin: string;
+  typeDossier?: InterventionType | string;
+  vehiculeModele?: string;
+  vehiculeVersion?: string;
+  plainteClient?: string;
+  vehicleMasterVinAvailable?: boolean;
+}
+
+export interface ReceptionDateValidationContext {
+  dateLivraison?: string;
+  dateMiseCirculation?: string;
+  typeDossier?: InterventionType | string;
+  now?: Date;
+}
+
 export function validateTunisianPhone(phone: string): boolean {
   const cleaned = phone.trim().replace(/[\s-]+/g, "");
   if (/[a-zA-Z]/.test(cleaned)) return false;
@@ -54,11 +81,168 @@ export function validateComplaintText(text: string, isPreset?: boolean): boolean
 }
 
 export function validateTechnicianDiagnostic(text: string, isPreset?: boolean): boolean {
-  const cleaned = text.trim().toLowerCase().replace(/\s+/g, "");
-  const forbidden = ["ok", "fait", "ras", "done"];
-  if (forbidden.includes(cleaned)) return false;
+  const cleaned = normalizeShortDiagnostic(text);
+  if (FORBIDDEN_SHORT_DIAGNOSTICS.includes(cleaned)) return false;
   if (isPreset) return cleaned.length > 0;
   return text.trim().length >= 15;
+}
+
+export function buildStructuredTechnicianDiagnostic(input: StructuredTechnicianDiagnosticInput): string {
+  const cause = sanitizeFreeText(input.cause);
+  const action = sanitizeFreeText(input.action);
+  const validation = sanitizeFreeText(input.validation);
+  return [
+    `Cause constatée: ${cause}`,
+    `Action réalisée: ${action}`,
+    `Test / validation finale: ${validation}`,
+  ].join("\n");
+}
+
+export function validateStructuredTechnicianDiagnostic(
+  input: StructuredTechnicianDiagnosticInput
+): { valid: boolean; reason?: string; diagnostic?: string } {
+  const fields = [
+    { label: "Cause constatée", value: sanitizeFreeText(input.cause) },
+    { label: "Action réalisée", value: sanitizeFreeText(input.action) },
+    { label: "Test / validation finale", value: sanitizeFreeText(input.validation) },
+  ];
+
+  const missing = fields.find(field => field.value.length < STRUCTURED_DIAGNOSTIC_MIN_LENGTH);
+  if (missing) {
+    return {
+      valid: false,
+      reason: `${missing.label} obligatoire (${STRUCTURED_DIAGNOSTIC_MIN_LENGTH} caractères minimum).`,
+    };
+  }
+
+  const tooShort = fields.find(field => FORBIDDEN_SHORT_DIAGNOSTICS.includes(normalizeShortDiagnostic(field.value)));
+  if (tooShort) {
+    return {
+      valid: false,
+      reason: "Diagnostic trop court ou non exploitable.",
+    };
+  }
+
+  const diagnostic = buildStructuredTechnicianDiagnostic({
+    cause: fields[0].value,
+    action: fields[1].value,
+    validation: fields[2].value,
+  });
+
+  if (!validateTechnicianDiagnostic(diagnostic, false)) {
+    return {
+      valid: false,
+      reason: "Diagnostic final non exploitable.",
+    };
+  }
+
+  return { valid: true, diagnostic };
+}
+
+export function isElectricOrHybridVehicle(model?: string, version?: string): boolean {
+  const text = `${model || ""} ${version || ""}`.toUpperCase();
+  return /\b(EV|HEV|PHEV|HYBRIDE|HYBRID|ELECTRIQUE|ELECTRIQUE|E-POWER)\b/.test(text);
+}
+
+export function isSecurityRelatedIntervention(text?: string): boolean {
+  const cleaned = sanitizeFreeText(text || "").toLowerCase();
+  return /(sécurité|securite|frein|airbag|direction|ceinture|abs|esp|adblue|haute tension|batterie traction)/i.test(cleaned);
+}
+
+export function validateConditionalVin(context: ConditionalVinContext): {
+  required: boolean;
+  valid: boolean;
+  blocking: boolean;
+  reason?: string;
+  warning?: string;
+} {
+  const vin = sanitizeFreeText(context.vin).toUpperCase();
+  const reasons: string[] = [];
+
+  if (context.typeDossier === InterventionType.GARANTIE_CONSTRUCTEUR || context.typeDossier === "garantie constructeur") {
+    reasons.push("garantie constructeur");
+  }
+  if (isElectricOrHybridVehicle(context.vehiculeModele, context.vehiculeVersion)) {
+    reasons.push("véhicule EV / HEV / PHEV");
+  }
+  if (isSecurityRelatedIntervention(context.plainteClient)) {
+    reasons.push("intervention liée sécurité");
+  }
+  if (context.vehicleMasterVinAvailable) {
+    reasons.push("VIN disponible dans le référentiel véhicule");
+  }
+
+  const required = reasons.length > 0;
+  const vinValid = validateVin(vin);
+
+  if (required && !vin) {
+    return {
+      required,
+      valid: false,
+      blocking: true,
+      reason: `VIN obligatoire pour ${reasons.join(", ")}.`,
+    };
+  }
+
+  if (required && !vinValid) {
+    return {
+      required,
+      valid: false,
+      blocking: true,
+      reason: "VIN invalide : 17 caractères requis, sans I, O, Q.",
+    };
+  }
+
+  if (vin && !vinValid) {
+    return {
+      required,
+      valid: false,
+      blocking: false,
+      warning: "VIN invalide : saisie acceptée en réception rapide simple, à corriger avant garantie/sécurité.",
+    };
+  }
+
+  return { required, valid: true, blocking: false };
+}
+
+export function validateReceptionDates(context: ReceptionDateValidationContext): {
+  valid: boolean;
+  blockingReasons: string[];
+  warnings: string[];
+} {
+  const blockingReasons: string[] = [];
+  const warnings: string[] = [];
+  const now = context.now || new Date();
+  const pdiOrNewVehicle = isPdiOrNewVehicle(context.typeDossier);
+  const deliveryDate = parseDateOnly(context.dateLivraison);
+  const circulationDate = parseDateOnly(context.dateMiseCirculation);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  if (deliveryDate && deliveryDate.getTime() > today && !pdiOrNewVehicle) {
+    blockingReasons.push("Date livraison future interdite hors PDI/VN.");
+  }
+  if (circulationDate && circulationDate.getTime() > today && !pdiOrNewVehicle) {
+    blockingReasons.push("Date mise en circulation future interdite hors PDI/VN.");
+  }
+  if (deliveryDate && circulationDate && circulationDate.getTime() < deliveryDate.getTime()) {
+    warnings.push("Date de mise en circulation antérieure à la date de livraison : vérifier la cohérence dossier.");
+  }
+
+  return {
+    valid: blockingReasons.length === 0,
+    blockingReasons,
+    warnings,
+  };
+}
+
+export function validateDeliveryRestitutionStatus(status: string | undefined, comment: string): { valid: boolean; reason?: string } {
+  if (!status || !DELIVERY_RESTITUTION_STATUSES.includes(status as any)) {
+    return { valid: false, reason: "Statut de restitution obligatoire." };
+  }
+  if ((status === "Réserve client" || status === "Client mécontent") && !sanitizeFreeText(comment).trim()) {
+    return { valid: false, reason: "Commentaire obligatoire pour une réserve client ou un client mécontent." };
+  }
+  return { valid: true };
 }
 
 export function sanitizeFreeText(text: string): string {
@@ -81,4 +265,21 @@ export function maskPhoneNumber(phone: string): string {
     return `+216 ** *** ${suffix || "***"}`;
   }
   return `** *** ${suffix || "***"}`;
+}
+
+function normalizeShortDiagnostic(text: string): string {
+  return sanitizeFreeText(text).trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function isPdiOrNewVehicle(type?: InterventionType | string): boolean {
+  const cleaned = String(type || "").toLowerCase();
+  return cleaned.includes("préparation livraison") || cleaned.includes("preparation livraison") || cleaned.includes("pdi") || cleaned.includes("vn");
+}
+
+function parseDateOnly(value?: string): Date | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  const [year, month, day] = trimmed.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }

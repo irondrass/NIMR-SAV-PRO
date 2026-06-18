@@ -23,7 +23,8 @@ test.describe("Lot 6E — Hardening métier pré-RC", () => {
     await humanFill(page, page.locator('[data-testid="reception-plate"]'), "123 TU 456");
     await humanFill(page, page.locator('[data-testid="reception-vin"]'), "VIN-COURT");
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
-    await expect(page.locator('[data-testid="reception-error-message"]')).toContainText(/VIN invalide/i);
+    await expect(page.locator('[data-testid="reception-warning-message"]')).toContainText(/VIN invalide/i);
+    await humanClick(page, page.locator('[data-testid="reception-previous"]'));
 
     await humanFill(page, page.locator('[data-testid="reception-vin"]'), "");
     await humanFill(page, page.locator('[data-testid="reception-mileage"]'), "-5");
@@ -58,10 +59,12 @@ test.describe("Lot 6E — Hardening métier pré-RC", () => {
 
     await humanClick(page, page.locator('[data-testid="task-finish-ro_6e_diag"]'));
     await expect(page.locator('[data-testid="modal-task-finish"]')).toBeVisible();
-    await humanFill(page, page.locator('[data-testid="modal-task-finish-diagnostic"]'), "ok");
+    await humanFill(page, page.locator('[data-testid="modal-task-finish-cause"]'), "ok");
     await expect(page.locator('[data-testid="modal-task-finish-confirm"]')).toBeDisabled();
 
-    await humanFill(page, page.locator('[data-testid="modal-task-finish-diagnostic"]'), "Réparation terminée après contrôle complet du circuit de freinage.");
+    await humanFill(page, page.locator('[data-testid="modal-task-finish-cause"]'), "Usure anormale confirmée après contrôle visuel complet.");
+    await humanFill(page, page.locator('[data-testid="modal-task-finish-action"]'), "Remplacement des plaquettes et contrôle du serrage effectué.");
+    await humanFill(page, page.locator('[data-testid="modal-task-finish-validation"]'), "Essai statique conforme sans bruit résiduel détecté.");
     await expect(page.locator('[data-testid="modal-task-finish-confirm"]')).toBeEnabled();
   });
 

@@ -869,7 +869,8 @@ export default function PerformanceSAV({
                         ["Dossiers prêts à livrer", deliveryData.totalReadyToDeliver],
                         ["Dossiers livrés", deliveryData.totalDelivered],
                         ["Dossiers en attente client", deliveryData.totalPendingClient],
-                        ["Délai moyen QC -> Livraison (jours)", deliveryData.averageQcToDeliveryDays.toFixed(1)]
+                        ["Délai moyen QC -> Livraison (jours)", deliveryData.averageQcToDeliveryDays.toFixed(1)],
+                        ...deliveryData.restitutionStatuses.map(item => [`Statut restitution - ${item.status}`, item.count])
                       ]
                     )
                   }
@@ -899,6 +900,18 @@ export default function PerformanceSAV({
                 <div className="text-2xl font-black text-blue-600 mt-1" data-testid="delivery-avg-days">
                   {deliveryData.averageQcToDeliveryDays.toFixed(1)} <span className="text-xs font-semibold text-slate-400">Jours</span>
                 </div>
+              </div>
+            </div>
+
+            <div data-testid="delivery-restitution-status-report" className="border rounded-xl p-4 text-left text-xs">
+              <h4 className="font-extrabold uppercase text-slate-700 mb-3">Statuts opérationnels de restitution</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                {deliveryData.restitutionStatuses.map(item => (
+                  <div key={item.status} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-[10px] font-black uppercase text-slate-500">{item.status}</div>
+                    <div className="mt-1 text-lg font-black text-slate-900">{item.count}</div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

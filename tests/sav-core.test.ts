@@ -21,6 +21,7 @@ import {
 import {
   addPhotoToDossier,
   assignTechnicianToDossier,
+  blockRepairOrder,
   canDeliverDossier,
   canSavePlanningAssignment,
   confirmDelivery,
@@ -122,7 +123,7 @@ function testReceptionCreation() {
   assert.equal(dossier.id, "NIMR-2026-006");
   assert.equal(dossier.clientNom, "Client Test");
   assert.equal(dossier.deposantNom, "Client Test");
-  assert.equal(dossier.vehiculeVIN, "17-VIN-PLACEHOLDER");
+  assert.equal(dossier.vehiculeVIN, "");
   assert.equal(dossier.niveauCarburant, 100);
   assert.equal(dossier.statut, DossierStatus.VEHICULE_RECU);
   assert.equal(dossier.dateReception, fixedNow.toISOString());
@@ -170,6 +171,7 @@ function testDeliveryAndBilling() {
   assert.equal(delivered.livraison.controleQualiteOk, true);
   assert.equal(delivered.livraison.clientInforme, true);
   assert.equal(delivered.livraison.confirmationReceptionClient, true);
+  assert.equal(delivered.livraison.statutRestitution, "Livré sans réserve");
   assert.equal(delivered.livraison.dateLivraisonReelle, fixedNow.toISOString());
 
   const billing = markReadyForBilling(delivered, fixedNow);
@@ -363,6 +365,56 @@ function testFinishRequiresInProgress() {
   if (!result.ok) assert.match(result.error, /en cours/);
 }
 
+function testFinishRequiresStructuredDiagnostic() {
+  const dossier = createTaskDossier("NIMR-FINISH-STRUCT", "tech_01", [createLine("line_running", "in_progress")]);
+  const baseLogCount = dossier.historiqueLogs?.length ?? 0;
+  const invalid = finishRepairOrder([dossier], dossier.id, "line_running", "ok", fixedNow);
+  assert.equal(invalid.ok, false);
+  assert.equal(dossier.historiqueLogs?.length ?? 0, baseLogCount);
+
+  const diagnostic = [
+    "Cause constatée: Usure des plaquettes confirmée après contrôle visuel complet.",
+    "Action réalisée: Remplacement des plaquettes et contrôle du serrage effectué.",
+    "Test / validation finale: Essai statique conforme sans bruit résiduel détecté.",
+  ].join("\n");
+  const valid = finishRepairOrder([dossier], dossier.id, "line_running", diagnostic, fixedNow);
+  assert.equal(valid.ok, true);
+  if (valid.ok) {
+    assert.equal(valid.line.status, "done");
+    assert.match(valid.line.diagnosticFinal ?? "", /Cause constatée/);
+  }
+}
+
+function testTaskBlockRequiresCommentAndStoresFollowUp() {
+  const dossier = createTaskDossier("NIMR-BLOCK-FOLLOW", "tech_01", [createLine("line_running", "in_progress")]);
+  const baseLogCount = dossier.historiqueLogs?.length ?? 0;
+  const missingComment = blockRepairOrder([dossier], dossier.id, "line_running", "Attente pièce", UserRole.TECHNICIEN, fixedNow);
+  assert.equal(missingComment.ok, false);
+  assert.equal(dossier.historiqueLogs?.length ?? 0, baseLogCount);
+
+  const blocked = blockRepairOrder(
+    [dossier],
+    dossier.id,
+    "line_running",
+    "Attente pièce",
+    UserRole.TECHNICIEN,
+    fixedNow,
+    "REF-DEMO-01",
+    "2026-06-20",
+    "Réception",
+    "2026-06-21",
+    "Pièce demandée au comptoir, suivi réception à confirmer."
+  );
+  assert.equal(blocked.ok, true);
+  if (blocked.ok) {
+    assert.equal(blocked.line.status, "blocked");
+    assert.equal(blocked.line.blockFollowUpOwner, "Réception");
+    assert.equal(blocked.line.blockSparePartRef, "REF-DEMO-01");
+    assert.equal(blocked.dossier.bloqueResponsableSuivi, "Réception");
+    assert.match(blocked.dossier.historiqueLogs?.[0] ?? "", /Blocage Tâche/);
+  }
+}
+
 function testBlockedTaskRequiresUnblockBeforeRestart() {
   const dossier = createTaskDossier("NIMR-BLOCK-001", "tech_01", [createLine("line_blocked", "blocked")]);
   const startBlocked = startRepairOrder([dossier], dossier.id, "line_blocked", fixedNow);
@@ -546,10 +598,10 @@ function testStorageKeysUseNewPrefixOnly() {
 
 function testApplicationIdentityVersion() {
   assert.equal(APP_NAME, "NIMR SAV PRO");
-  assert.equal(APP_VERSION, "1.1.0");
+  assert.equal(APP_VERSION, "1.1.1");
   assert.equal(APP_BASE_URL, "/NIMR-SAV-PRO/");
   assert.equal(LOCAL_STORAGE_PREFIX, "nimr-sav-pro");
-  assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.1.0");
+  assert.equal(APP_CACHE_NAME, "nimr-sav-pro-v1.1.1");
 }
 
 function testAdvancedPlanningHelpers() {
@@ -1331,6 +1383,8 @@ testDoneTaskCannotRestart();
 testReopenDoneTaskByWorkshopChief();
 testTechnicianCannotReopenDoneTask();
 testFinishRequiresInProgress();
+testFinishRequiresStructuredDiagnostic();
+testTaskBlockRequiresCommentAndStoresFollowUp();
 testBlockedTaskRequiresUnblockBeforeRestart();
 testOperationalVisibilityHelpers();
 testWorkshopSlotSuggestionFirstTechnicianAndBay();

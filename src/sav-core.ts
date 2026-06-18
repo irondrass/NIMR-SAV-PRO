@@ -18,6 +18,7 @@ import {
   ReclammationClient,
   RepairOrderLine,
   RepairOrderStatus,
+  TaskBlockFollowUpOwner,
   TechnicienResource,
   UserRole,
   WorkshopBay,
@@ -25,7 +26,7 @@ import {
   WorkshopAvailabilityConfig,
 } from "./types";
 import { createComplaint } from "./complaints-workflow";
-import { normalizePlateNumber, sanitizeFreeText, validateTechnicianDiagnostic } from "./field-validations";
+import { normalizePlateNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, validateTechnicianDiagnostic } from "./field-validations";
 import {
   validateAvailabilityForSlot,
   isTechnicianAbsent,
@@ -242,7 +243,7 @@ export function createReceptionDossier(
     vehiculeMarque: vehiculeMarque || "Dongfeng",
     vehiculeModele: vehiculeModele || "Modèle standard",
     vehiculeImmatriculation: vehiculeImmatriculation || "000 TU 0000",
-    vehiculeVIN: vehiculeVIN || "17-VIN-PLACEHOLDER",
+    vehiculeVIN: vehiculeVIN || "",
     vehiculeKilometrage: Math.max(0, safeKilometrage),
     vehiculeCouleur: vehiculeCouleur || "Non spécifiée",
     vehiculeVersion: sanitizeFreeText(input.vehiculeVersion || ""),
@@ -414,6 +415,9 @@ export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
       status: normalizeRepairOrderStatus(line.status),
       history: line.history ?? [],
     })),
+    bloqueComment: dossier.bloqueComment ?? "",
+    bloqueResponsableSuivi: dossier.bloqueResponsableSuivi,
+    bloqueResolutionEta: dossier.bloqueResolutionEta ?? "",
     historiqueLogs: dossier.historiqueLogs ?? [],
   };
 }
@@ -525,6 +529,9 @@ export function releaseRepairOrderBlock(
       dossierChanges: {
         statut: DossierStatus.TRAVAUX_PLANIFIES,
         bloqueRaison: "",
+        bloqueComment: "",
+        bloqueResponsableSuivi: undefined,
+        bloqueResolutionEta: "",
         bloqueSparePartRef: "",
         bloqueSparePartEta: "",
         prochaineActionRecommended: "Reprendre la tâche après levée du blocage",
@@ -559,23 +566,55 @@ export function blockRepairOrder(
   userRole: UserRole = UserRole.TECHNICIEN,
   now = new Date(),
   sparePartRef?: string,
-  sparePartEta?: string
+  sparePartEta?: string,
+  followUpOwner: TaskBlockFollowUpOwner = "Chef Atelier",
+  resolutionEta?: string,
+  comment?: string
 ): TaskMutationResult {
+  const safeReason = sanitizeFreeText(reason);
+  const safeComment = sanitizeFreeText(comment || "");
+  if (!safeReason.trim()) {
+    return { ok: false, error: "Motif de blocage obligatoire." };
+  }
+  if (!safeComment.trim()) {
+    return { ok: false, error: "Commentaire de blocage obligatoire." };
+  }
+
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
     if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
       return { ok: false, error: "Seule une tâche en cours peut être bloquée." };
     }
+    const historyDetails = [
+      `Tâche bloquée: ${safeReason}`,
+      `Commentaire: ${safeComment}`,
+      `Responsable suivi: ${followUpOwner}`,
+      resolutionEta ? `ETA résolution: ${resolutionEta}` : "",
+      sparePartRef ? `Réf pièce demandée: ${sanitizeFreeText(sparePartRef)}` : "",
+      sparePartEta ? `Date estimée réception pièce: ${sparePartEta}` : "",
+    ].filter(Boolean).join(" | ");
     return {
       ok: true,
-      line: appendLineHistory({ ...line, status: "blocked" }, now, `Tâche bloquée: ${reason}`),
+      line: appendLineHistory({
+        ...line,
+        status: "blocked",
+        blockReason: safeReason,
+        blockComment: safeComment,
+        blockFollowUpOwner: followUpOwner,
+        blockResolutionEta: resolutionEta || "",
+        blockSparePartRef: sparePartRef ? sanitizeFreeText(sparePartRef) : "",
+        blockSparePartEta: sparePartEta || "",
+      }, now, historyDetails),
       dossierChanges: {
         statut: DossierStatus.BLOQUE,
-        bloqueRaison: reason,
-        bloqueSparePartRef: sparePartRef || "",
+        bloqueRaison: safeReason,
+        bloqueComment: safeComment,
+        bloqueResponsableSuivi: followUpOwner,
+        bloqueResolutionEta: resolutionEta || "",
+        bloqueSparePartRef: sparePartRef ? sanitizeFreeText(sparePartRef) : "",
         bloqueSparePartEta: sparePartEta || "",
-        prochaineActionRecommended: `Lever le blocage atelier: ${reason}`,
+        prochaineActionRecommended: `Lever le blocage atelier: ${safeReason}`,
       },
-      dossierLog: `[${userRole}] - Blocage Tâche "${line.designation}" - Motif: ${reason}`,
+      dossierLog: `[${userRole}] - Blocage Tâche "${line.designation}" - Motif: ${safeReason} - Suivi: ${followUpOwner}`,
     };
   });
 }
@@ -602,7 +641,7 @@ export function finishRepairOrder(
     }
 
     const nextLine = appendLineHistory(
-      { ...line, status: "done", tempsPasse: Math.max(line.tempsPasse, line.tempsEstime) },
+      { ...line, status: "done", tempsPasse: Math.max(line.tempsPasse, line.tempsEstime), diagnosticFinal: diagnostic },
       now,
       `Tâche terminée. Diagnostic: ${diagnostic}`
     );
@@ -1147,16 +1186,24 @@ export function blockDossier(
   reason: string,
   now = new Date(),
   sparePartRef?: string,
-  sparePartEta?: string
+  sparePartEta?: string,
+  followUpOwner: TaskBlockFollowUpOwner = "Chef Atelier",
+  resolutionEta?: string,
+  comment?: string
 ): DossierSAV {
+  const safeReason = sanitizeFreeText(reason);
+  const safeComment = sanitizeFreeText(comment || "");
   return {
     ...dossier,
     statut: DossierStatus.BLOQUE,
-    bloqueRaison: reason,
-    bloqueSparePartRef: sparePartRef || "",
+    bloqueRaison: safeReason,
+    bloqueComment: safeComment,
+    bloqueResponsableSuivi: followUpOwner,
+    bloqueResolutionEta: resolutionEta || "",
+    bloqueSparePartRef: sparePartRef ? sanitizeFreeText(sparePartRef) : "",
     bloqueSparePartEta: sparePartEta || "",
     dateDernierStatut: now.toISOString(),
-    prochaineActionRecommended: "Traiter la cause de blocage technique",
+    prochaineActionRecommended: `Traiter la cause de blocage technique: ${safeReason}`,
   };
 }
 
@@ -1165,6 +1212,9 @@ export function releaseDossierBlock(dossier: DossierSAV, now = new Date()): Doss
     ...dossier,
     statut: DossierStatus.EN_TRAVAUX,
     bloqueRaison: "",
+    bloqueComment: "",
+    bloqueResponsableSuivi: undefined,
+    bloqueResolutionEta: "",
     bloqueSparePartRef: "",
     bloqueSparePartEta: "",
     dateDernierStatut: now.toISOString(),
@@ -1253,8 +1303,12 @@ export function canDeliverDossier(dossier: DossierSAV): DossierDeliveryGate {
   };
 }
 
-export function confirmDelivery(dossier: DossierSAV, now = new Date()): DossierSAV {
+export function confirmDelivery(dossier: DossierSAV, now = new Date(), restitutionStatus = "Livré sans réserve"): DossierSAV {
   if (!canDeliverDossier(dossier).allowed) {
+    return dossier;
+  }
+  const statusValidation = validateDeliveryRestitutionStatus(restitutionStatus, dossier.livraison.remarquesLivraison);
+  if (!statusValidation.valid) {
     return dossier;
   }
 
@@ -1264,6 +1318,7 @@ export function confirmDelivery(dossier: DossierSAV, now = new Date()): DossierS
     clientInforme: true,
     confirmationReceptionClient: true,
     dateLivraisonReelle: now.toISOString(),
+    statutRestitution: restitutionStatus as DeliveryProtocole["statutRestitution"],
     clotureInterne: true,
   };
 

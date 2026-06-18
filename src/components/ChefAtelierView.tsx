@@ -5,13 +5,14 @@
 
 import React, { useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
-import { DossierSAV, DossierStatus, TechnicienResource, AtelierZone, UserRole } from "../types";
+import { DossierSAV, DossierStatus, TaskBlockFollowUpOwner, TechnicienResource, AtelierZone, UserRole } from "../types";
 import {
   assignTechnicianToDossier,
   blockDossier,
   finishWorksForQuality,
   releaseDossierBlock
 } from "../sav-core";
+import { buildAgingAlerts, filterAgingAlerts } from "../aging-alerts";
 import { 
   Users, 
   Wrench, 
@@ -81,6 +82,7 @@ export default function ChefAtelierView({
     d.statut === DossierStatus.BLOQUE &&
     (d.bloqueRaison?.includes("Attente pièce") || d.bloqueSparePartRef || d.bloqueSparePartEta)
   );
+  const chefAgingAlerts = filterAgingAlerts(buildAgingAlerts(dossiers), "chef-atelier");
 
   const handleQuickAssign = (dossierId: string, techId: string) => {
     const original = dossiers.find(d => d.id === dossierId);
@@ -106,13 +108,19 @@ export default function ChefAtelierView({
     setModalActive(true);
   };
 
-  const handleBlockConfirm = (reason: string, details: string, sparePartRef?: string, sparePartEta?: string) => {
-    const fullReason = details ? `${reason} : ${details}` : reason;
+  const handleBlockConfirm = (
+    reason: string,
+    details: string,
+    sparePartRef?: string,
+    sparePartEta?: string,
+    followUpOwner?: TaskBlockFollowUpOwner,
+    resolutionEta?: string
+  ) => {
     if (modalTargetDossierId) {
       const original = dossiers.find(d => d.id === modalTargetDossierId);
       if (original) {
         const logMessage = `[${UserRole.CHEF_ATELIER}] - Blocage Dossier - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
-        const nextDossier = blockDossier(original, fullReason, new Date(), sparePartRef, sparePartEta);
+        const nextDossier = blockDossier(original, reason, new Date(), sparePartRef, sparePartEta, followUpOwner, resolutionEta, details);
         const updatedLogs = [
           `${new Date().toISOString()} - ${logMessage}`,
           ...(nextDossier.historiqueLogs || [])
@@ -171,6 +179,23 @@ export default function ChefAtelierView({
         </div>
       </div>
 
+      {chefAgingAlerts.length > 0 && (
+        <div data-testid="aging-alerts-chef" className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl text-xs space-y-2">
+          <div className="flex items-center gap-2 font-bold uppercase">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            Alertes aging atelier ({chefAgingAlerts.length})
+          </div>
+          <ul className="space-y-1 font-semibold">
+            {chefAgingAlerts.slice(0, 6).map(alert => (
+              <li key={`${alert.kind}-${alert.dossierId}`} className="flex flex-wrap gap-1">
+                <strong className="font-mono text-slate-900 hover:underline cursor-pointer" onClick={() => onSelectDossier(alert.dossierId)}>{alert.dossierId}</strong>
+                <span>{alert.title} - {alert.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Missing Pieces Banner Alert */}
       {dossiersAttentePiece.length > 0 && (
         <div data-testid="alert-missing-pieces" className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-xs space-y-2">
@@ -183,6 +208,8 @@ export default function ChefAtelierView({
               <li key={d.id}>
                 Dossier <strong className="font-mono text-slate-900 hover:underline cursor-pointer" onClick={() => onSelectDossier(d.id)}>{d.id}</strong> ({d.vehiculeMarque} {d.vehiculeModele} - {d.vehiculeImmatriculation}) :
                 bloqué pour "Attente pièce"
+                {d.bloqueResponsableSuivi && ` (Suivi: ${d.bloqueResponsableSuivi})`}
+                {d.bloqueResolutionEta && ` (ETA résolution: ${new Date(d.bloqueResolutionEta).toLocaleDateString("fr-FR")})`}
                 {d.bloqueSparePartRef && ` (Réf: ${d.bloqueSparePartRef})`}
                 {d.bloqueSparePartEta && ` (Date estimée: ${new Date(d.bloqueSparePartEta).toLocaleDateString("fr-FR")})`}
               </li>
@@ -333,6 +360,17 @@ export default function ChefAtelierView({
                       <span className="text-[10px] bg-blue-50  px-1 py-[1px] rounded text-blue-700  font-bold uppercase">{doss.zoneAtelier}</span>
                     </div>
                   </div>
+
+                  {doss.statut === DossierStatus.BLOQUE && (
+                    <div data-testid={`chef-block-followup-${doss.id}`} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] font-semibold text-amber-900">
+                      <span className="font-black uppercase">Blocage : {doss.bloqueRaison || "atelier"}</span>
+                      {doss.bloqueComment && <span className="block">Commentaire : {doss.bloqueComment}</span>}
+                      <span className="block">Suivi : {doss.bloqueResponsableSuivi || "Chef Atelier"}</span>
+                      {doss.bloqueResolutionEta && <span className="block">ETA résolution : {doss.bloqueResolutionEta}</span>}
+                      {doss.bloqueSparePartRef && <span className="block">Réf. pièce demandée : {doss.bloqueSparePartRef}</span>}
+                      {doss.bloqueSparePartEta && <span className="block">Réception pièce estimée : {doss.bloqueSparePartEta}</span>}
+                    </div>
+                  )}
 
                   {/* Actions for active items */}
                   <div className="pt-2.5 border-t border-zinc-200  flex justify-between items-center gap-2">

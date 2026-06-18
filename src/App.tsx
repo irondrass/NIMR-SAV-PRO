@@ -41,7 +41,7 @@ import {
 } from "./auth";
 import * as perm from "./permissions";
 import {
-  createBackupPayload,
+  BackupPayload,
   createRuntimeId,
   isActiviteLog,
   isDossierSAV,
@@ -53,6 +53,15 @@ import {
   validateBackupPayload,
   isWorkshopReservation
 } from "./sav-core";
+import {
+  buildImportSummary,
+  createPreImportBackupPayload,
+  createRoleAwareBackupPayload,
+  ImportSummary,
+  isStrongImportConfirmation,
+  PRE_IMPORT_BACKUP_KEY,
+  STRONG_IMPORT_CONFIRMATION,
+} from "./import-export-safety";
 import { APP_NAME, APP_VERSION } from "./app-identity";
 import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
@@ -279,6 +288,10 @@ export default function App() {
   // Import feedback states
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
   const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
+  const [showExportConfirm, setShowExportConfirm] = useState(false);
+  const [pendingImport, setPendingImport] = useState<{ data: Partial<BackupPayload>; summary: ImportSummary; fileName: string } | null>(null);
+  const [importConfirmationText, setImportConfirmationText] = useState("");
+  const [hasImportBackup, setHasImportBackup] = useState(false);
 
   // Search and Filter states
   const [globalSearchTerm, setGlobalSearchTerm] = useState("");
@@ -296,6 +309,7 @@ export default function App() {
     setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
     setVehicleMasterRecords(loadStoredVehicleMaster(STORAGE_KEYS.vehicleMaster));
     setVehicleMasterLastImport(localStorage.getItem(STORAGE_KEYS.vehicleMasterLastImport) || null);
+    setHasImportBackup(Boolean(localStorage.getItem(PRE_IMPORT_BACKUP_KEY)));
 
     const defaultAvail: WorkshopAvailabilityConfig = {
       schedule: getDefaultWorkshopSchedule(),
@@ -466,7 +480,19 @@ export default function App() {
   // State Import/Export logic
   const handleExportDataJSON = () => {
     handleTouchSession();
-    const fullBackup = createBackupPayload(dossiers, reclamations, techList, activityLogs, reservations);
+    setShowExportConfirm(true);
+  };
+
+  const executeExportDataJSON = () => {
+    handleTouchSession();
+    const fullBackup = createRoleAwareBackupPayload(
+      dossiers,
+      reclamations,
+      techList,
+      activityLogs,
+      reservations,
+      perm.canViewVehicleSensitiveFields(activeRole)
+    );
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullBackup, null, 2));
     const downloadAnchor = document.createElement("a");
     downloadAnchor.setAttribute("href", dataStr);
@@ -480,15 +506,19 @@ export default function App() {
       commentaire: `${dossiers.length} dossiers exportés`,
       source: "backup-json",
     });
+    setShowExportConfirm(false);
   };
 
   const handleImportDataJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     handleTouchSession();
     setImportSuccessMessage(null);
     setImportErrorMessage(null);
+    setPendingImport(null);
+    setImportConfirmationText("");
     const reader = new FileReader();
     const files = e.target.files;
     if (files && files[0]) {
+      const fileName = files[0].name;
       reader.onload = (event) => {
         try {
           const parsed = JSON.parse(event.target?.result as string);
@@ -498,33 +528,13 @@ export default function App() {
             return;
           }
 
-          if (validation.data.dossiers) {
-            const normalizedDossiers = validation.data.dossiers.map(normalizeDossierForRuntime);
-            setDossiers(normalizedDossiers);
-            writeLocalStorageJSON(STORAGE_KEYS.dossiers, normalizedDossiers);
-          }
-          if (validation.data.reclamations) {
-            setReclamations(validation.data.reclamations);
-            writeLocalStorageJSON(STORAGE_KEYS.reclamations, validation.data.reclamations);
-          }
-          if (validation.data.techList) {
-            setTechList(validation.data.techList);
-            writeLocalStorageJSON(STORAGE_KEYS.techs, validation.data.techList);
-          }
-          if (validation.data.activityLogs) {
-            setActivityLogs(validation.data.activityLogs);
-            writeLocalStorageJSON(STORAGE_KEYS.logs, validation.data.activityLogs);
-          }
-          if (validation.data.reservations) {
-            setReservations(validation.data.reservations);
-            writeLocalStorageJSON(STORAGE_KEYS.reservations, validation.data.reservations);
-          }
-          setImportSuccessMessage("Base restaurée avec succès !");
-          recordAudit({
-            module: "import_export",
-            action: "import_json",
-            commentaire: `${validation.data.dossiers.length} dossiers restaurés depuis sauvegarde`,
-            source: "backup-json",
+          const preImportBackup = createPreImportBackupPayload(dossiers, reclamations, techList, activityLogs, reservations);
+          writeLocalStorageValue(PRE_IMPORT_BACKUP_KEY, JSON.stringify(preImportBackup));
+          setHasImportBackup(true);
+          setPendingImport({
+            data: validation.data,
+            summary: buildImportSummary(validation.data),
+            fileName,
           });
         } catch (err) {
           setImportErrorMessage("Erreur de format de fichier de sauvegarde.");
@@ -535,6 +545,69 @@ export default function App() {
         setImportErrorMessage("Impossible de lire le fichier de sauvegarde.");
       };
       reader.readAsText(files[0]);
+    }
+  };
+
+  const applyValidatedImportPayload = (data: Partial<BackupPayload>, sourceLabel: string) => {
+    if (data.dossiers) {
+      const normalizedDossiers = data.dossiers.map(normalizeDossierForRuntime);
+      setDossiers(normalizedDossiers);
+      writeLocalStorageJSON(STORAGE_KEYS.dossiers, normalizedDossiers);
+    }
+    if (data.reclamations) {
+      setReclamations(data.reclamations);
+      writeLocalStorageJSON(STORAGE_KEYS.reclamations, data.reclamations);
+    }
+    if (data.techList) {
+      setTechList(data.techList);
+      writeLocalStorageJSON(STORAGE_KEYS.techs, data.techList);
+    }
+    if (data.activityLogs) {
+      setActivityLogs(data.activityLogs);
+      writeLocalStorageJSON(STORAGE_KEYS.logs, data.activityLogs);
+    }
+    if (data.reservations) {
+      setReservations(data.reservations);
+      writeLocalStorageJSON(STORAGE_KEYS.reservations, data.reservations);
+    }
+    recordAudit({
+      module: "import_export",
+      action: sourceLabel === "restore-backup" ? "restore_pre_import_backup" : "import_json",
+      commentaire: `${data.dossiers?.length ?? 0} dossiers appliqués`,
+      source: sourceLabel,
+    });
+  };
+
+  const confirmPendingImport = () => {
+    if (!pendingImport || !isStrongImportConfirmation(importConfirmationText)) return;
+    applyValidatedImportPayload(pendingImport.data, "backup-json");
+    setImportSuccessMessage("Base restaurée avec succès !");
+    setPendingImport(null);
+    setImportConfirmationText("");
+  };
+
+  const handleRestoreImportBackup = () => {
+    handleTouchSession();
+    setImportSuccessMessage(null);
+    setImportErrorMessage(null);
+    try {
+      const rawBackup = localStorage.getItem(PRE_IMPORT_BACKUP_KEY);
+      if (!rawBackup) {
+        setImportErrorMessage("Aucune sauvegarde pré-import disponible.");
+        return;
+      }
+      const parsed = JSON.parse(rawBackup);
+      const validation = validateBackupPayload(parsed);
+      if (validation.ok === false) {
+        setImportErrorMessage(validation.error);
+        return;
+      }
+      applyValidatedImportPayload(validation.data, "restore-backup");
+      setImportSuccessMessage("Sauvegarde pré-import restaurée.");
+      setPendingImport(null);
+      setImportConfirmationText("");
+    } catch {
+      setImportErrorMessage("Sauvegarde pré-import illisible.");
     }
   };
 
@@ -1233,6 +1306,8 @@ export default function App() {
                 <SettingsView 
                   onExportData={handleExportDataJSON}
                   onImportData={handleImportDataJSON}
+                  onRestoreImportBackup={handleRestoreImportBackup}
+                  hasImportBackup={hasImportBackup}
                   activeRole={activeRole}
                   importSuccessMessage={importSuccessMessage}
                   importErrorMessage={importErrorMessage}
@@ -1255,6 +1330,94 @@ export default function App() {
                 <KanbanBoard dossiers={dossiers} onSelectDossier={setSelectedDossierId} />
               )}
             </>
+          )}
+
+          {showExportConfirm && (
+            <div data-testid="export-json-confirm-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+              <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
+                  <div>
+                    <h3 className="font-black uppercase text-slate-900">Confirmer l'export JSON</h3>
+                    <p className="mt-1 font-semibold text-slate-600">
+                      L'export contient des données locales sensibles. Les téléphones sont masqués si le rôle courant n'est pas autorisé.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    data-testid="export-json-cancel"
+                    onClick={() => setShowExportConfirm(false)}
+                    className="rounded-lg bg-slate-100 px-4 py-2 font-extrabold text-slate-700"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="export-json-confirm"
+                    onClick={executeExportDataJSON}
+                    className="rounded-lg bg-slate-900 px-4 py-2 font-extrabold text-white"
+                  >
+                    Confirmer l'export
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {pendingImport && (
+            <div data-testid="import-json-confirm-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+              <div className="w-full max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className="h-5 w-5 shrink-0 text-rose-600" />
+                  <div>
+                    <h3 className="font-black uppercase text-slate-900">Confirmer l'import JSON</h3>
+                    <p className="mt-1 font-semibold text-slate-600">
+                      Une sauvegarde locale pré-import a été créée. L'import remplace les données locales des sections présentes.
+                    </p>
+                  </div>
+                </div>
+                <div data-testid="import-json-summary" className="rounded-lg border border-slate-200 bg-slate-50 p-3 font-bold text-slate-700">
+                  Fichier : {pendingImport.fileName} · {pendingImport.summary.label}
+                </div>
+                <label className="block space-y-1.5">
+                  <span className="font-black text-slate-700">Confirmation forte</span>
+                  <input
+                    data-testid="import-json-confirmation-input"
+                    value={importConfirmationText}
+                    onChange={(e) => setImportConfirmationText(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
+                    placeholder={STRONG_IMPORT_CONFIRMATION}
+                  />
+                </label>
+                <div className="rounded-lg bg-amber-50 p-3 font-semibold text-amber-800">
+                  Saisir exactement : {STRONG_IMPORT_CONFIRMATION}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    data-testid="import-json-cancel"
+                    onClick={() => {
+                      setPendingImport(null);
+                      setImportConfirmationText("");
+                    }}
+                    className="rounded-lg bg-slate-100 px-4 py-2 font-extrabold text-slate-700"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="import-json-confirm"
+                    disabled={!isStrongImportConfirmation(importConfirmationText)}
+                    onClick={confirmPendingImport}
+                    className="rounded-lg bg-rose-600 px-4 py-2 font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
+                  >
+                    Remplacer les données locales
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
         </main>

@@ -7,6 +7,8 @@ import {
   DossierSAV,
   UserRole,
   DossierStatus,
+  DELIVERY_RESTITUTION_STATUSES,
+  DeliveryRestitutionStatus,
   InterventionType,
   RepairOrderStatus,
   ComplaintStatus,
@@ -601,6 +603,10 @@ export function buildDeliveryReport(dossiers: DossierSAV[], filters: SavReportFi
   let totalReadyToDeliver = 0;
   let totalDelivered = 0;
   let totalPendingClient = 0;
+  const restitutionCounts = DELIVERY_RESTITUTION_STATUSES.reduce((acc, status) => {
+    acc[status] = 0;
+    return acc;
+  }, {} as Record<DeliveryRestitutionStatus, number>);
 
   let totalDays = 0;
   let count = 0;
@@ -610,6 +616,8 @@ export function buildDeliveryReport(dossiers: DossierSAV[], filters: SavReportFi
       totalReadyToDeliver++;
     } else if (d.statut === "Livré" || d.statut === "Clôturé opérationnellement") {
       totalDelivered++;
+      const status = d.livraison?.statutRestitution || "Livré sans réserve";
+      restitutionCounts[status] = (restitutionCounts[status] || 0) + 1;
     } else if (d.statut === "En attente accord" || d.statut === "Client absent") {
       totalPendingClient++;
     }
@@ -630,7 +638,8 @@ export function buildDeliveryReport(dossiers: DossierSAV[], filters: SavReportFi
     totalReadyToDeliver,
     totalDelivered,
     totalPendingClient,
-    averageQcToDeliveryDays
+    averageQcToDeliveryDays,
+    restitutionStatuses: DELIVERY_RESTITUTION_STATUSES.map(status => ({ status, count: restitutionCounts[status] || 0 }))
   };
 }
 

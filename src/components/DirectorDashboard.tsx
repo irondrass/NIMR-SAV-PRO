@@ -23,6 +23,7 @@ import {
   DashboardPeriod,
   DashboardTone,
 } from "../dashboard-kpis";
+import { buildAgingAlerts, filterAgingAlerts } from "../aging-alerts";
 import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
 import { LicencePlate, PriorityBadge } from "./UIParts";
 
@@ -78,6 +79,10 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
     availabilityConfig,
     filters: { period, status, technicianId, priority },
   }), [filteredDossiersForKpis, period, priority, status, technicianId, techniciens, reservations, availabilityConfig]);
+  const dashboardAgingAlerts = useMemo(
+    () => filterAgingAlerts(buildAgingAlerts(filteredDossiersForKpis), "dashboard"),
+    [filteredDossiersForKpis]
+  );
   const activeActivityCards = kpis.activity.cards.slice(0, 4);
   const erpActivityCards = kpis.activity.cards.slice(4);
 
@@ -93,7 +98,7 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
               <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-700">
                 Directeur SAV
               </span>
-              <span className="text-xs font-semibold text-slate-500">NIMR SAV PRO v1.1.0</span>
+              <span className="text-xs font-semibold text-slate-500">NIMR SAV PRO v1.1.1</span>
             </div>
             <h1 className="font-display text-2xl font-black text-slate-950">Dashboard KPI opérationnel</h1>
             <p className="max-w-3xl text-sm font-medium text-slate-600">
@@ -240,6 +245,29 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
           </div>
         </div>
       </section>
+
+      {dashboardAgingAlerts.length > 0 && (
+        <section data-testid="aging-alerts-dashboard" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 shadow-sm">
+          <div className="mb-2 flex items-center gap-2 font-black uppercase">
+            <AlertTriangle className="h-4 w-4 text-rose-600" />
+            Alertes aging opérationnelles ({dashboardAgingAlerts.length})
+          </div>
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            {dashboardAgingAlerts.slice(0, 8).map(alert => (
+              <button
+                key={`${alert.kind}-${alert.dossierId}`}
+                type="button"
+                onClick={() => onSelectDossier(alert.dossierId)}
+                className="rounded-md border border-rose-200 bg-white px-3 py-2 text-left font-semibold text-rose-900 hover:border-rose-300"
+              >
+                <span className="font-mono font-black">{alert.dossierId}</span>
+                <span className="ml-2 font-black">{alert.title}</span>
+                <span className="block text-rose-700">{alert.detail}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section data-testid="dashboard-delay-view" className="space-y-3">
         <SectionTitle icon={<Timer className="h-5 w-5" />} title="Vue délais" />
