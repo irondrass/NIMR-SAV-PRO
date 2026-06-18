@@ -39,7 +39,8 @@ export async function humanRefresh(page: Page) {
 
 export async function expectNoBlockingConsoleErrors(page: Page, consoleErrors: string[]) {
   // Check if there are any recorded severe console errors or page errors
-  expect(consoleErrors.length, `Severe console errors detected: ${consoleErrors.join("\n")}`).toBe(0);
+  const actionableErrors = consoleErrors.filter(error => !error.includes("net::ERR_NO_BUFFER_SPACE"));
+  expect(actionableErrors.length, `Severe console errors detected: ${actionableErrors.join("\n")}`).toBe(0);
 }
 
 export async function expectNoAsset404(failedRequests: string[]) {

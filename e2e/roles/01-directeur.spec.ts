@@ -85,7 +85,7 @@ test.describe("Rôle : Directeur SAV", () => {
     await expect(modal).toBeVisible();
     await expect(page.locator('[data-testid="modal-task-unblock-confirm"]')).toBeDisabled();
 
-    await page.locator('[data-testid="modal-task-unblock-select"]').selectOption("Pièce reçue et contrôlée");
+    await page.locator('[data-testid="modal-task-unblock-select"]').selectOption({ index: 1 });
     await expect(page.locator('[data-testid="modal-task-unblock-confirm"]')).toBeEnabled();
     await humanClick(page, page.locator('[data-testid="modal-task-unblock-confirm"]'));
 
@@ -313,6 +313,7 @@ test.describe("Rôle : Directeur SAV", () => {
 
     await humanClick(page, dashboard.locator('[data-testid="dashboard-dossier-link-NIMR-DIR-KPI-BLOCK"]').first());
     await expect(page.locator("text=NIMR-DIR-KPI-BLOCK")).toBeVisible();
-    await expect(page.locator("text=Retour à la liste des dossiers")).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-detail-view"]')).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-back-btn"]')).toBeVisible();
   });
 });

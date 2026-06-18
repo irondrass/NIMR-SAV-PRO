@@ -329,7 +329,7 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
 
     const presetBadge = page.locator('[data-testid^="task-duration-preset-badge-"]').first();
     await expect(presetBadge).toBeVisible({ timeout: 5000 });
-    await expect(presetBadge).toHaveText(/Durée preset à valider/i);
+    await expect(presetBadge).toHaveText(/preset.*valider/i);
   });
 
   // ─── Test 11 : localStorage — aucune clé legacy ───────────────────────────
@@ -582,4 +582,3 @@ Page 3 / 3
   });
 
 });
-

@@ -52,7 +52,8 @@ test.describe("Lot 4A - Kanban Board visual", () => {
     await humanClick(page, page.locator("text=Client K2"));
 
     // Should open detail view of the dossier
-    await expect(page.locator("text=Retour à la liste des dossiers")).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-detail-view"]')).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-back-btn"]')).toBeVisible();
     await expect(page.locator("text=NIMR-K-002")).toBeVisible();
     await expect(page.locator("text=Client K2")).toBeVisible();
   });

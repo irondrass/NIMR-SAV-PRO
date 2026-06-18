@@ -329,7 +329,7 @@ export default function DossierDetail({
   const confirmDeliveryRequest = () => {
     setShowDeliveryValidationConfirm(false);
     setDeliveryError(null);
-    onUpdateDossier(confirmDelivery(dossier, new Date(), "LivrÃ© sans rÃ©serve"));
+    onUpdateDossier(confirmDelivery(dossier, new Date(), "Livré sans réserve"));
   };
 
   const handleFinalOperationalClose = () => {

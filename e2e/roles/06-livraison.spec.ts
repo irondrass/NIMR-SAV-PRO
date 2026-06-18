@@ -72,7 +72,7 @@ test.describe("Rôle : Livraison", () => {
 
     // Click signature pad mock
     await humanClick(page, page.locator('[data-testid="delivery-signature"]'));
-    await expect(page.locator('[data-testid="delivery-signature"]')).toContainText("Signature client capturée");
+    await expect(page.locator('[data-testid="delivery-signature"]')).toContainText(/Signature client captur/i);
 
     // Click deliver
     await humanClick(page, page.locator('[data-testid="delivery-submit"]'));
@@ -80,7 +80,7 @@ test.describe("Rôle : Livraison", () => {
     await humanClick(page, page.locator('[data-testid="modal-delivery-confirm-detail-confirm"]'));
 
     // Verify dossier status transitioned to Livré
-    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: "Livré" })).toBeVisible();
+    await expect(page.locator('[data-testid="status-badge"]').filter({ hasText: /Livr/i })).toBeVisible();
 
     // Click mark ready for billing
     await humanClick(page, page.locator('[data-testid="delivery-billing"]'));

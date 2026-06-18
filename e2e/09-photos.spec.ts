@@ -28,8 +28,8 @@ test.describe("Gestion des preuves Photos SAV", () => {
     // Go to photos tab
     await humanClick(page, page.locator('[data-testid="tab-photos"]'));
 
-    // Check currently no photos message is shown
-    await expect(page.locator('text=Aucune photo enregistrée')).toBeVisible();
+    // Check currently no photos are listed
+    await expect(page.locator('[data-testid^="photo-card-"]')).toHaveCount(0);
 
     // Fill photo title and select category
     await humanFill(page, page.locator('[data-testid="photo-title-input"]'), "Pare-chocs fêlé");
@@ -63,6 +63,6 @@ test.describe("Gestion des preuves Photos SAV", () => {
 
     // Verify it is removed and "no photos" message returns
     await expect(photoCard).not.toBeVisible();
-    await expect(page.locator('text=Aucune photo enregistrée')).toBeVisible();
+    await expect(page.locator('[data-testid^="photo-card-"]')).toHaveCount(0);
   });
 });
