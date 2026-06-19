@@ -5,7 +5,7 @@
 
 import React, { useState, useRef } from "react";
 import { DELIVERY_RESTITUTION_STATUSES, DeliveryRestitutionStatus, DossierSAV, UserRole, DossierStatus } from "../types";
-import { confirmDelivery } from "../sav-core";
+import { archiveDeliveredDossier, canDeliverDossier, confirmDelivery } from "../sav-core";
 import { 
   CheckCircle, 
   AlertTriangle, 
@@ -19,7 +19,9 @@ import {
 } from "lucide-react";
 import { LicencePlate } from "./UIParts";
 import { maskPhoneNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, validateMileage } from "../field-validations";
-import { canViewVehicleSensitiveFields } from "../permissions";
+import { canArchiveDeliveredDossier, canConfirmDelivery, canViewVehicleSensitiveFields } from "../permissions";
+import { canRunGuardedAction } from "../action-guard";
+import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
 
 interface LivraisonViewProps {
   dossiers: DossierSAV[];
@@ -146,9 +148,9 @@ export default function LivraisonView({
   };
 
   // 1. Filter dossiers
-  const readyDossiers = dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER);
+  const readyDossiers = dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER || d.statut === DossierStatus.NON_RETIRE);
   const deliveredDossiers = dossiers
-    .filter(d => d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.PRET_FACTURATION || d.statut === DossierStatus.CLOTURE)
+    .filter(d => d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.NON_RETIRE || d.statut === DossierStatus.PRET_FACTURATION || d.statut === DossierStatus.CLOTURE)
     .sort((a, b) => {
       const dateA = a.livraison.dateLivraisonReelle ? new Date(a.livraison.dateLivraisonReelle).getTime() : 0;
       const dateB = b.livraison.dateLivraisonReelle ? new Date(b.livraison.dateLivraisonReelle).getTime() : 0;
@@ -156,6 +158,11 @@ export default function LivraisonView({
     });
 
   const handleConfirmDelivery = () => {
+    if (!canConfirmDelivery(currentUser.role)) {
+      setValidationError("Rôle non autorisé pour confirmer une livraison.");
+      return;
+    }
+    if (!selectedDossier || !canRunGuardedAction(`delivery-confirm:${selectedDossier.id}`)) return;
     if (deliveryConfirmRef.current) return;
     deliveryConfirmRef.current = true;
     setIsConfirmingDelivery(true);
@@ -199,7 +206,7 @@ export default function LivraisonView({
     }
 
     if (!hasSigned) {
-      setValidationError("La signature client tactile est obligatoire.");
+      setValidationError("L'acceptation/signature simple client est obligatoire.");
       setIsConfirmingDelivery(false);
       deliveryConfirmRef.current = false;
       return;
@@ -220,7 +227,21 @@ export default function LivraisonView({
       }
     };
 
+    const deliveryGate = canDeliverDossier(withDeliveryInfo);
+    if (!deliveryGate.allowed) {
+      setValidationError(deliveryGate.reasons.join(" "));
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
+      return;
+    }
+
     const delivered = confirmDelivery(withDeliveryInfo, new Date(), restitutionStatus);
+    if (delivered === withDeliveryInfo) {
+      setValidationError("Livraison refusée : prérequis opérationnels incomplets.");
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
+      return;
+    }
 
     // Add delivery log with actor and details
     const timestamp = new Date().toISOString();
@@ -235,6 +256,13 @@ export default function LivraisonView({
     deliveryConfirmRef.current = false;
   };
 
+  const handleArchiveDelivered = (dossier: DossierSAV) => {
+    if (!canArchiveDeliveredDossier(currentUser.role)) return;
+    if (!canRunGuardedAction(`archive-delivered:${dossier.id}`)) return;
+    const archived = archiveDeliveredDossier(dossier, currentUser.role);
+    onUpdateDossier(archived);
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* Header with gradient and title */}
@@ -242,7 +270,7 @@ export default function LivraisonView({
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Module Livraison dédié</h1>
           <p className="text-sm text-indigo-200 mt-1">
-            Restitution des véhicules aux clients, signature de réception et relevé du kilométrage final.
+            Restitution des véhicules aux clients, acceptation simple pilote interne et relevé du kilométrage final.
           </p>
         </div>
         
@@ -351,7 +379,7 @@ export default function LivraisonView({
                   </h3>
 
                   {validationError && (
-                    <div className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
+                    <div data-testid="delivery-validation-error" className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
                       <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
                       <span>{validationError}</span>
                     </div>
@@ -414,7 +442,7 @@ export default function LivraisonView({
                         }}
                         className="w-4.5 h-4.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                       />
-                      <span className="text-xs">Confirmation de réception et signature client (Clé remise)</span>
+                      <span className="text-xs">Confirmation de réception et acceptation/signature simple client (clé remise)</span>
                     </label>
                   </div>
                 </div>
@@ -449,8 +477,11 @@ export default function LivraisonView({
                 {/* Canvas Signature Pad */}
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-slate-400 tracking-wider block">
-                    Signature tactile du client (Requis)
+                    Acceptation / signature simple client (Requis)
                   </label>
+                  <p data-testid="delivery-simple-signature-notice" className="text-[10px] font-bold text-amber-700">
+                    {PILOT_SIGNATURE_NOTICE}
+                  </p>
                   <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-center gap-2">
                     <canvas
                       ref={canvasRef}
@@ -471,7 +502,7 @@ export default function LivraisonView({
                         onClick={clearSignature}
                         className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-[10px] transition cursor-pointer"
                       >
-                        Effacer la signature
+                        Effacer l'acceptation
                       </button>
                     </div>
                   </div>
@@ -549,7 +580,7 @@ export default function LivraisonView({
                     }
 
                     if (!hasSigned) {
-                      setValidationError("La signature client tactile est obligatoire.");
+                      setValidationError("L'acceptation/signature simple client est obligatoire.");
                       return;
                     }
 
@@ -631,6 +662,7 @@ export default function LivraisonView({
                   <th className="py-2.5 px-3">KM Entrée</th>
                   <th className="py-2.5 px-3">KM Sortie</th>
                   <th className="py-2.5 px-3">Observations</th>
+                  <th className="py-2.5 px-3 text-right">Archive</th>
                 </tr>
               </thead>
               <tbody data-testid="delivery-history-list" className="divide-y divide-slate-50">
@@ -660,6 +692,20 @@ export default function LivraisonView({
                       </td>
                       <td className="py-3 px-3 text-slate-500 max-w-xs truncate" title={d.livraison.remarquesLivraison}>
                         {d.livraison.remarquesLivraison || <span className="text-slate-300">-</span>}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        {canArchiveDeliveredDossier(currentUser.role) && !d.archiveOperationnelle && d.statut !== DossierStatus.CLOTURE ? (
+                          <button
+                            type="button"
+                            data-testid={`delivery-archive-${d.id}`}
+                            onClick={() => handleArchiveDelivered(d)}
+                            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-black text-slate-700 hover:border-blue-300"
+                          >
+                            Archiver
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400">-</span>
+                        )}
                       </td>
                     </tr>
                   );

@@ -20,8 +20,11 @@ import { InterventionType } from "../src/types";
 console.log("Démarrage des tests field-validations...");
 
 assert.equal(validateTunisianPhone("+216 20 000 001"), true);
+assert.equal(validateTunisianPhone("+21620000001"), true);
+assert.equal(validateTunisianPhone("20000001"), true);
 assert.equal(validateTunisianPhone("20-000-001"), true);
 assert.equal(validateTunisianPhone("+216 20 ABC 001"), false);
+assert.equal(validateTunisianPhone("+33 6 00 00 00 00"), false);
 
 assert.equal(validateVin("1HGCM82633A004352"), true);
 assert.equal(validateVin("1HGCM82633A00435Q"), false);
@@ -37,7 +40,10 @@ assert.deepEqual(validateMileage(-1), {
 });
 assert.equal(validateMileage(500001).valid, true);
 assert.equal(validateMileage(500001).mustConfirm, true);
+assert.equal(validateMileage(999999).valid, true);
+assert.equal(validateMileage(1000000).valid, false);
 assert.equal(validateMileage(1000001).valid, false);
+assert.equal(validateMileage(12.5).valid, false);
 
 assert.equal(validateCustomerName("A"), false);
 assert.equal(validateCustomerName("Ali"), true);

@@ -67,6 +67,7 @@ import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
 import { getDefaultWorkshopSchedule } from "./workshop-availability";
 import { logAuditEvent } from "./audit-trail";
+import { canRunGuardedAction } from "./action-guard";
 
 // Views
 import DirectorDashboard from "./components/DirectorDashboard";
@@ -85,6 +86,8 @@ import { KanbanBoard } from "./components/KanbanBoard";
 import { StatusBadge, PriorityBadge } from "./components/UIParts";
 import ControleQualiteView from "./components/ControleQualiteView";
 import LivraisonView from "./components/LivraisonView";
+import WarrantyView from "./components/WarrantyView";
+import SatisfactionView from "./components/SatisfactionView";
 
 // Icons
 import { 
@@ -110,7 +113,8 @@ import {
   Plus,
   UserCog,
   Truck,
-  ClipboardCheck
+  ClipboardCheck,
+  Star
 } from "lucide-react";
 
 function writeLocalStorageValue(key: string, value: string) {
@@ -369,6 +373,15 @@ export default function App() {
 
   const handleUpdateDossier = (updatedDossier: DossierSAV) => {
     handleTouchSession();
+    const canUpdateDossierFromHandler =
+      perm.canEditDossier(activeRole) ||
+      perm.canPlanWorkshop(activeRole) ||
+      perm.canStartTask(activeRole) ||
+      perm.canValidateQC(activeRole) ||
+      perm.canConfirmDelivery(activeRole) ||
+      perm.canManageWarranty(activeRole) ||
+      perm.canRecordSatisfaction(activeRole);
+    if (!canUpdateDossierFromHandler) return;
     // Generate an automatic log entry if status has updated
     const original = dossiers.find(d => d.id === updatedDossier.id);
     if (original && original.statut !== updatedDossier.statut) {
@@ -400,6 +413,9 @@ export default function App() {
 
   const handleAddDossier = (newDossier: DossierSAV) => {
     handleTouchSession();
+    if (!perm.canCreateDossier(activeRole)) return;
+    const guardKey = `create-dossier:${newDossier.id}`;
+    if (!canRunGuardedAction(guardKey)) return;
     const nextDossiers = [newDossier, ...dossiers];
     
     // Log creation
@@ -455,6 +471,7 @@ export default function App() {
 
   const handleUpdateReservations = (nextRes: WorkshopReservation[]) => {
     handleTouchSession();
+    if (!perm.canCreateReservation(activeRole) && !perm.canPlanWorkshop(activeRole)) return;
     setReservations(nextRes);
     writeLocalStorageJSON(STORAGE_KEYS.reservations, nextRes);
     recordAudit({
@@ -467,6 +484,7 @@ export default function App() {
 
   const handleUpdateAvailabilityConfig = (nextConfig: WorkshopAvailabilityConfig) => {
     handleTouchSession();
+    if (!perm.canManageWorkshopAvailability(activeRole)) return;
     setAvailabilityConfig(nextConfig);
     writeLocalStorageJSON(STORAGE_KEYS.availability, nextConfig);
     recordAudit({
@@ -480,11 +498,14 @@ export default function App() {
   // State Import/Export logic
   const handleExportDataJSON = () => {
     handleTouchSession();
+    if (!perm.canExportData(activeRole)) return;
     setShowExportConfirm(true);
   };
 
   const executeExportDataJSON = () => {
     handleTouchSession();
+    if (!perm.canExportData(activeRole)) return;
+    if (!canRunGuardedAction("export-json")) return;
     const fullBackup = createRoleAwareBackupPayload(
       dossiers,
       reclamations,
@@ -511,6 +532,7 @@ export default function App() {
 
   const handleImportDataJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     handleTouchSession();
+    if (!perm.canImportData(activeRole)) return;
     setImportSuccessMessage(null);
     setImportErrorMessage(null);
     setPendingImport(null);
@@ -579,6 +601,8 @@ export default function App() {
   };
 
   const confirmPendingImport = () => {
+    if (!perm.canImportData(activeRole)) return;
+    if (!canRunGuardedAction("import-json-confirm")) return;
     if (!pendingImport || !isStrongImportConfirmation(importConfirmationText)) return;
     applyValidatedImportPayload(pendingImport.data, "backup-json");
     setImportSuccessMessage("Base restaurée avec succès !");
@@ -588,6 +612,7 @@ export default function App() {
 
   const handleRestoreImportBackup = () => {
     handleTouchSession();
+    if (!perm.canImportData(activeRole)) return;
     setImportSuccessMessage(null);
     setImportErrorMessage(null);
     try {
@@ -622,7 +647,7 @@ export default function App() {
           : dossierOperationalFilter === "ready_for_billing"
             ? d.statut === DossierStatus.PRET_FACTURATION
             : dossierOperationalFilter === "delivered"
-              ? d.statut === DossierStatus.LIVRE
+              ? d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.NON_RETIRE
               : true;
       const matchesStatus = statusFilter === "Tous" || d.statut === statusFilter;
       const matchesPriority = priorityFilter === "Toutes" || d.priorite === priorityFilter;
@@ -912,6 +937,8 @@ export default function App() {
               { id: "tech-view", label: "Mode Technicien", icon: UserCheck },
               { id: "controle-qualite", label: "Contrôle Qualité", icon: ClipboardCheck },
               { id: "livraison", label: "Livraison SAV", icon: Truck },
+              { id: "garantie", label: "Garantie locale", icon: CheckCircle },
+              { id: "satisfaction", label: "Satisfaction pilote", icon: Star },
               { id: "reclamations", label: "Réclamations SAV", icon: ShieldAlert },
               { id: "rendements-sav", label: "Rapports SAV", icon: BarChart3 },
               { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal },
@@ -935,6 +962,8 @@ export default function App() {
                 "atelier-kanban": "nav-kanban",
                 "reclamations": "nav-reclamations",
                 "rendements-sav": "nav-performance",
+                "garantie": "nav-warranty",
+                "satisfaction": "nav-satisfaction",
                 "users": "nav-users"
               };
 
@@ -1286,6 +1315,22 @@ export default function App() {
 
               {activeTab === "livraison" && (
                 <LivraisonView 
+                  dossiers={dossiers}
+                  onUpdateDossier={handleUpdateDossier}
+                  currentUser={{ displayName: currentUser.displayName, role: activeRole }}
+                />
+              )}
+
+              {activeTab === "garantie" && (
+                <WarrantyView
+                  dossiers={dossiers}
+                  onUpdateDossier={handleUpdateDossier}
+                  currentUser={{ displayName: currentUser.displayName, role: activeRole }}
+                />
+              )}
+
+              {activeTab === "satisfaction" && (
+                <SatisfactionView
                   dossiers={dossiers}
                   onUpdateDossier={handleUpdateDossier}
                   currentUser={{ displayName: currentUser.displayName, role: activeRole }}

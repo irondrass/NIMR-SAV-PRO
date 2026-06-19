@@ -44,8 +44,10 @@ export enum DossierStatus {
   TRAVAUX_PLANIFIES = "Travaux planifiés",
   EN_TRAVAUX = "En travaux",
   BLOQUE = "Bloqué",
+  IMMOBILISE = "Immobilisé",
   CONTROLE_QUALITE = "Contrôle qualité",
   PRET_A_LIVRER = "Prêt à livrer",
+  NON_RETIRE = "Non retiré",
   LIVRE = "Livré",
   CLOTURE = "Clôturé opérationnellement",
   PRET_FACTURATION = "Prêt pour facturation ERP"
@@ -223,6 +225,24 @@ export interface AccordSuivi {
   pieceJointe?: string;
 }
 
+export interface WarrantyLocalAttachment {
+  id: string;
+  fileName: string;
+  sizeBytes: number;
+  addedAt: string;
+  addedBy: string;
+  note: string;
+}
+
+export interface SatisfactionFeedback {
+  rating: 1 | 2 | 3 | 4 | 5;
+  comment: string;
+  createdAt: string;
+  createdBy: string;
+  status: "a_contacter" | "satisfait" | "insatisfait" | "neutre";
+  internalPilotOnly: true;
+}
+
 export interface ChecklistQualite {
   essaiEffectue: boolean;
   defautRepare: boolean;
@@ -388,6 +408,10 @@ export interface DossierSAV {
   bloqueSparePartRef?: string;
   bloqueSparePartEta?: string;
   retourQualite?: boolean;
+  warrantyAttachments?: WarrantyLocalAttachment[];
+  satisfaction?: SatisfactionFeedback;
+  archiveOperationnelle?: boolean;
+  archiveDate?: string;
   prochaineActionRecommended: string;
   dateDernierStatut: string;
   avancementGlobal: number; // progress indicator 0 - 100
@@ -672,4 +696,3 @@ export interface OperationalKpiReport {
   criticalPriorityDossiersCount: number;
   averageStayDays: number; // average stay duration from reception to delivery/ERP
 }
-

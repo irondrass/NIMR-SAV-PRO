@@ -2,28 +2,39 @@ import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
 import {
+  addWarrantyLocalAttachment,
+  archiveDeliveredDossier,
   suggestWorkshopSlot,
   validatePlanningAssignment,
   calculateTechnicianDailyLoad,
   blockRepairOrder,
   canDeliverDossier,
+  confirmDelivery,
   finishRepairOrder,
   getDossierOperationalBucket,
   getVisibleTechnicianTasks,
   isOperationalActiveDossier,
+  markDossierImmobilized,
+  recordSatisfactionFeedback,
   startRepairOrder,
   shouldShowDossierForTechnician,
   createReceptionDossier,
+  submitQualityControl,
   validateBackupPayload,
 } from "../src/sav-core";
 import {
+  ROLE_PERMISSIONS,
   canAccessTab,
+  canArchiveDeliveredDossier,
+  canManageWarranty,
   canManageUsers,
+  canRecordSatisfaction,
   isReadOnlyRole,
   canViewVehicleSensitiveFields,
   canViewSavReports,
   canViewSensitiveReportFields,
   canExportSavReports,
+  canViewWarranty,
 } from "../src/permissions";
 import {
   buildDossierHistory,
@@ -106,6 +117,11 @@ import {
   isStrongImportConfirmation,
   STRONG_IMPORT_CONFIRMATION,
 } from "../src/import-export-safety";
+import {
+  CLIENT_SIDE_SECURITY_NOTICE,
+  PILOT_SIGNATURE_NOTICE,
+  WARRANTY_LOCAL_ATTACHMENT_NOTICE,
+} from "../src/rc-notices";
 
 
 interface QACheck {
@@ -2135,13 +2151,18 @@ registerCheck("Lot 6D-bis Invariants", "Le focus-out de l'immatriculation décle
 
 registerCheck("Lot 6E Invariants", "validations métier bloquent les entrées invalides", () => {
   assert.equal(validateTunisianPhone("+216 20 000 001"), true);
+  assert.equal(validateTunisianPhone("+21620000001"), true);
+  assert.equal(validateTunisianPhone("20000001"), true);
   assert.equal(validateTunisianPhone("+216 XX 000 001"), false);
   assert.equal(validateVin("1HGCM82633A004352"), true);
   assert.equal(validateVin("1HGCM82633A00435Q"), false);
   assert.equal(validatePlateNumber("123 TU 456"), true);
   assert.equal(validateMileage(-1).valid, false);
   assert.equal(validateMileage(500001).mustConfirm, true);
+  assert.equal(validateMileage(999999).valid, true);
+  assert.equal(validateMileage(1000000).valid, false);
   assert.equal(validateMileage(1000001).valid, false);
+  assert.equal(validateMileage(12.5).valid, false);
   assert.equal(validateComplaintText("Bruit moteur à froid"), true);
   assert.equal(validateComplaintText("RAS"), false);
   assert.equal(validateTechnicianDiagnostic("ok"), false);
@@ -2614,6 +2635,103 @@ registerCheck("Lot 6H Invariants", "aucun mojibake, finance, donnée réelle ou 
   assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
 });
 
+registerCheck("Lot 6I Invariants", "mentions RC client-side signatures simples et pièces jointes locales", () => {
+  assert.equal(CLIENT_SIDE_SECURITY_NOTICE, "Version RC client-side, sécurité réelle nécessitant backend v2.0.");
+  assert.match(PILOT_SIGNATURE_NOTICE, /Signature simple/);
+  assert.match(WARRANTY_LOCAL_ATTACHMENT_NOTICE, /simulées\/locales/);
+
+  const directorContent = fs.readFileSync("src/components/DirectorDashboard.tsx", "utf8");
+  const printContent = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
+  const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const warrantyContent = fs.readFileSync("src/components/WarrantyView.tsx", "utf8");
+
+  assert.ok(directorContent.includes("CLIENT_SIDE_SECURITY_NOTICE"), "La Direction doit afficher la limite RC client-side");
+  assert.ok(printContent.includes("PILOT_SIGNATURE_NOTICE"), "Les impressions doivent rappeler la signature simple pilote");
+  assert.ok(deliveryContent.includes("PILOT_SIGNATURE_NOTICE"), "Livraison doit rappeler la signature simple pilote");
+  assert.ok(detailContent.includes("PILOT_SIGNATURE_NOTICE"), "Détail dossier doit rappeler la signature simple pilote");
+  assert.ok(warrantyContent.includes("WARRANTY_LOCAL_ATTACHMENT_NOTICE"), "Garantie doit rappeler les pièces jointes locales simulées");
+});
+
+registerCheck("Lot 6I Invariants", "statuts immobilisé non retiré archivage garantie et satisfaction", () => {
+  const qcBase = getMockDossier({
+    statut: DossierStatus.CONTROLE_QUALITE,
+    ordresReparation: [
+      { id: "task_done", designation: "Contrôle", tempsEstime: 1, tempsPasse: 1, status: "done" },
+    ],
+  });
+  const qcRejectedWithoutComment = submitQualityControl(qcBase, UserRole.CONTROLE_QUALITE, "refuse", "");
+  assert.equal(qcRejectedWithoutComment.statut, qcBase.statut);
+  assert.equal(qcRejectedWithoutComment.checklistQC.validationGlobale, "en_attente");
+
+  const ready = getMockDossier({
+    statut: DossierStatus.PRET_A_LIVRER,
+    ordresReparation: [
+      { id: "task_done", designation: "Contrôle final", tempsEstime: 1, tempsPasse: 1, status: "done" },
+    ],
+    checklistQC: { ...qcBase.checklistQC, validationGlobale: "valide" },
+    livraison: { ...qcBase.livraison, controleQualiteOk: true, statutRestitution: "Livré sans réserve" },
+  });
+  assert.equal(canDeliverDossier({ ...ready, checklistQC: { ...ready.checklistQC, validationGlobale: "en_attente" } }).allowed, false);
+  const delivered = confirmDelivery(ready);
+  assert.equal(delivered.statut, DossierStatus.LIVRE);
+  const archived = archiveDeliveredDossier(delivered, UserRole.DIRECTEUR_SAV);
+  assert.equal(archived.statut, DossierStatus.CLOTURE);
+  assert.equal(archived.archiveOperationnelle, true);
+
+  const immobilized = markDossierImmobilized(ready, "Véhicule immobilisé en attente client.");
+  assert.equal(immobilized.statut, DossierStatus.IMMOBILISE);
+  assert.equal(immobilized.priorite, DossierPriority.VEHICULE_IMMOBILISE);
+  assert.equal(DossierStatus.NON_RETIRE, "Non retiré");
+
+  const attached = addWarrantyLocalAttachment(ready, { fileName: "local-garantie.txt", sizeBytes: 2048, addedBy: "QA" });
+  assert.equal(attached.warrantyAttachments?.length, 1);
+  assert.equal(addWarrantyLocalAttachment(ready, { fileName: "trop-grand.txt", sizeBytes: 3 * 1024 * 1024, addedBy: "QA" }).warrantyAttachments?.length ?? 0, 0);
+
+  const feedback = recordSatisfactionFeedback(delivered, { rating: 5, comment: "Client satisfait pendant le pilote interne.", createdBy: "QA" });
+  assert.equal(feedback.satisfaction?.status, "satisfait");
+  assert.equal(feedback.satisfaction?.internalPilotOnly, true);
+});
+
+registerCheck("Lot 6I Invariants", "permissions centralisées handlers protégés et UX mobile 48px", () => {
+  assert.equal(ROLE_PERMISSIONS[UserRole.DIRECTEUR_SAV].archiveDeliveredDossier, true);
+  assert.equal(canArchiveDeliveredDossier(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(canArchiveDeliveredDossier(UserRole.RECEPTIONNAIRE), false);
+  assert.equal(canManageWarranty(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(canViewWarranty(UserRole.RECEPTIONNAIRE), true);
+  assert.equal(canRecordSatisfaction(UserRole.LIVRAISON), true);
+
+  const appContent = fs.readFileSync("src/App.tsx", "utf8");
+  const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  const cssContent = fs.readFileSync("src/index.css", "utf8");
+  assert.ok(appContent.includes("canUpdateDossierFromHandler"), "Les mises à jour dossier doivent vérifier les permissions dans le handler");
+  assert.ok(appContent.includes("canRunGuardedAction"), "Les actions critiques doivent passer par l'anti-double-clic global");
+  assert.ok(deliveryContent.includes("canDeliverDossier(withDeliveryInfo)"), "LivraisonView doit réutiliser la gate livraison du cœur SAV");
+  assert.ok(cssContent.includes("min-height: 48px"), "Les boutons mobiles doivent conserver une hauteur tactile minimale");
+});
+
+registerCheck("Lot 6I Invariants", "exports et rapports restent opérationnels sans finance ni données réelles", () => {
+  const files = [
+    "src/components/WarrantyView.tsx",
+    "src/components/SatisfactionView.tsx",
+    "src/components/LivraisonView.tsx",
+    "src/components/PrintDocuments.tsx",
+    "src/sav-core.ts",
+    "src/sav-reports.ts",
+  ];
+  const forbidden = ["chiffre d'affaires", "chiffre d’affaires", "marge", "paiement", "caisse", "facture réelle", "stock réel", "disponibilité pièce réelle"];
+  for (const file of files) {
+    const content = fs.readFileSync(file, "utf8").toLowerCase();
+    for (const word of forbidden) {
+      assert.equal(content.includes(word), false, `${file} contient ${word}`);
+    }
+  }
+
+  assert.equal(fs.existsSync("Liste Vehicule.csv"), false);
+  assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
+  assert.equal(fs.existsSync(".env"), false);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -2637,7 +2755,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6H - Planning atelier terrain, Gantt, shifts et fiche tâche)
+- **Version** : v1.1.1 (Lot 6I - Remédiations P0/P1 post-audit SAV)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

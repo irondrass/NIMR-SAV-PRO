@@ -154,7 +154,7 @@ type DossierTiming = {
 };
 
 const NON_MEASURABLE = "Non mesurable";
-const POST_DELIVERY_STATUSES = new Set([DossierStatus.LIVRE, DossierStatus.PRET_FACTURATION, DossierStatus.CLOTURE]);
+const POST_DELIVERY_STATUSES = new Set([DossierStatus.LIVRE, DossierStatus.NON_RETIRE, DossierStatus.PRET_FACTURATION, DossierStatus.CLOTURE]);
 const DATE_PREFIX = /^(\d{4}-\d{2}-\d{2}T[^\s]+)\s+-\s+/;
 
 export function buildDirectorDashboardKpis(input: DirectorDashboardKpiInput): DirectorDashboardKpis {
@@ -172,7 +172,7 @@ export function buildDirectorDashboardKpis(input: DirectorDashboardKpiInput): Di
   const inProgressDossiers = filteredDossiers.filter(isInProgressDossier).length;
   const blockedDossiers = filteredDossiers.filter(isBlockedDossier).length;
   const readyToDeliverDossiers = filteredDossiers.filter(isReadyToDeliverDossier).length;
-  const deliveredDossiers = filteredDossiers.filter(dossier => dossier.statut === DossierStatus.LIVRE).length;
+  const deliveredDossiers = filteredDossiers.filter(dossier => dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.NON_RETIRE).length;
   const readyForErpDossiers = filteredDossiers.filter(dossier => dossier.statut === DossierStatus.PRET_FACTURATION).length;
   const pendingErpClosureDossiers = filteredDossiers.filter(dossier => (
     dossier.statut === DossierStatus.LIVRE && dossier.livraison.clotureInterne === true
@@ -655,6 +655,26 @@ function buildAlerts(
   const alerts: DashboardAlert[] = [];
 
   for (const dossier of dossiers) {
+    if (dossier.statut === DossierStatus.IMMOBILISE || dossier.priorite === DossierPriority.VEHICULE_IMMOBILISE) {
+      alerts.push({
+        id: `immobilized-${dossier.id}`,
+        severity: "critical",
+        title: "Véhicule immobilisé",
+        detail: `${dossier.id} est immobilisé et nécessite un suivi Direction.`,
+        dossierId: dossier.id,
+      });
+    }
+
+    if (dossier.statut === DossierStatus.NON_RETIRE) {
+      alerts.push({
+        id: `not-withdrawn-${dossier.id}`,
+        severity: "warning",
+        title: "Véhicule non retiré",
+        detail: `${dossier.id} reste à restituer au client.`,
+        dossierId: dossier.id,
+      });
+    }
+
     if (isBlockedDossier(dossier)) {
       alerts.push({
         id: `blocked-${dossier.id}`,

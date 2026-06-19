@@ -6,6 +6,7 @@
 import React from "react";
 import { DossierSAV, ReclammationClient, RepairOrderLine } from "../types";
 import { getTaskStatusVisual } from "../task-status-visual";
+import { CLIENT_SIDE_SECURITY_NOTICE, PILOT_SIGNATURE_NOTICE } from "../rc-notices";
 
 interface PrintDocumentsProps {
   type: "reception" | "or" | "qc" | "delivery" | "task";
@@ -46,8 +47,10 @@ export default function PrintDocuments({
   );
 
   const renderFooter = () => (
-    <div className="mt-12 pt-4 border-t border-dashed border-slate-300 text-center text-[9px] text-slate-400 font-bold uppercase tracking-wider">
-      Document interne de travail NIMR SAV PRO - Reproduction interdite sans autorisation
+    <div className="mt-12 pt-4 border-t border-dashed border-slate-300 text-center text-[9px] text-slate-500 font-bold uppercase tracking-wider space-y-1">
+      <div>Document interne de travail NIMR SAV PRO - Reproduction interdite sans autorisation</div>
+      <div>{CLIENT_SIDE_SECURITY_NOTICE}</div>
+      <div>{PILOT_SIGNATURE_NOTICE}</div>
     </div>
   );
 
@@ -193,11 +196,11 @@ export default function PrintDocuments({
         {/* Signature Box */}
         <div className="grid grid-cols-2 gap-8 text-xs mt-12">
           <div className="border border-slate-300 rounded-lg p-6 h-36 flex flex-col justify-between">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Signature Client / Déposant</span>
-            <span className="text-slate-300 text-center italic text-[10px]">Signature manuscrite requise</span>
+            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Acceptation simple Client / Déposant</span>
+            <span className="text-slate-300 text-center italic text-[10px]">Case ou signature simple pilote interne</span>
           </div>
           <div className="border border-slate-300 rounded-lg p-6 h-36 flex flex-col justify-between">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Signature Conseiller NIMR</span>
+            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Visa Conseiller NIMR</span>
             <span className="text-slate-300 text-center italic text-[10px]">Signature de prise en charge</span>
           </div>
         </div>
@@ -347,7 +350,7 @@ export default function PrintDocuments({
             <div className="space-y-2 font-semibold text-slate-700">
               <p>1. Contrôle routier et de qualité effectué : {del.controleQualiteOk ? "✓ OUI" : "✗ NON"}</p>
               <p>2. Client informé des travaux réalisés : {del.clientInforme ? "✓ OUI" : "✗ NON"}</p>
-              <p>3. Restitution du véhicule & signature de décharge : {del.confirmationReceptionClient ? "✓ OUI" : "✗ NON"}</p>
+              <p>3. Restitution du véhicule & acceptation simple client : {del.confirmationReceptionClient ? "✓ OUI" : "✗ NON"}</p>
               <p>4. Kilométrage de sortie relevé : <strong className="font-mono">{del.kilometrageSortie || dossier.vehiculeKilometrage} km</strong> (KM Entrée : {dossier.vehiculeKilometrage} km)</p>
             </div>
           </div>
@@ -363,13 +366,13 @@ export default function PrintDocuments({
         {/* Display Signature if available */}
         <div className="grid grid-cols-2 gap-8 text-xs mt-12">
           <div className="border border-slate-300 rounded-lg p-6 h-36 flex flex-col justify-between">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-2">Signature Client Recueillie</span>
+            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-2">Acceptation simple client recueillie</span>
             {del.signatureClientUri ? (
               <div className="flex-1 flex justify-center items-center overflow-hidden border border-slate-100 rounded bg-slate-50">
-                <img src={del.signatureClientUri} alt="Signature Client" className="max-h-20 max-w-full" />
+                <img src={del.signatureClientUri} alt="Acceptation simple client" className="max-h-20 max-w-full" />
               </div>
             ) : (
-              <span className="text-slate-300 text-center italic text-[10px] mt-8">Signature de décharge signée sur tablette</span>
+              <span className="text-slate-300 text-center italic text-[10px] mt-8">Case ou signature simple pilote interne</span>
             )}
           </div>
           <div className="border border-slate-300 rounded-lg p-6 h-36 flex flex-col justify-between">

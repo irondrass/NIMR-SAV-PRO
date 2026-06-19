@@ -820,8 +820,10 @@ export function buildOperationalKpis(
     "Travaux planifiés": 0,
     "En travaux": 0,
     "Bloqué": 0,
+    "Immobilisé": 0,
     "Contrôle qualité": 0,
     "Prêt à livrer": 0,
+    "Non retiré": 0,
     "Livré": 0,
     "Clôturé opérationnellement": 0,
     "Prêt pour facturation ERP": 0
@@ -836,7 +838,7 @@ export function buildOperationalKpis(
   filtered.forEach(d => {
     dossiersStatusCounts[d.statut] = (dossiersStatusCounts[d.statut] || 0) + 1;
 
-    if (d.statut !== "Livré" && d.statut !== "Clôturé opérationnellement" && d.statut !== "Prêt pour facturation ERP") {
+    if (d.statut !== "Livré" && d.statut !== "Non retiré" && d.statut !== "Clôturé opérationnellement" && d.statut !== "Prêt pour facturation ERP") {
       activeDossiersCount++;
     }
 

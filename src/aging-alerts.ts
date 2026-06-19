@@ -74,7 +74,7 @@ export function buildAgingAlerts(dossiers: DossierSAV[], now = new Date()): Agin
 
     if (dossier.priorite === DossierPriority.VEHICULE_IMMOBILISE) {
       const ageHours = diffHours(receptionAt, now);
-      if (ageHours > 72 && ![DossierStatus.LIVRE, DossierStatus.CLOTURE, DossierStatus.PRET_FACTURATION].includes(dossier.statut)) {
+      if (ageHours > 72 && ![DossierStatus.LIVRE, DossierStatus.NON_RETIRE, DossierStatus.CLOTURE, DossierStatus.PRET_FACTURATION].includes(dossier.statut)) {
         alerts.push({
           kind: "immobilized",
           dossierId: dossier.id,

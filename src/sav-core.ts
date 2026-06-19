@@ -18,15 +18,19 @@ import {
   ReclammationClient,
   RepairOrderLine,
   RepairOrderStatus,
+  SatisfactionFeedback,
   TaskBlockFollowUpOwner,
   TechnicienResource,
   UserRole,
+  WarrantyLocalAttachment,
   WorkshopBay,
   WorkshopReservation,
   WorkshopAvailabilityConfig,
 } from "./types";
 import { createComplaint } from "./complaints-workflow";
 import { normalizePlateNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, validateTechnicianDiagnostic } from "./field-validations";
+import { canReleaseBlock } from "./permissions";
+import { WARRANTY_LOCAL_ATTACHMENT_NOTICE } from "./rc-notices";
 import {
   validateAvailabilityForSlot,
   isTechnicianAbsent,
@@ -245,7 +249,7 @@ export function createReceptionDossier(
     vehiculeModele: vehiculeModele || "Modèle standard",
     vehiculeImmatriculation: vehiculeImmatriculation || "000 TU 0000",
     vehiculeVIN: vehiculeVIN || "",
-    vehiculeKilometrage: Math.max(0, safeKilometrage),
+    vehiculeKilometrage: Math.min(999999, Math.max(0, Math.trunc(safeKilometrage))),
     vehiculeCouleur: vehiculeCouleur || "Non spécifiée",
     vehiculeVersion: sanitizeFreeText(input.vehiculeVersion || ""),
     dateLivraison: sanitizeFreeText(input.dateLivraison || ""),
@@ -295,6 +299,7 @@ export function createReceptionDossier(
     accords: [],
     checklistQC: createEmptyChecklist(),
     livraison: createDeliveryProtocol(deliveryDate),
+    warrantyAttachments: [],
     prochaineActionRecommended: "Affecter à un technicien selon disponibilité atelier",
     dateDernierStatut: receptionDate,
     avancementGlobal: 10,
@@ -359,6 +364,7 @@ export type DossierOperationalBucket = "active" | "ready_for_billing" | "deliver
 const ARCHIVED_OR_ERP_READY_STATUSES = new Set<DossierStatus>([
   DossierStatus.PRET_FACTURATION,
   DossierStatus.LIVRE,
+  DossierStatus.NON_RETIRE,
   DossierStatus.CLOTURE,
 ]);
 
@@ -396,7 +402,7 @@ export function shouldShowDossierForTechnician(dossier: DossierSAV, technicianId
 
 export function getDossierOperationalBucket(dossier: DossierSAV): DossierOperationalBucket {
   if (dossier.statut === DossierStatus.PRET_FACTURATION) return "ready_for_billing";
-  if (dossier.statut === DossierStatus.LIVRE) return "delivered";
+  if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.NON_RETIRE) return "delivered";
   if (dossier.statut === DossierStatus.CLOTURE) return "closed";
   return "active";
 }
@@ -419,6 +425,7 @@ export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
     bloqueComment: dossier.bloqueComment ?? "",
     bloqueResponsableSuivi: dossier.bloqueResponsableSuivi,
     bloqueResolutionEta: dossier.bloqueResolutionEta ?? "",
+    warrantyAttachments: dossier.warrantyAttachments ?? [],
     historiqueLogs: dossier.historiqueLogs ?? [],
   };
 }
@@ -514,7 +521,7 @@ export function releaseRepairOrderBlock(
   now = new Date()
 ): TaskMutationResult {
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ line }) => {
-    if (![UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole)) {
+    if (!canReleaseBlock(userRole)) {
       return { ok: false, error: "Seul le Directeur SAV ou le Chef Atelier peut lever un blocage." };
     }
     if (!reason.trim()) {
@@ -637,8 +644,8 @@ export function finishRepairOrder(
     if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
       return { ok: false, error: "Une tâche doit être en cours avant d'être terminée." };
     }
-    if (!validateTechnicianDiagnostic(diagnostic)) {
-      return { ok: false, error: "Diagnostic invalide (au moins 15 caractères requis et ne doit pas être un mot trivial)." };
+    if (!validateTechnicianDiagnostic(diagnostic) || !isStructuredDiagnosticText(diagnostic)) {
+      return { ok: false, error: "Diagnostic structuré invalide (cause, action réalisée et test final obligatoires)." };
     }
 
     const nextLine = appendLineHistory(
@@ -1238,10 +1245,14 @@ export function submitQualityControl(
   comment = "",
   now = new Date()
 ): DossierSAV {
+  const safeComment = sanitizeFreeText(comment);
+  if (validationGlobale === "refuse" && !safeComment.trim()) {
+    return dossier;
+  }
   const updatedQC: ChecklistQualite = {
     ...dossier.checklistQC,
     validationGlobale,
-    commentaireRefus: comment || undefined,
+    commentaireRefus: safeComment || undefined,
     dateValidation: now.toISOString(),
     validePar: userRole,
   };
@@ -1263,7 +1274,7 @@ export function submitQualityControl(
     checklistQC: updatedQC,
     statut: DossierStatus.EN_TRAVAUX,
     retourQualite: true,
-    prochaineActionRecommended: `Retour atelier suite à refus contrôle qualité. Motif: ${comment}`,
+    prochaineActionRecommended: `Retour atelier suite à refus contrôle qualité. Motif: ${safeComment}`,
     bloqueRaison: "",
     dateDernierStatut: now.toISOString(),
   };
@@ -1276,7 +1287,7 @@ export function canDeliverDossier(dossier: DossierSAV): DossierDeliveryGate {
   if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.PRET_FACTURATION || dossier.statut === DossierStatus.CLOTURE) {
     reasons.push("Le dossier est déjà livré ou clôturé.");
   }
-  if (dossier.statut !== DossierStatus.PRET_A_LIVRER) {
+  if (![DossierStatus.PRET_A_LIVRER, DossierStatus.NON_RETIRE].includes(dossier.statut)) {
     reasons.push("Le statut doit être Prêt à livrer.");
   }
   if (dossier.checklistQC.validationGlobale !== "valide") {
@@ -1322,13 +1333,127 @@ export function confirmDelivery(dossier: DossierSAV, now = new Date(), restituti
     statutRestitution: restitutionStatus as DeliveryProtocole["statutRestitution"],
     clotureInterne: true,
   };
+  const isNonWithdrawn = restitutionStatus === "Client absent" || restitutionStatus === "Livraison reportée";
 
   return {
     ...dossier,
     livraison,
-    statut: DossierStatus.LIVRE,
+    statut: isNonWithdrawn ? DossierStatus.NON_RETIRE : DossierStatus.LIVRE,
     dateDernierStatut: now.toISOString(),
-    prochaineActionRecommended: "Clôturer le dossier opérationnellement pour facturation ERP",
+    prochaineActionRecommended: isNonWithdrawn
+      ? "Replanifier la restitution client et suivre le véhicule non retiré"
+      : "Clôturer le dossier opérationnellement pour facturation ERP",
+  };
+}
+
+export function archiveDeliveredDossier(dossier: DossierSAV, actor = UserRole.DIRECTEUR_SAV, now = new Date()): DossierSAV {
+  if (![DossierStatus.LIVRE, DossierStatus.NON_RETIRE, DossierStatus.PRET_FACTURATION].includes(dossier.statut)) {
+    return dossier;
+  }
+  const timestamp = now.toISOString();
+  return {
+    ...dossier,
+    statut: DossierStatus.CLOTURE,
+    archiveOperationnelle: true,
+    archiveDate: timestamp,
+    dateDernierStatut: timestamp,
+    prochaineActionRecommended: "Dossier archivé opérationnellement dans la base locale pilote",
+    historiqueLogs: [
+      `${timestamp} - [${actor}] - Archivage opérationnel du dossier livré/non retiré.`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+  };
+}
+
+export function markDossierImmobilized(dossier: DossierSAV, reason: string, now = new Date()): DossierSAV {
+  const safeReason = sanitizeFreeText(reason) || "Véhicule immobilisé";
+  const timestamp = now.toISOString();
+  return {
+    ...dossier,
+    statut: DossierStatus.IMMOBILISE,
+    priorite: DossierPriority.VEHICULE_IMMOBILISE,
+    dateDernierStatut: timestamp,
+    prochaineActionRecommended: `Suivre immobilisation atelier: ${safeReason}`,
+    historiqueLogs: [
+      `${timestamp} - Statut Immobilisé: ${safeReason}`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+  };
+}
+
+export function markDossierNotWithdrawn(dossier: DossierSAV, reason: string, now = new Date()): DossierSAV {
+  const safeReason = sanitizeFreeText(reason) || "Client absent";
+  const timestamp = now.toISOString();
+  return {
+    ...dossier,
+    statut: DossierStatus.NON_RETIRE,
+    dateDernierStatut: timestamp,
+    prochaineActionRecommended: `Recontacter le client pour restitution: ${safeReason}`,
+    livraison: {
+      ...dossier.livraison,
+      statutRestitution: "Client absent",
+      remarquesLivraison: safeReason,
+    },
+    historiqueLogs: [
+      `${timestamp} - Véhicule non retiré: ${safeReason}`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+  };
+}
+
+export function addWarrantyLocalAttachment(
+  dossier: DossierSAV,
+  input: { fileName: string; sizeBytes: number; addedBy: string },
+  now = new Date()
+): DossierSAV {
+  const timestamp = now.toISOString();
+  const safeFileName = sanitizeFreeText(input.fileName).slice(0, 120);
+  const sizeBytes = Math.max(0, Math.trunc(Number(input.sizeBytes) || 0));
+  if (!safeFileName || sizeBytes > 2 * 1024 * 1024) {
+    return dossier;
+  }
+  const attachment: WarrantyLocalAttachment = {
+    id: createRuntimeId("warranty_local"),
+    fileName: safeFileName,
+    sizeBytes,
+    addedAt: timestamp,
+    addedBy: sanitizeFreeText(input.addedBy) || "Utilisateur NIMR",
+    note: WARRANTY_LOCAL_ATTACHMENT_NOTICE,
+  };
+  return {
+    ...dossier,
+    warrantyAttachments: [attachment, ...(dossier.warrantyAttachments ?? [])],
+    historiqueLogs: [
+      `${timestamp} - Pièce jointe garantie locale simulée ajoutée: ${safeFileName}. ${WARRANTY_LOCAL_ATTACHMENT_NOTICE}`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+  };
+}
+
+export function recordSatisfactionFeedback(
+  dossier: DossierSAV,
+  input: { rating: number; comment: string; createdBy: string },
+  now = new Date()
+): DossierSAV {
+  const parsedRating = Number.isFinite(input.rating) ? input.rating : 1;
+  const rating = Math.min(5, Math.max(1, Math.trunc(parsedRating))) as SatisfactionFeedback["rating"];
+  const safeComment = sanitizeFreeText(input.comment);
+  const status: SatisfactionFeedback["status"] = rating <= 2 ? "insatisfait" : rating >= 4 ? "satisfait" : "neutre";
+  const feedback: SatisfactionFeedback = {
+    rating,
+    comment: safeComment,
+    createdAt: now.toISOString(),
+    createdBy: sanitizeFreeText(input.createdBy) || "Utilisateur NIMR",
+    status,
+    internalPilotOnly: true,
+  };
+  return {
+    ...dossier,
+    satisfaction: feedback,
+    historiqueLogs: [
+      `${feedback.createdAt} - Satisfaction pilote interne enregistrée: ${rating}/5${safeComment ? ` - ${safeComment}` : ""}`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
   };
 }
 
@@ -1639,6 +1764,14 @@ function appendLineHistory(line: RepairOrderLine, now: Date, action: string): Re
     ...line,
     history: [`${now.toISOString()} - ${action}`, ...(line.history ?? [])],
   };
+}
+
+function isStructuredDiagnosticText(diagnostic: string): boolean {
+  return [
+    /Cause constatée\s*:/i,
+    /Action réalisée\s*:/i,
+    /Test\s*\/\s*validation finale\s*:/i,
+  ].every(pattern => pattern.test(diagnostic));
 }
 
 function calculateRepairProgress(lines: RepairOrderLine[]): number {

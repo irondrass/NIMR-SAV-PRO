@@ -54,11 +54,17 @@ export function StatusBadge({ status }: { status: DossierStatus }) {
     case DossierStatus.BLOQUE:
       style = "bg-rose-100 text-rose-800 border-rose-300 font-semibold";
       break;
+    case DossierStatus.IMMOBILISE:
+      style = "bg-red-100 text-red-900 border-red-300 font-semibold";
+      break;
     case DossierStatus.CONTROLE_QUALITE:
       style = "bg-yellow-50 text-yellow-800 border-yellow-300";
       break;
     case DossierStatus.PRET_A_LIVRER:
       style = "bg-green-100 text-green-800 border-green-300 font-medium";
+      break;
+    case DossierStatus.NON_RETIRE:
+      style = "bg-amber-100 text-amber-900 border-amber-300 font-semibold";
       break;
     case DossierStatus.LIVRE:
       style = "bg-emerald-50 text-emerald-700 border-emerald-200";

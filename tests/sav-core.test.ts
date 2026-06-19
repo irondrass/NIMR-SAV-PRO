@@ -20,6 +20,8 @@ import {
 } from "../src/auth";
 import {
   addPhotoToDossier,
+  addWarrantyLocalAttachment,
+  archiveDeliveredDossier,
   assignTechnicianToDossier,
   blockRepairOrder,
   canDeliverDossier,
@@ -33,8 +35,11 @@ import {
   isArchivedOrErpReadyDossier,
   isDossierSAV,
   isOperationalActiveDossier,
+  markDossierImmobilized,
+  markDossierNotWithdrawn,
   markReadyForBilling,
   parseStoredArray,
+  recordSatisfactionFeedback,
   releaseRepairOrderBlock,
   removePhotoFromDossier,
   reopenRepairOrder,
@@ -158,6 +163,10 @@ function testQualityControl() {
   assert.equal(rejected.statut, DossierStatus.EN_TRAVAUX);
   assert.equal(rejected.checklistQC.validationGlobale, "refuse");
   assert.equal(rejected.bloqueRaison, "");
+
+  const rejectedWithoutComment = submitQualityControl(dossier, UserRole.CONTROLE_QUALITE, "refuse", "", fixedNow);
+  assert.equal(rejectedWithoutComment.statut, dossier.statut);
+  assert.equal(rejectedWithoutComment.checklistQC.validationGlobale, "en_attente");
 }
 
 function testDeliveryAndBilling() {
@@ -208,6 +217,50 @@ function testDeliveryGuards() {
 
   const delivered = confirmDelivery(baseReady, fixedNow);
   assert.equal(canDeliverDossier(delivered).allowed, false);
+
+  const notWithdrawn = confirmDelivery(baseReady, fixedNow, "Client absent");
+  assert.equal(notWithdrawn.statut, DossierStatus.NON_RETIRE);
+  assert.equal(canDeliverDossier(notWithdrawn).allowed, true);
+}
+
+function testLot6IPostRcSafeguards() {
+  const ready = createReadyForDeliveryFixture();
+  const delivered = confirmDelivery(ready, fixedNow);
+  const archived = archiveDeliveredDossier(delivered, UserRole.DIRECTEUR_SAV, fixedNow);
+  assert.equal(archived.statut, DossierStatus.CLOTURE);
+  assert.equal(archived.archiveOperationnelle, true);
+
+  const immobilized = markDossierImmobilized(createReceptionFixture(), "Véhicule immobilisé en attente décision client.", fixedNow);
+  assert.equal(immobilized.statut, DossierStatus.IMMOBILISE);
+  assert.equal(immobilized.priorite, DossierPriority.VEHICULE_IMMOBILISE);
+
+  const notWithdrawn = markDossierNotWithdrawn(ready, "Client absent au rendez-vous de restitution.", fixedNow);
+  assert.equal(notWithdrawn.statut, DossierStatus.NON_RETIRE);
+  assert.equal(notWithdrawn.livraison.statutRestitution, "Client absent");
+
+  const withAttachment = addWarrantyLocalAttachment(ready, {
+    fileName: "accord-garantie-pilote.txt",
+    sizeBytes: 1024,
+    addedBy: "QA",
+  }, fixedNow);
+  assert.equal(withAttachment.warrantyAttachments?.length, 1);
+  assert.match(withAttachment.warrantyAttachments?.[0].note ?? "", /simulées\/locales/);
+
+  const oversizedAttachment = addWarrantyLocalAttachment(ready, {
+    fileName: "trop-volumineux.txt",
+    sizeBytes: 3 * 1024 * 1024,
+    addedBy: "QA",
+  }, fixedNow);
+  assert.equal(oversizedAttachment.warrantyAttachments?.length ?? 0, ready.warrantyAttachments?.length ?? 0);
+
+  const satisfied = recordSatisfactionFeedback(delivered, {
+    rating: Number.NaN,
+    comment: "<script>alert(1)</script> Client à rappeler après pilote.",
+    createdBy: "QA",
+  }, fixedNow);
+  assert.equal(satisfied.satisfaction?.rating, 1);
+  assert.equal(satisfied.satisfaction?.internalPilotOnly, true);
+  assert.equal(satisfied.satisfaction?.comment.includes("<"), false);
 }
 
 function testImportExportValidation() {
@@ -458,16 +511,21 @@ function testOperationalVisibilityHelpers() {
 
   const readyForBilling = { ...activeDossier, statut: DossierStatus.PRET_FACTURATION };
   const delivered = { ...activeDossier, statut: DossierStatus.LIVRE };
+  const notWithdrawn = { ...activeDossier, statut: DossierStatus.NON_RETIRE };
   const closed = { ...activeDossier, statut: DossierStatus.CLOTURE };
 
   assert.equal(isOperationalActiveDossier(readyForBilling), false);
   assert.equal(isOperationalActiveDossier(delivered), false);
+  assert.equal(isOperationalActiveDossier(notWithdrawn), false);
   assert.equal(isOperationalActiveDossier(closed), false);
   assert.equal(isArchivedOrErpReadyDossier(readyForBilling), true);
+  assert.equal(isArchivedOrErpReadyDossier(notWithdrawn), true);
   assert.equal(getDossierOperationalBucket(readyForBilling), "ready_for_billing");
   assert.equal(getDossierOperationalBucket(delivered), "delivered");
+  assert.equal(getDossierOperationalBucket(notWithdrawn), "delivered");
   assert.equal(getDossierOperationalBucket(closed), "closed");
   assert.equal(shouldShowDossierForTechnician(readyForBilling, "tech_01"), false);
+  assert.equal(shouldShowDossierForTechnician(notWithdrawn, "tech_01"), false);
   assert.equal(getVisibleTechnicianTasks(delivered, "tech_01").length, 0);
 }
 
@@ -1241,6 +1299,13 @@ function testCentralizedPermissions() {
   assert.equal(perm.canExportData(UserRole.CHEF_ATELIER), true);
   assert.equal(perm.canExportData(UserRole.LIVRAISON), false);
 
+  assert.equal(perm.ROLE_PERMISSIONS[UserRole.DIRECTEUR_SAV].manageWarranty, true);
+  assert.equal(perm.canManageWarranty(UserRole.LECTURE_SEULE), false);
+  assert.equal(perm.canViewWarranty(UserRole.RECEPTIONNAIRE), true);
+  assert.equal(perm.canRecordSatisfaction(UserRole.LIVRAISON), true);
+  assert.equal(perm.canArchiveDeliveredDossier(UserRole.DIRECTEUR_SAV), true);
+  assert.equal(perm.canArchiveDeliveredDossier(UserRole.RECEPTIONNAIRE), false);
+
   // isReadOnlyRole
   assert.equal(perm.isReadOnlyRole(UserRole.LECTURE_SEULE), true);
   assert.equal(perm.isReadOnlyRole(UserRole.DIRECTEUR_SAV), false);
@@ -1374,6 +1439,7 @@ testTechnicianAssignment();
 testQualityControl();
 testDeliveryAndBilling();
 testDeliveryGuards();
+testLot6IPostRcSafeguards();
 testImportExportValidation();
 testPhotoMutationsAndImportExport();
 testTaskLockingSameDossier();

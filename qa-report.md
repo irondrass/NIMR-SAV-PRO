@@ -1,9 +1,9 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 19/06/2026 11:00:22
-- **Version** : v1.1.1 (Lot 6H - Planning atelier terrain, Gantt, shifts et fiche tâche)
-- **Contrôles exécutés** : 138
-- **Résultat global** : **OK** (138 OK / 0 KO)
+- **Date** : 19/06/2026 14:13:58
+- **Version** : v1.1.1 (Lot 6I - Remédiations P0/P1 post-audit SAV)
+- **Contrôles exécutés** : 142
+- **Résultat global** : **OK** (142 OK / 0 KO)
 
 
 ## Anomalies détectées

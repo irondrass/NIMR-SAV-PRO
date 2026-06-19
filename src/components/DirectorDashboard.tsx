@@ -26,6 +26,7 @@ import {
 import { buildAgingAlerts, filterAgingAlerts } from "../aging-alerts";
 import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
 import { LicencePlate, PriorityBadge } from "./UIParts";
+import { CLIENT_SIDE_SECURITY_NOTICE } from "../rc-notices";
 
 interface DirectorDashboardProps {
   dossiers: DossierSAV[];
@@ -124,6 +125,10 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
               </button>
             ))}
           </div>
+        </div>
+
+        <div data-testid="client-side-security-notice" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          {CLIENT_SIDE_SECURITY_NOTICE}
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -529,11 +534,17 @@ function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string })
 
 function DashboardStatusPill({ status }: { status: DossierStatus }) {
   const isBlocked = status === DossierStatus.BLOQUE;
+  const isImmobilized = status === DossierStatus.IMMOBILISE;
+  const isNotWithdrawn = status === DossierStatus.NON_RETIRE;
   const isReady = status === DossierStatus.PRET_A_LIVRER || status === DossierStatus.PRET_FACTURATION;
   const isRunning = status === DossierStatus.EN_TRAVAUX || status === DossierStatus.TRAVAUX_PLANIFIES;
-  const classes = isBlocked
+  const classes = isImmobilized
+    ? "border-red-200 bg-red-50 text-red-800"
+    : isBlocked
     ? "border-rose-200 bg-rose-50 text-rose-700"
-    : isReady
+    : isNotWithdrawn
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : isReady
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : isRunning
         ? "border-blue-200 bg-blue-50 text-blue-700"

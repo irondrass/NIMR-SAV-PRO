@@ -82,6 +82,7 @@ export function groupDossiersByVehicle(dossiers: DossierSAV[]): VehicleGroup[] {
 export function isOpenDossier(dossier: DossierSAV): boolean {
   return (
     dossier.statut !== DossierStatus.LIVRE &&
+    dossier.statut !== DossierStatus.NON_RETIRE &&
     dossier.statut !== DossierStatus.CLOTURE &&
     dossier.statut !== DossierStatus.PRET_FACTURATION
   );
@@ -161,7 +162,7 @@ export function getVehicleAggregatedStatus(dossiersForVehicle: DossierSAV[]): st
   }
 
   // 8. Livré si tous les dossiers sont livrés
-  const allDelivered = dossiersForVehicle.every(d => d.statut === DossierStatus.LIVRE);
+  const allDelivered = dossiersForVehicle.every(d => d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.NON_RETIRE);
   if (allDelivered) {
     return "Livré";
   }

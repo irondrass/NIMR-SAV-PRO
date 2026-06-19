@@ -7,6 +7,15 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+@media (max-width: 640px) {
+  button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"] {
+    min-height: 48px;
+  }
+}
+
 @media print {
   /* Hide standard UI elements */
   body * {

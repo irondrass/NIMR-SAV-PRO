@@ -45,6 +45,7 @@ import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus }
 import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { getTaskStatusVisual } from "../task-status-visual";
+import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
 import { 
   ArrowLeft, 
   FileText, 
@@ -333,7 +334,7 @@ export default function DossierDetail({
       return;
     }
     if (!signatureCaptured) {
-      setDeliveryError("Signature client obligatoire avant restitution.");
+      setDeliveryError("Acceptation/signature simple client obligatoire avant restitution.");
       return;
     }
     setDeliveryError(null);
@@ -1536,7 +1537,7 @@ export default function DossierDetail({
           <div className="space-y-6">
             <div className="border-b pb-2">
               <h3 className="font-bold text-sm text-slate-800 ">Protocole de Clôture et Restitution d'Véhicules</h3>
-              <p className="text-slate-400 text-xs">Validation de conformité d'exploitation avec signature manuelle du client final</p>
+              <p className="text-slate-400 text-xs">Validation de conformité d'exploitation avec acceptation simple client pour pilote interne</p>
             </div>
 
             {deliveryError && (
@@ -1591,7 +1592,7 @@ export default function DossierDetail({
             {dossier.statut === DossierStatus.PRET_A_LIVRER && canDeliverVehicle ? (
               <div className="space-y-4">
                 <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
-                  <span className="font-bold text-blue-800  block uppercase font-display">Signature client lors de la remise des clés :</span>
+                  <span className="font-bold text-blue-800  block uppercase font-display">Acceptation / signature simple client lors de la remise des clés :</span>
                   
                   {/* Visual Signature Mock */}
                   <div 
@@ -1599,10 +1600,10 @@ export default function DossierDetail({
                     className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
                     onClick={() => setSignatureCaptured(true)}
                   >
-                    {signatureCaptured ? "[ Signature client capturée ]" : "[ Cliquer ici pour simuler la signature tactile du client ]"}
+                    {signatureCaptured ? "[ Acceptation simple client capturée ]" : "[ Cliquer ici pour simuler l'acceptation/signature simple du client ]"}
                   </div>
 
-                  <p className="text-[10px] text-zinc-400">La signature certifie la restitution du véhicule, le contrôle de propreté et la remise des objets personnels listés.</p>
+                  <p data-testid="detail-simple-signature-notice" className="text-[10px] text-zinc-500">{PILOT_SIGNATURE_NOTICE}</p>
                 </div>
 
                 <div className="flex gap-2">
@@ -1621,7 +1622,7 @@ export default function DossierDetail({
               <div className="space-y-4">
                 <div className="p-4 bg-emerald-50  border border-emerald-200  rounded-lg text-xs space-y-1 text-emerald-800 ">
                   <span className="font-bold block">✓ Véhicule remis en main propre au client. Clôture en transit.</span>
-                  <p className="font-medium text-slate-600 ">Restitution confirmée et signée. Le dossier passe au suivi administratif interne.</p>
+                  <p className="font-medium text-slate-600 ">Restitution confirmée avec acceptation simple. Le dossier passe au suivi administratif interne.</p>
                   {dossier.livraison.statutRestitution && (
                     <p data-testid="delivery-restitution-status-detail" className="font-black text-emerald-900">
                       Statut restitution : {dossier.livraison.statutRestitution}
@@ -1695,7 +1696,7 @@ export default function DossierDetail({
                 <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
                 <div>
                   <h3 className="font-black text-slate-900">Confirmer la restitution</h3>
-                  <p className="mt-1 font-semibold text-slate-600">La signature client est capturée et le dossier passera au statut livré.</p>
+                  <p className="mt-1 font-semibold text-slate-600">L'acceptation simple client est capturée et le dossier passera au statut livré.</p>
                 </div>
               </div>
               <div className="flex justify-end gap-2">

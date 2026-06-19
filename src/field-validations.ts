@@ -61,8 +61,11 @@ export function validateMileage(km: number | string): { valid: boolean; mustConf
   if (isNaN(num) || num < 0) {
     return { valid: false, mustConfirm: false, reason: "Le kilométrage ne peut pas être négatif." };
   }
-  if (num > 1000000) {
-    return { valid: false, mustConfirm: false, reason: "Le kilométrage dépasse la limite maximale autorisée (1 000 000 km)." };
+  if (!Number.isInteger(num)) {
+    return { valid: false, mustConfirm: false, reason: "Le kilométrage doit être un entier." };
+  }
+  if (num > 999999) {
+    return { valid: false, mustConfirm: false, reason: "Le kilométrage dépasse la limite maximale autorisée (999 999 km)." };
   }
   if (num > 500000) {
     return { valid: true, mustConfirm: true, reason: "Kilométrage particulièrement élevé (> 500 000 km). Veuillez confirmer la plausibilité de cette saisie." };
