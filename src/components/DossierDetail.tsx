@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -124,22 +124,46 @@ export default function DossierDetail({
   const handlePrintDocument = (type: "reception" | "or" | "qc" | "delivery") => {
     setPrintTask(null);
     setPrintType(type);
-    window.setTimeout(() => {
-      window.print();
-      window.setTimeout(() => setPrintType(null), 750);
-    }, 50);
+    document.body.classList.add("printing-standard-document");
+
+    const cleanup = () => {
+      document.body.classList.remove("printing-standard-document");
+      setPrintType(null);
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        window.setTimeout(cleanup, 1000);
+      });
+    });
   };
 
-  const handlePrintTaskDocument = (line: RepairOrderLine) => {
+  const handlePrintTaskDocument = (line: RepairOrderLine | null | undefined) => {
+    if (!line) {
+      window['alert']("Aucune tâche sélectionnée pour impression.");
+      return;
+    }
     setPrintTask(line);
     setPrintType("task");
-    window.setTimeout(() => {
-      window.print();
-      window.setTimeout(() => {
-        setPrintType(null);
-        setPrintTask(null);
-      }, 750);
-    }, 50);
+    document.body.classList.add("printing-task-sheet");
+
+    const cleanup = () => {
+      document.body.classList.remove("printing-task-sheet");
+      setPrintType(null);
+      setPrintTask(null);
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        window.setTimeout(cleanup, 1000);
+      });
+    });
   };
 
   const updateDossierState = (changes: Partial<DossierSAV>) => {
@@ -1885,20 +1909,36 @@ export default function DossierDetail({
 
       </div>
 
-      <div id="nimr-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!printType}>
-        {printType && (
+      {/* Standard print container */}
+      <div id="nimr-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!printType || printType === "task"}>
+        {printType && printType !== "task" && (
           <PrintDocuments
             type={printType}
             dossier={dossier}
-            task={printTask || undefined}
             clientPhoneToShow={dossier.clientTelephone}
-            technicianName={
-              printTask
-                ? techniciensList.find(t => t.id === (printTask.plannedTechnicianId || dossier.technicienId))?.nom
-                : undefined
-            }
-            linkedComplaint={printTask?.sourceComplaintId ? linkedComplaints.find(rec => rec.id === printTask.sourceComplaintId) : undefined}
           />
+        )}
+      </div>
+
+      {/* Technician task print root container */}
+      <div id="technician-task-print-root" className="print-only">
+        {printType === "task" && (
+          printTask ? (
+            <PrintDocuments
+              type="task"
+              dossier={dossier}
+              task={printTask}
+              clientPhoneToShow={dossier.clientTelephone}
+              technicianName={
+                printTask
+                  ? techniciensList.find(t => t.id === (printTask.plannedTechnicianId || dossier.technicienId))?.nom
+                  : undefined
+              }
+              linkedComplaint={printTask?.sourceComplaintId ? linkedComplaints.find(rec => rec.id === printTask.sourceComplaintId) : undefined}
+            />
+          ) : (
+            <div className="p-4 text-center font-bold text-rose-600">Aucune tâche sélectionnée pour impression.</div>
+          )
         )}
       </div>
 

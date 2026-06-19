@@ -669,12 +669,27 @@ export default function WorkshopPlanning({
     setDraggingTask(null);
   };
 
-  const handlePrintTaskSheet = (dossier: DossierSAV, line: RepairOrderLine) => {
+  const handlePrintTaskSheet = (dossier: DossierSAV, line: RepairOrderLine | null | undefined) => {
+    if (!line) {
+      window['alert']("Aucune tâche sélectionnée pour impression.");
+      return;
+    }
     setTaskSheetTarget({ dossier, line });
-    window.setTimeout(() => {
-      window.print();
-      window.setTimeout(() => setTaskSheetTarget(null), 750);
-    }, 50);
+    document.body.classList.add("printing-task-sheet");
+
+    const cleanup = () => {
+      document.body.classList.remove("printing-task-sheet");
+      setTaskSheetTarget(null);
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        window.setTimeout(cleanup, 1000);
+      });
+    });
   };
 
   // Find all tasks planned on the selected date
@@ -2640,8 +2655,8 @@ export default function WorkshopPlanning({
         </div>
       )}
 
-      <div id="nimr-planning-task-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!taskSheetTarget}>
-        {taskSheetTarget && (
+      <div id="technician-task-print-root" className="print-only">
+        {taskSheetTarget && taskSheetTarget.line && (
           <PrintDocuments
             type="task"
             dossier={taskSheetTarget.dossier}

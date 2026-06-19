@@ -92,62 +92,15 @@ export default function PrintDocuments({
     </div>
   );
 
-  if (type === "task" && task) {
-    const taskStatus = getTaskStatusVisual(task.status);
-    const plannedStart = task.planningStart ? new Date(task.planningStart) : null;
-    const plannedEnd = task.planningEnd ? new Date(task.planningEnd) : null;
+  if (type === "task") {
     return (
-      <div className="p-4 bg-white text-slate-900 max-w-4xl mx-auto">
-        {renderHeader("Fiche tâche technicien")}
-        {renderDossierInfo()}
-        {renderVehicleInfo()}
-
-        <div className="space-y-4 text-xs mb-8">
-          <div className="border border-slate-200 p-4 rounded-lg space-y-2">
-            <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Mission atelier</h3>
-            <p><span className="font-bold text-slate-700">Tâche :</span> <span className="font-extrabold text-slate-900">{task.designation}</span></p>
-            <p><span className="font-bold text-slate-700">Statut :</span> <span className="font-black uppercase">{taskStatus.label}</span></p>
-            <p><span className="font-bold text-slate-700">Technicien :</span> {technicianName || task.plannedTechnicianId || "À affecter"}</p>
-            <p><span className="font-bold text-slate-700">Poste / pont :</span> {bayName || task.plannedBayId || "À confirmer"}</p>
-            <p><span className="font-bold text-slate-700">Créneau :</span> {plannedStart && plannedEnd ? `${plannedStart.toLocaleString("fr-FR")} → ${plannedEnd.toLocaleString("fr-FR")}` : "Non planifié"}</p>
-            <p><span className="font-bold text-slate-700">Temps atelier estimé :</span> {task.tempsEstime} h</p>
-            {task.workshopZoneNote && (
-              <p><span className="font-bold text-slate-700">Note atelier :</span> {task.workshopZoneNote}</p>
-            )}
-          </div>
-
-          {linkedComplaint && (
-            <div className="border border-red-200 bg-red-50/50 p-4 rounded-lg space-y-1">
-              <h3 className="font-bold text-red-800 uppercase tracking-wider mb-2 text-[10px] border-b border-red-100 pb-1">Réclamation liée</h3>
-              <p><span className="font-bold">Référence :</span> {linkedComplaint.id}</p>
-              <p><span className="font-bold">Criticité :</span> {linkedComplaint.criticite}</p>
-              <p><span className="font-bold">Motif :</span> {linkedComplaint.motif}</p>
-            </div>
-          )}
-
-          <div className="border border-slate-200 p-4 rounded-lg">
-            <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Diagnostic de clôture</h3>
-            <p className="min-h-20 whitespace-pre-line text-slate-700">{task.diagnosticFinal || "À renseigner après intervention."}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-5 text-xs mt-12">
-          <div className="border border-slate-300 rounded-lg p-5 h-32 flex flex-col justify-between">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Signature Technicien</span>
-            <span className="text-slate-300 text-center italic text-[10px]">Intervention réalisée</span>
-          </div>
-          <div className="border border-slate-300 rounded-lg p-5 h-32 flex flex-col justify-between">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Signature Chef Atelier</span>
-            <span className="text-slate-300 text-center italic text-[10px]">Contrôle atelier</span>
-          </div>
-          <div className="border border-slate-300 rounded-lg p-5 h-32 flex flex-col justify-between">
-            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Contrôle Qualité</span>
-            <span className="text-slate-300 text-center italic text-[10px]">Validation finale</span>
-          </div>
-        </div>
-
-        {renderFooter()}
-      </div>
+      <TechnicianTaskSheetPrint
+        dossier={dossier}
+        task={task}
+        clientPhoneToShow={clientPhoneToShow}
+        technicianName={technicianName}
+        linkedComplaint={linkedComplaint}
+      />
     );
   }
 
@@ -388,4 +341,181 @@ export default function PrintDocuments({
   }
 
   return null;
+}
+
+export function TechnicianTaskSheetPrint({
+  dossier,
+  task,
+  clientPhoneToShow,
+  technicianName,
+  linkedComplaint,
+}: {
+  dossier: DossierSAV;
+  task?: RepairOrderLine;
+  clientPhoneToShow: string;
+  technicianName?: string;
+  linkedComplaint?: ReclammationClient;
+}) {
+  const printTime = new Date().toLocaleString("fr-FR");
+  if (!task) {
+    return (
+      <div className="p-4 text-center font-bold text-rose-600">
+        Aucune tâche sélectionnée pour impression.
+      </div>
+    );
+  }
+
+  const isBlocked = task.status === "blocked";
+  const hasQCFeedback = dossier.retourQualite || dossier.checklistQC?.validationGlobale === "refuse";
+
+  const finalComplaint = linkedComplaint || (() => {
+    if (!task?.sourceComplaintId) return undefined;
+    try {
+      const raw = localStorage.getItem("nimr-sav-pro-reclamations-v1");
+      if (raw) {
+        const recs: ReclammationClient[] = JSON.parse(raw);
+        return recs.find(r => r.id === task.sourceComplaintId);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return undefined;
+  })();
+
+  return (
+    <div className="p-6 bg-white text-slate-900 max-w-4xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="border-b-2 border-slate-900 pb-4 flex justify-between items-start">
+        <div>
+          <h1 className="text-xl font-black tracking-wider text-slate-900 uppercase">NIMR CONCESSIONS SAV</h1>
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-0.5">Document interne NIMR SAV PRO</p>
+        </div>
+        <div className="text-right">
+          <span className="inline-block px-3 py-1 bg-slate-900 text-white font-mono text-xs font-bold uppercase rounded">
+            Fiche tâche technicien
+          </span>
+          <p className="text-[9px] text-slate-500 mt-1 font-mono">Imprimé le: {printTime}</p>
+        </div>
+      </div>
+
+      {/* Info Sections */}
+      <div className="grid grid-cols-2 gap-4 text-xs">
+        <div className="space-y-1 bg-slate-50 p-4 border border-slate-200 rounded-lg">
+          <p className="text-slate-500 text-[10px] uppercase font-bold">Informations Dossier & Client</p>
+          <p><span className="font-bold text-slate-700">Dossier ID :</span> <span className="font-mono font-bold text-slate-900">{dossier.id}</span></p>
+          <p><span className="font-bold text-slate-700">Client :</span> <span className="font-bold text-slate-900">{dossier.clientNom}</span></p>
+          {clientPhoneToShow && (
+            <p><span className="font-bold text-slate-700">Téléphone :</span> <span className="font-mono text-slate-800">{clientPhoneToShow}</span></p>
+          )}
+          <p><span className="font-bold text-slate-700">Priorité :</span> <span className="font-bold text-slate-800">{dossier.priorite}</span></p>
+        </div>
+
+        <div className="space-y-1 bg-slate-50 p-4 border border-slate-200 rounded-lg">
+          <p className="text-slate-500 text-[10px] uppercase font-bold">Informations Véhicule</p>
+          <p><span className="font-bold text-slate-700">Véhicule :</span> <span className="font-bold text-slate-900">{dossier.vehiculeMarque} {dossier.vehiculeModele} {dossier.vehiculeVersion || ""}</span></p>
+          <p><span className="font-bold text-slate-700">Immatriculation :</span> <span className="font-mono font-bold text-slate-900">{dossier.vehiculeImmatriculation}</span></p>
+          {dossier.vehiculeVIN && (
+            <p><span className="font-bold text-slate-700">VIN :</span> <span className="font-mono text-slate-800">{dossier.vehiculeVIN}</span></p>
+          )}
+          <p><span className="font-bold text-slate-700">Kilométrage :</span> <span className="font-mono text-slate-800">{dossier.vehiculeKilometrage} km</span></p>
+        </div>
+      </div>
+
+      {/* Motif Client */}
+      <div className="border border-slate-200 p-4 rounded-lg text-xs">
+        <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Motif client / Plainte</h3>
+        <p className="text-slate-700 italic font-semibold">"{dossier.plainteClient || "Non renseigné"}"</p>
+      </div>
+
+      {/* Détails de la Tâche */}
+      <div className="border border-slate-200 p-4 rounded-lg text-xs space-y-2">
+        <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Opération à réaliser</h3>
+        <p><span className="font-bold text-slate-700">Tâche / opération :</span> <span className="font-extrabold text-slate-900">{task.designation}</span></p>
+        <p><span className="font-bold text-slate-700">Technicien affecté :</span> <span className="font-semibold text-slate-800">{technicianName || "À affecter"}</span></p>
+        <p><span className="font-bold text-slate-700">Statut :</span> <span className="font-black uppercase">{getTaskStatusVisual(task.status).label}</span></p>
+        <p><span className="font-bold text-slate-700">Temps estimé :</span> {task.tempsEstime} h</p>
+      </div>
+
+      {/* Diagnostic Final */}
+      <div className="border border-slate-200 p-4 rounded-lg text-xs">
+        <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Diagnostic technicien</h3>
+        <p className="min-h-16 whitespace-pre-line text-slate-700 font-mono bg-slate-50 p-2 rounded border border-slate-100">
+          {task.diagnosticFinal || "À renseigner après intervention."}
+        </p>
+      </div>
+
+      {/* Observations */}
+      <div className="border border-slate-200 p-4 rounded-lg text-xs space-y-1">
+        <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Observations</h3>
+        {dossier.observationsReception && (
+          <p><span className="font-bold text-slate-700">Observations Réception :</span> {dossier.observationsReception}</p>
+        )}
+        {task.workshopZoneNote && (
+          <p><span className="font-bold text-slate-700">Note Atelier :</span> {task.workshopZoneNote}</p>
+        )}
+        {task.chefNotes && (
+          <p><span className="font-bold text-slate-700">Note Chef d'Atelier :</span> {task.chefNotes}</p>
+        )}
+        {!dossier.observationsReception && !task.workshopZoneNote && !task.chefNotes && (
+          <p className="text-slate-400 italic">Aucune observation particulière.</p>
+        )}
+      </div>
+
+      {/* Blocage Éventuel */}
+      {isBlocked && (
+        <div className="border border-amber-200 bg-amber-50/50 p-4 rounded-lg text-xs space-y-1">
+          <h3 className="font-bold text-amber-800 uppercase tracking-wider mb-2 text-[10px] border-b border-amber-100 pb-1">Blocage technique constaté</h3>
+          <p><span className="font-bold">Motif du blocage :</span> {task.blockReason || "Non spécifié"}</p>
+          {task.blockComment && <p><span className="font-bold">Commentaire :</span> {task.blockComment}</p>}
+          {task.blockFollowUpOwner && <p><span className="font-bold">Suivi par :</span> {task.blockFollowUpOwner}</p>}
+          {task.blockResolutionEta && <p><span className="font-bold">Délai estimé :</span> {task.blockResolutionEta}</p>}
+          {task.blockSparePartRef && <p><span className="font-bold">Référence pièce requise :</span> {task.blockSparePartRef}</p>}
+          {task.blockSparePartEta && <p><span className="font-bold">Date de réception estimée :</span> {task.blockSparePartEta}</p>}
+        </div>
+      )}
+
+      {/* Retour QC Éventuel */}
+      {hasQCFeedback && (
+        <div className="border border-rose-200 bg-rose-50/50 p-4 rounded-lg text-xs space-y-1">
+          <h3 className="font-bold text-rose-800 uppercase tracking-wider mb-2 text-[10px] border-b border-rose-100 pb-1">Retour Contrôle Qualité</h3>
+          <p className="font-bold text-rose-700">Refus de conformité qualité</p>
+          {dossier.checklistQC.commentaireRefus && (
+            <p><span className="font-bold">Motif / Commentaire :</span> {dossier.checklistQC.commentaireRefus}</p>
+          )}
+        </div>
+      )}
+
+      {/* Réclamation Liée */}
+      {finalComplaint && (
+        <div className="border border-red-200 bg-red-50/50 p-4 rounded-lg text-xs space-y-1">
+          <h3 className="font-bold text-red-800 uppercase tracking-wider mb-2 text-[10px] border-b border-red-100 pb-1">Réclamation liée</h3>
+          <p><span className="font-bold">Numéro Réclamation :</span> {finalComplaint.id}</p>
+          <p><span className="font-bold">Motif :</span> {finalComplaint.motif}</p>
+          <p><span className="font-bold">Criticité :</span> {finalComplaint.criticite}</p>
+        </div>
+      )}
+
+      {/* Signatures */}
+      <div className="grid grid-cols-3 gap-5 text-xs pt-4">
+        <div className="border border-slate-300 rounded-lg p-4 h-28 flex flex-col justify-between">
+          <span className="font-bold text-slate-700 uppercase tracking-wider text-[9px]">Signature Technicien</span>
+          <span className="text-slate-300 text-center italic text-[9px]">Intervention réalisée</span>
+        </div>
+        <div className="border border-slate-300 rounded-lg p-4 h-28 flex flex-col justify-between">
+          <span className="font-bold text-slate-700 uppercase tracking-wider text-[9px]">Signature Chef Atelier</span>
+          <span className="text-slate-300 text-center italic text-[9px]">Contrôle atelier</span>
+        </div>
+        <div className="border border-slate-300 rounded-lg p-4 h-28 flex flex-col justify-between">
+          <span className="font-bold text-slate-700 uppercase tracking-wider text-[9px]">Contrôle Qualité</span>
+          <span className="text-slate-300 text-center italic text-[9px]">Validation finale</span>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="pt-4 border-t border-dashed border-slate-300 text-center text-[9px] text-slate-400 font-bold uppercase tracking-wider space-y-1">
+        <div>Document interne de travail NIMR SAV PRO - Reproduction interdite sans autorisation</div>
+        <div>{PILOT_SIGNATURE_NOTICE}</div>
+      </div>
+    </div>
+  );
 }

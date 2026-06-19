@@ -16,20 +16,44 @@
   }
 }
 
+@media screen {
+  .print-only {
+    display: none;
+  }
+}
+
 @media print {
-  /* Hide standard UI elements */
   body * {
     visibility: hidden;
   }
-  #nimr-print-container, #nimr-print-container * {
+
+  body.printing-task-sheet #technician-task-print-root,
+  body.printing-task-sheet #technician-task-print-root * {
     visibility: visible;
   }
-  #nimr-print-container {
+
+  body.printing-standard-document #nimr-print-container,
+  body.printing-standard-document #nimr-print-container * {
+    visibility: visible;
+  }
+
+  body.printing-task-sheet #technician-task-print-root,
+  body.printing-standard-document #nimr-print-container {
+    display: block !important;
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
     background: white !important;
     color: black !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
   }
 }
