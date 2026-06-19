@@ -120,7 +120,7 @@ test.describe("Lot 5F-1 - Nettoyage opérationnel atelier", () => {
     await humanClick(page, page.locator('[data-testid="nav-technician"]'));
 
     await expect(page.locator("text=NIMR-5F-PENDING")).toBeVisible();
-    await expect(page.locator('[data-testid="task-status-task_pending_5f"]')).toContainText(/à faire/i);
+    await expect(page.locator('[data-testid="task-status-task_pending_5f"]')).toContainText(/en attente/i);
     await expect(page.locator("text=NIMR-5F-RUNNING")).toBeVisible();
     await expect(page.locator('[data-testid="task-status-task_running_5f"]')).toContainText(/en cours/i);
     await expect(page.locator("text=NIMR-5F-BLOCKED")).toBeVisible();

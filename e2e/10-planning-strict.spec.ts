@@ -356,7 +356,7 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await expect(page.locator('[data-testid="gantt-block-ro_manual"]').first()).toBeVisible();
   });
 
-  test("boutons impression Gantt et tableau appellent window.print", async ({ page }) => {
+  test("retire impression Gantt/tableau et imprime la fiche tâche technicien", async ({ page }) => {
     await page.evaluate(() => {
       const printableWindow = window as Window & { __printCalls?: number };
       printableWindow.__printCalls = 0;
@@ -365,11 +365,33 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
       };
     });
 
-    await humanClick(page, page.locator('[data-testid="planning-print-gantt"]'));
-    await expect.poll(() => page.evaluate(() => (window as Window & { __printCalls?: number }).__printCalls ?? 0)).toBe(1);
+    await expect(page.locator('[data-testid="planning-print-gantt"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="planning-print-table"]')).toHaveCount(0);
+    await expect(page.getByText("Imprimer Gantt")).toHaveCount(0);
+    await expect(page.getByText("Imprimer Tableau")).toHaveCount(0);
 
-    await humanClick(page, page.locator('[data-testid="planning-print-table"]'));
-    await expect.poll(() => page.evaluate(() => (window as Window & { __printCalls?: number }).__printCalls ?? 0)).toBe(2);
+    await setPlanningDate(page, "2026-06-15");
+    const taskSheetButton = page.locator('[data-testid="gantt-task-sheet-ro_morning"]').first();
+    await expect(taskSheetButton).toBeVisible();
+    await humanClick(page, taskSheetButton);
+    await expect.poll(() => page.evaluate(() => (window as Window & { __printCalls?: number }).__printCalls ?? 0)).toBe(1);
+  });
+
+  test("ouvre le modal modifier créneau et déplace une tâche planifiée", async ({ page }) => {
+    await page.evaluate(() => {
+      window.confirm = () => true;
+    });
+
+    await humanClick(page, page.locator('[data-testid="gantt-reschedule-ro_morning"]').first());
+    await expect(page.locator('[data-testid="planning-reschedule-modal"]')).toBeVisible();
+    await page.locator('[data-testid="planning-reschedule-tech"]').selectOption(techFree.id);
+    await page.locator('[data-testid="planning-reschedule-bay"]').selectOption("bay_mech_01");
+    await page.locator('[data-testid="planning-reschedule-start"]').fill("14:00");
+    await humanClick(page, page.locator('[data-testid="planning-reschedule-confirm"]'));
+
+    await expect(page.locator('[data-testid="planning-saved-indicator"]')).toBeVisible();
+    await expect(page.locator(`[data-testid="tech-row-${techFree.id}"]`)).toContainText("Planifié aujourd’hui");
+    await expect(page.locator('[data-testid="gantt-block-ro_morning"]').first()).toHaveAttribute("data-start", /T13:00:00\.000Z|T14:00:00\.000Z/);
   });
 
   test("Lot 5D - Suggestion intelligente, ligne Maintenant et statuts", async ({ page }) => {

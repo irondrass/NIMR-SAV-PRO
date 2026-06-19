@@ -10,7 +10,6 @@ import {
   addPhotoToDossier,
   blockRepairOrder,
   finishRepairOrder,
-  getRepairOrderStatusLabel,
   getVisibleTechnicianTasks,
   normalizeRepairOrderStatus,
   pauseRepairOrder,
@@ -20,6 +19,7 @@ import {
 import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { canSimulateTechnicianAccess } from "../permissions";
+import { getTaskStatusVisual } from "../task-status-visual";
 import { 
   Play, 
   Pause, 
@@ -446,6 +446,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                       <div className="space-y-2">
                         {visibleTechnicianTasks.map(line => {
                           const status = normalizeRepairOrderStatus(line.status);
+                          const statusVisual = getTaskStatusVisual(status);
                           const activeLineInSameDossier = task.ordresReparation.find(current =>
                             current.id !== line.id && normalizeRepairOrderStatus(current.status) === "in_progress"
                           );
@@ -471,8 +472,8 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                                 </div>
                                 <span 
                                   data-testid={`task-status-${line.id}`}
-                                  className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-slate-100  text-slate-600 ">
-                                  {getRepairOrderStatusLabel(status)}
+                                  className={`text-[9px] uppercase font-black px-2 py-0.5 rounded border ${statusVisual.badgeClassName}`}>
+                                  {statusVisual.label}
                                 </span>
                               </div>
                               {startBlockedMessage && status !== "done" && status !== "in_progress" && (

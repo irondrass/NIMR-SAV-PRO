@@ -51,9 +51,11 @@ import {
   canEditComplaint,
   changeComplaintStatus,
   closeComplaint,
+  createCorrectiveTaskFromComplaint,
   isComplaintLinkedToReadyDelivery,
   isComplaintOpen,
   isComplaintOverdue,
+  linkComplaintToRepairOrder,
   normalizeComplaint,
 } from "../src/complaints-workflow";
 import {
@@ -579,14 +581,16 @@ function getFilesRecursively(dir: string): string[] {
 // -----------------------------------------------------------------
 
 registerCheck("Planning", "Statut tâche visible dans le code source de planification", () => {
-  const fileContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
-  assert.ok(fileContent.includes("gantt-task-status-pending"));
-  assert.ok(fileContent.includes("gantt-task-status-in-progress"));
-  assert.ok(fileContent.includes("gantt-task-status-paused"));
-  assert.ok(fileContent.includes("gantt-task-status-blocked"));
-  assert.ok(fileContent.includes("gantt-task-status-done"));
-  assert.ok(fileContent.includes("gantt-task-status-reopened"));
-  assert.ok(fileContent.includes("gantt-status-legend"));
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const visualContent = fs.readFileSync("src/task-status-visual.ts", "utf8");
+  assert.ok(visualContent.includes("gantt-task-status-pending"));
+  assert.ok(visualContent.includes("gantt-task-status-in-progress"));
+  assert.ok(visualContent.includes("gantt-task-status-paused"));
+  assert.ok(visualContent.includes("gantt-task-status-blocked"));
+  assert.ok(visualContent.includes("gantt-task-status-done"));
+  assert.ok(visualContent.includes("gantt-task-status-reopened"));
+  assert.ok(planningContent.includes("getTaskStatusVisual"));
+  assert.ok(planningContent.includes("gantt-status-legend"));
 });
 
 registerCheck("Véhicules", "Véhicule multi-dossiers correctement agrégé", () => {
@@ -1051,10 +1055,15 @@ import {
 } from "../src/workshop-reservations";
 import {
   getDefaultWorkshopSchedule,
+  getDefaultWorkshopShiftProfiles,
+  getEffectiveWorkshopWindowsForResource,
   isWorkshopClosed,
   isTechnicianAbsent,
-  isBayUnavailable
+  isBayUnavailable,
+  validateAvailabilityForSlot,
 } from "../src/workshop-availability";
+import { TASK_STATUS_VISUAL_ORDER, getTaskStatusVisual } from "../src/task-status-visual";
+import { getCurrentGanttTaskStatus, getUnplannedRepairOrderTargets } from "../src/workshop-planning-helpers";
 
 registerCheck("Lot 5F-4A Invariants", "aucune réservation sans durée MO validée", () => {
   const dossier = getMockDossier({
@@ -2418,6 +2427,193 @@ registerCheck("Lot 6G Invariants", "aucun tag créé et aucune donnée réelle L
   assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
 });
 
+registerCheck("Lot 6H Invariants", "Gantt et vues tâches utilisent un statut visuel unique", () => {
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const techContent = fs.readFileSync("src/components/TechnicianView.tsx", "utf8");
+
+  assert.ok(TASK_STATUS_VISUAL_ORDER.includes("blocked"), "Le statut bloqué doit être dans la légende Gantt");
+  assert.equal(getTaskStatusVisual("blocked").testId, "gantt-task-status-blocked");
+  assert.equal(getTaskStatusVisual("done").label, "Terminée");
+  assert.ok(planningContent.includes("getTaskStatusVisual"), "WorkshopPlanning doit utiliser le helper visuel commun");
+  assert.ok(detailContent.includes("getTaskStatusVisual"), "DossierDetail doit utiliser le helper visuel commun");
+  assert.ok(techContent.includes("getTaskStatusVisual"), "TechnicianView doit utiliser le helper visuel commun");
+  assert.equal(planningContent.includes("getTaskStatusLabel("), false, "Ancien helper local de statut Gantt interdit");
+});
+
+registerCheck("Lot 6H Invariants", "suggestion planning cible une tâche non planifiée sans planifier tout le dossier", () => {
+  const dossier = getMockDossier({
+    id: "NIMR-QA-6H-PLAN",
+    statut: DossierStatus.EN_TRAVAUX,
+    ordresReparation: [
+      { id: "ro_todo", designation: "Diagnostic vibration", tempsEstime: 1.5, tempsPasse: 0, status: "pending" },
+      { id: "ro_done", designation: "Contrôle terminé", tempsEstime: 1, tempsPasse: 1, status: "done" },
+      {
+        id: "ro_planned",
+        designation: "Tâche déjà planifiée",
+        tempsEstime: 1,
+        tempsPasse: 0,
+        status: "pending",
+        planningStart: "2026-06-15T09:00:00",
+        planningEnd: "2026-06-15T10:00:00",
+        plannedTechnicianId: "tech_01",
+        plannedBayId: "bay_01",
+      },
+    ],
+  });
+  const targets = getUnplannedRepairOrderTargets([dossier]);
+  assert.deepEqual(targets.map(target => target.key), ["NIMR-QA-6H-PLAN::ro_todo"]);
+  assert.equal(getCurrentGanttTaskStatus(dossier, "ro_done"), "done");
+
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(planningContent.includes("getUnplannedRepairOrderTargets"), "La liste des suggestions doit être construite par tâche");
+  assert.ok(planningContent.includes("selectedTargetForSuggest"), "La suggestion doit porter sur la cible tâche sélectionnée");
+});
+
+registerCheck("Lot 6H Invariants", "déplacement Gantt validé et impressions Gantt tableau retirées", () => {
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(planningContent.includes("planning-reschedule-modal"), "Le modal de modification créneau doit exister");
+  assert.ok(planningContent.includes("validatePlanningAssignment"), "La modification créneau doit réutiliser la validation planning stricte");
+  assert.ok(planningContent.includes("handleDropTask"), "Le drag/drop Gantt doit être câblé");
+  assert.ok(planningContent.includes("gantt-reschedule-"), "Chaque bloc Gantt doit exposer l'action modifier créneau");
+  assert.equal(planningContent.includes("planning-print-gantt"), false, "Ancien bouton impression Gantt interdit");
+  assert.equal(planningContent.includes("planning-print-table"), false, "Ancien bouton impression tableau interdit");
+  assert.equal(planningContent.includes("Imprimer Gantt"), false, "Libellé impression Gantt retiré");
+  assert.equal(planningContent.includes("Imprimer Tableau"), false, "Libellé impression tableau retiré");
+});
+
+registerCheck("Lot 6H Invariants", "shifts techniciens et ponts réduisent les créneaux effectifs", () => {
+  const profiles = getDefaultWorkshopShiftProfiles();
+  assert.ok(profiles.some(profile => profile.id === "shift_morning"), "Profil équipe matin obligatoire");
+  assert.ok(profiles.some(profile => profile.id === "shift_afternoon"), "Profil équipe après-midi obligatoire");
+  assert.ok(profiles.some(profile => profile.id === "shift_continuous"), "Profil journée continue obligatoire");
+
+  const config: WorkshopAvailabilityConfig = {
+    schedule: getDefaultWorkshopSchedule(),
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: [],
+    shiftProfiles: profiles,
+    technicianShiftAssignments: [
+      { id: "shift-tech-qa", technicianId: "tech_01", shiftProfileId: "shift_morning", startDate: "2026-06-15" },
+    ],
+    bayShiftAssignments: [
+      { id: "shift-bay-qa", bayId: "bay_01", shiftProfileId: "shift_morning", startDate: "2026-06-15" },
+    ],
+  };
+
+  const windows = getEffectiveWorkshopWindowsForResource(
+    new Date("2026-06-15T08:00:00"),
+    config,
+    { technicianId: "tech_01", bayId: "bay_01" }
+  );
+  assert.deepEqual(windows, [{ start: "08:00", end: "12:00" }]);
+
+  const morningSlot = validateAvailabilityForSlot({
+    startTime: "2026-06-15T09:00:00",
+    endTime: "2026-06-15T11:00:00",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    config,
+  });
+  const afternoonSlot = validateAvailabilityForSlot({
+    startTime: "2026-06-15T13:00:00",
+    endTime: "2026-06-15T14:00:00",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    config,
+  });
+  assert.equal(morningSlot.allowed, true);
+  assert.equal(afternoonSlot.allowed, false);
+  assert.ok(afternoonSlot.codes.includes("outside-effective-working-hours"));
+});
+
+registerCheck("Lot 6H Invariants", "fiche tâche technicien imprimable et sans finance", () => {
+  const printContent = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+
+  for (const expected of ["Fiche tâche technicien", "Signature Technicien", "Signature Chef Atelier", "Contrôle Qualité"]) {
+    assert.ok(printContent.includes(expected), `Fiche tâche technicien incomplète: ${expected}`);
+  }
+  assert.ok(printContent.includes('type === "task"'), "PrintDocuments doit gérer le type task");
+  assert.ok(detailContent.includes("print-task-sheet-"), "DossierDetail doit proposer la fiche tâche");
+  assert.ok(planningContent.includes("gantt-task-sheet-"), "Gantt doit proposer la fiche tâche");
+
+  for (const forbidden of ["caisse", "paiement", "marge", "facture réelle", "stock réel", "montant", "solde"]) {
+    assert.equal(printContent.toLowerCase().includes(forbidden), false, `Fiche tâche contient ${forbidden}`);
+  }
+});
+
+registerCheck("Lot 6H Invariants", "réclamation liée crée badge et tâche corrective atelier", () => {
+  const complaint = getMockComplaint({
+    id: "REC-QA-6H",
+    dossierId: "NIMR-QA-6H-REC",
+    linkedDossierId: "NIMR-QA-6H-REC",
+    motif: "Bruit récurrent après restitution",
+    criticite: "critique",
+    statut: "nouvelle",
+  });
+  const linked = linkComplaintToRepairOrder(
+    complaint,
+    "ro_existing",
+    { user: "QA", role: UserRole.RECEPTIONNAIRE },
+    new Date("2026-06-15T09:00:00Z")
+  );
+  assert.equal(linked.statut, "en_analyse");
+  assert.deepEqual(linked.linkedRepairOrderIds, ["ro_existing"]);
+
+  const corrective = createCorrectiveTaskFromComplaint(
+    linked,
+    ["ro_existing"],
+    { user: "QA", role: UserRole.CHEF_ATELIER },
+    new Date("2026-06-15T09:10:00Z")
+  );
+  assert.equal(corrective.complaint.statut, "tache_corrective_creee");
+  assert.equal(corrective.line.sourceComplaintId, "REC-QA-6H");
+  assert.equal(corrective.line.complaintBadge, true);
+  assert.ok(corrective.complaint.linkedRepairOrderIds?.includes(corrective.line.id));
+
+  const complaintsViewContent = fs.readFileSync("src/components/ComplaintsView.tsx", "utf8");
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  assert.ok(complaintsViewContent.includes("complaint-linked-task-badge"), "La vue réclamations doit afficher le lien tâche");
+  assert.ok(planningContent.includes("sourceComplaintId"), "Le Gantt doit afficher le badge réclamation");
+  assert.ok(detailContent.includes("sourceComplaintId"), "Le détail dossier doit afficher le badge réclamation");
+});
+
+registerCheck("Lot 6H Invariants", "aucun mojibake, finance, donnée réelle ou tag final ajouté", () => {
+  const files = [
+    "src/components/WorkshopPlanning.tsx",
+    "src/components/DossierDetail.tsx",
+    "src/components/PrintDocuments.tsx",
+    "src/components/ComplaintsView.tsx",
+    "src/workshop-availability.ts",
+    "src/complaints-workflow.ts",
+    "src/task-status-visual.ts",
+    "src/workshop-planning-helpers.ts",
+  ];
+  const mojibake = /Ã|Â|�|â€™|â€œ|â€|âœ|Å“/;
+  const forbiddenFinance = ["chiffre d'affaires", "chiffre d’affaires", "marge", "paiement", "caisse", "facture réelle", "montant", "solde", "stock réel", "disponibilité pièce réelle", "prix"];
+  for (const file of files) {
+    const content = fs.readFileSync(file, "utf8");
+    assert.equal(mojibake.test(content), false, `${file} contient un caractère mojibake`);
+    const lower = content.toLowerCase();
+    for (const word of forbiddenFinance) {
+      assert.equal(lower.includes(word), false, `${file} contient le mot financier interdit: ${word}`);
+    }
+  }
+
+  const packedRefs = fs.existsSync(".git/packed-refs") ? fs.readFileSync(".git/packed-refs", "utf8") : "";
+  const hasForbiddenTag = packedRefs.split(/\r?\n/).some(line => /\srefs\/tags\/v1\.1\.0$|\srefs\/tags\/v1\.1\.1$/.test(line));
+  assert.equal(fs.existsSync(".git/refs/tags/v1.1.0"), false);
+  assert.equal(fs.existsSync(".git/refs/tags/v1.1.1"), false);
+  assert.equal(hasForbiddenTag, false);
+  assert.equal(fs.existsSync("Liste Vehicule.csv"), false);
+  assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -2441,7 +2637,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6G - Import CSV réel-like véhicules)
+- **Version** : v1.1.1 (Lot 6H - Planning atelier terrain, Gantt, shifts et fiche tâche)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

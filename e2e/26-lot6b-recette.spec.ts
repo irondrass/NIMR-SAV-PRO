@@ -51,8 +51,8 @@ test.describe("NIMR-SAV-PRO Lot 6B — Recette terrain & corrections P0", () => 
     // Force a click event programmatically on the button to check if the safety guard works
     await startBtn.evaluate(node => (node as HTMLButtonElement).click());
 
-    // The task status must remain "à faire" (pending), not "En cours"
-    await expect(page.locator('[data-testid="task-status-ro_pending_1"]')).toHaveText(/à faire/i);
+    // The task status must remain pending, not "En cours"
+    await expect(page.locator('[data-testid="task-status-ro_pending_1"]')).toHaveText(/en attente/i);
   });
 
   test("Directeur : Taux d'occupation atelier > 0% si des charges existent", async ({ page }) => {

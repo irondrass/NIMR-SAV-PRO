@@ -4,15 +4,28 @@
  */
 
 import React from "react";
-import { DossierSAV } from "../types";
+import { DossierSAV, ReclammationClient, RepairOrderLine } from "../types";
+import { getTaskStatusVisual } from "../task-status-visual";
 
 interface PrintDocumentsProps {
-  type: "reception" | "or" | "qc" | "delivery";
+  type: "reception" | "or" | "qc" | "delivery" | "task";
   dossier: DossierSAV;
+  task?: RepairOrderLine;
   clientPhoneToShow: string;
+  technicianName?: string;
+  bayName?: string;
+  linkedComplaint?: ReclammationClient;
 }
 
-export default function PrintDocuments({ type, dossier, clientPhoneToShow }: PrintDocumentsProps) {
+export default function PrintDocuments({
+  type,
+  dossier,
+  task,
+  clientPhoneToShow,
+  technicianName,
+  bayName,
+  linkedComplaint,
+}: PrintDocumentsProps) {
   const printTime = new Date().toLocaleString("fr-FR");
 
   const renderHeader = (title: string) => (
@@ -75,6 +88,65 @@ export default function PrintDocuments({ type, dossier, clientPhoneToShow }: Pri
       </div>
     </div>
   );
+
+  if (type === "task" && task) {
+    const taskStatus = getTaskStatusVisual(task.status);
+    const plannedStart = task.planningStart ? new Date(task.planningStart) : null;
+    const plannedEnd = task.planningEnd ? new Date(task.planningEnd) : null;
+    return (
+      <div className="p-4 bg-white text-slate-900 max-w-4xl mx-auto">
+        {renderHeader("Fiche tâche technicien")}
+        {renderDossierInfo()}
+        {renderVehicleInfo()}
+
+        <div className="space-y-4 text-xs mb-8">
+          <div className="border border-slate-200 p-4 rounded-lg space-y-2">
+            <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Mission atelier</h3>
+            <p><span className="font-bold text-slate-700">Tâche :</span> <span className="font-extrabold text-slate-900">{task.designation}</span></p>
+            <p><span className="font-bold text-slate-700">Statut :</span> <span className="font-black uppercase">{taskStatus.label}</span></p>
+            <p><span className="font-bold text-slate-700">Technicien :</span> {technicianName || task.plannedTechnicianId || "À affecter"}</p>
+            <p><span className="font-bold text-slate-700">Poste / pont :</span> {bayName || task.plannedBayId || "À confirmer"}</p>
+            <p><span className="font-bold text-slate-700">Créneau :</span> {plannedStart && plannedEnd ? `${plannedStart.toLocaleString("fr-FR")} → ${plannedEnd.toLocaleString("fr-FR")}` : "Non planifié"}</p>
+            <p><span className="font-bold text-slate-700">Temps atelier estimé :</span> {task.tempsEstime} h</p>
+            {task.workshopZoneNote && (
+              <p><span className="font-bold text-slate-700">Note atelier :</span> {task.workshopZoneNote}</p>
+            )}
+          </div>
+
+          {linkedComplaint && (
+            <div className="border border-red-200 bg-red-50/50 p-4 rounded-lg space-y-1">
+              <h3 className="font-bold text-red-800 uppercase tracking-wider mb-2 text-[10px] border-b border-red-100 pb-1">Réclamation liée</h3>
+              <p><span className="font-bold">Référence :</span> {linkedComplaint.id}</p>
+              <p><span className="font-bold">Criticité :</span> {linkedComplaint.criticite}</p>
+              <p><span className="font-bold">Motif :</span> {linkedComplaint.motif}</p>
+            </div>
+          )}
+
+          <div className="border border-slate-200 p-4 rounded-lg">
+            <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Diagnostic de clôture</h3>
+            <p className="min-h-20 whitespace-pre-line text-slate-700">{task.diagnosticFinal || "À renseigner après intervention."}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-5 text-xs mt-12">
+          <div className="border border-slate-300 rounded-lg p-5 h-32 flex flex-col justify-between">
+            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Signature Technicien</span>
+            <span className="text-slate-300 text-center italic text-[10px]">Intervention réalisée</span>
+          </div>
+          <div className="border border-slate-300 rounded-lg p-5 h-32 flex flex-col justify-between">
+            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Signature Chef Atelier</span>
+            <span className="text-slate-300 text-center italic text-[10px]">Contrôle atelier</span>
+          </div>
+          <div className="border border-slate-300 rounded-lg p-5 h-32 flex flex-col justify-between">
+            <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Contrôle Qualité</span>
+            <span className="text-slate-300 text-center italic text-[10px]">Validation finale</span>
+          </div>
+        </div>
+
+        {renderFooter()}
+      </div>
+    );
+  }
 
   if (type === "reception") {
     return (

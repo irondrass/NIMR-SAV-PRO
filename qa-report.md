@@ -1,9 +1,9 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 18/06/2026 15:51:49
-- **Version** : v1.1.1 (Lot 6G - Import CSV réel-like véhicules)
-- **Contrôles exécutés** : 131
-- **Résultat global** : **OK** (131 OK / 0 KO)
+- **Date** : 19/06/2026 11:00:22
+- **Version** : v1.1.1 (Lot 6H - Planning atelier terrain, Gantt, shifts et fiche tâche)
+- **Contrôles exécutés** : 138
+- **Résultat global** : **OK** (138 OK / 0 KO)
 
 
 ## Anomalies détectées

@@ -136,6 +136,7 @@ export interface WorkshopSlotSuggestion {
   reason: string;
   technicianLoad: number;
   bayAvailability: string;
+  rankLabel?: string;
 }
 
 export type PlanningBlockingCode =
@@ -1496,7 +1497,22 @@ export function isReclamationClient(value: unknown): value is ReclammationClient
     isString(value.vehiculeNom) &&
     isString(value.motif) &&
     ["basse", "moyenne", "haute", "critique"].includes(String(value.criticite)) &&
-    ["nouvelle", "en_analyse", "action_corrective", "attente_client", "resolue", "cloturee", "reouverte", "en_cours", "classee"].includes(String(value.statut)) &&
+    [
+      "nouvelle",
+      "en_analyse",
+      "action_corrective",
+      "attente_client",
+      "tache_corrective_creee",
+      "en_cours_atelier",
+      "attente_qc",
+      "action_realisee",
+      "rejetee_non_fondee",
+      "resolue",
+      "cloturee",
+      "reouverte",
+      "en_cours",
+      "classee",
+    ].includes(String(value.statut)) &&
     Array.isArray(value.historiqueLogs)
   );
 }

@@ -1008,7 +1008,7 @@ export default function PerformanceSAV({
                       ["Motif / Famille", "Dossiers"],
                       [
                         ["TOTAL DOSSIERS BLOQUÉS", blockingData.totalBlockedDossiers],
-                        ["TOTAL TÂCHES BLOQUÉES", blockingData.totalBlockedTasks],
+                        ["TOTAL TACHES BLOQUÉES", blockingData.totalBlockedTasks],
                         ["DURÉE MOYENNE BLOCAGE (HEURES)", blockingData.averageBlockingDurationHours.toFixed(1)],
                         ...blockingData.motifsBlocage.map(m => [`Motif: ${m.motif}`, m.count]),
                         ...blockingData.blockingByFamily.map(f => [`Famille: ${f.family}`, f.count])

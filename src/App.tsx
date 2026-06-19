@@ -1261,6 +1261,7 @@ export default function App() {
                   currentUserLabel={currentUser.displayName}
                   onAddReclamation={handleAddReclamation}
                   onUpdateReclamation={handleUpdateReclamation}
+                  onUpdateDossier={handleUpdateDossier}
                   onSelectDossier={(id) => setSelectedDossierId(id)}
                 />
               )}

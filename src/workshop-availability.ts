@@ -11,7 +11,10 @@ import {
   WorkshopHoliday,
   DossierSAV,
   WorkshopReservation,
-  DossierStatus
+  DossierStatus,
+  WorkshopShiftProfile,
+  TechnicianShiftAssignment,
+  BayShiftAssignment
 } from "./types";
 
 export function getDefaultWorkshopSchedule(): WorkshopSchedule {
@@ -52,6 +55,55 @@ export function getDefaultWorkshopSchedule(): WorkshopSchedule {
   };
 }
 
+export function getDefaultWorkshopShiftProfiles(): WorkshopShiftProfile[] {
+  return [
+    {
+      id: "shift_standard",
+      name: "Équipe standard",
+      description: "08:00-12:00 / 13:00-17:00",
+      active: true,
+      schedule: getDefaultWorkshopSchedule(),
+    },
+    {
+      id: "shift_morning",
+      name: "Équipe matin",
+      description: "07:00-13:00",
+      active: true,
+      schedule: buildWeeklySchedule([
+        { start: "07:00", end: "13:00" },
+      ]),
+    },
+    {
+      id: "shift_afternoon",
+      name: "Équipe après-midi",
+      description: "12:00-18:00",
+      active: true,
+      schedule: buildWeeklySchedule([
+        { start: "12:00", end: "18:00" },
+      ]),
+    },
+    {
+      id: "shift_continuous",
+      name: "Journée continue",
+      description: "08:00-16:00",
+      active: true,
+      schedule: buildWeeklySchedule([
+        { start: "08:00", end: "16:00" },
+      ]),
+    },
+  ];
+}
+
+function buildWeeklySchedule(windows: Array<{ start: string; end: string }>): WorkshopSchedule {
+  return {
+    days: [0, 1, 2, 3, 4, 5, 6].map(dayOfWeek => ({
+      dayOfWeek,
+      isClosed: dayOfWeek === 0,
+      windows: dayOfWeek === 0 ? [] : windows,
+    })),
+  };
+}
+
 function getLocalDateStr(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -62,6 +114,15 @@ function getLocalDateStr(d: Date): string {
 function parseTimeToMinutes(timeStr: string): number {
   const [h, m] = timeStr.split(":").map(Number);
   return h * 60 + m;
+}
+
+function getScheduleWindows(date: Date, schedule: WorkshopSchedule): Array<{ start: string; end: string }> {
+  const dayOfWeek = date.getDay();
+  const daySched = schedule.days.find(d => d.dayOfWeek === dayOfWeek);
+  if (!daySched || daySched.isClosed) {
+    return [];
+  }
+  return daySched.windows || [];
 }
 
 export function getEffectiveWorkshopWindows(
@@ -86,13 +147,89 @@ export function getEffectiveWorkshopWindows(
   }
 
   // 3. Fallback to default schedule
-  const dayOfWeek = date.getDay();
-  const daySched = config.schedule.days.find(d => d.dayOfWeek === dayOfWeek);
-  if (!daySched || daySched.isClosed) {
-    return [];
+  return getScheduleWindows(date, config.schedule);
+}
+
+export function getEffectiveWorkshopWindowsForResource(
+  date: Date,
+  config: WorkshopAvailabilityConfig,
+  options: { technicianId?: string; bayId?: string } = {}
+): Array<{ start: string; end: string }> {
+  const dateStr = getLocalDateStr(date);
+  const hasGlobalOverride =
+    config.holidays.some(h => h.date === dateStr) ||
+    config.exceptions.some(e => e.date === dateStr);
+  const baseWindows = getEffectiveWorkshopWindows(date, config);
+
+  if (hasGlobalOverride) {
+    return baseWindows;
   }
 
-  return daySched.windows || [];
+  const profilePool = [
+    ...(config.shiftProfiles ?? []),
+    ...getDefaultWorkshopShiftProfiles(),
+  ];
+
+  const technicianWindows = options.technicianId
+    ? getAssignedShiftWindows(date, config.technicianShiftAssignments ?? [], profilePool, options.technicianId, "technicianId")
+    : null;
+  const bayWindows = options.bayId
+    ? getAssignedShiftWindows(date, config.bayShiftAssignments ?? [], profilePool, options.bayId, "bayId")
+    : null;
+
+  if (technicianWindows && bayWindows) {
+    return intersectWindows(intersectWindows(baseWindows, technicianWindows), bayWindows);
+  }
+  if (technicianWindows) return intersectWindows(baseWindows, technicianWindows);
+  if (bayWindows) return intersectWindows(baseWindows, bayWindows);
+  return baseWindows;
+}
+
+function getAssignedShiftWindows<T extends TechnicianShiftAssignment | BayShiftAssignment>(
+  date: Date,
+  assignments: T[],
+  profiles: WorkshopShiftProfile[],
+  resourceId: string,
+  resourceKey: "technicianId" | "bayId"
+): Array<{ start: string; end: string }> | null {
+  const dateStr = getLocalDateStr(date);
+  const dayOfWeek = date.getDay();
+  const assignment = assignments.find(current => {
+    const currentResourceId = String((current as unknown as Record<string, unknown>)[resourceKey] ?? "");
+    const inDateRange = current.startDate <= dateStr && (!current.endDate || current.endDate >= dateStr);
+    const activeDay = !current.daysOfWeek || current.daysOfWeek.includes(dayOfWeek);
+    return currentResourceId === resourceId && inDateRange && activeDay;
+  });
+
+  if (!assignment) return null;
+  const profile = profiles.find(current => current.id === assignment.shiftProfileId && current.active);
+  return profile ? getScheduleWindows(date, profile.schedule) : null;
+}
+
+function intersectWindows(
+  first: Array<{ start: string; end: string }>,
+  second: Array<{ start: string; end: string }>
+): Array<{ start: string; end: string }> {
+  const intersections: Array<{ start: string; end: string }> = [];
+  for (const a of first) {
+    for (const b of second) {
+      const startMin = Math.max(parseTimeToMinutes(a.start), parseTimeToMinutes(b.start));
+      const endMin = Math.min(parseTimeToMinutes(a.end), parseTimeToMinutes(b.end));
+      if (startMin < endMin) {
+        intersections.push({
+          start: minutesToTime(startMin),
+          end: minutesToTime(endMin),
+        });
+      }
+    }
+  }
+  return intersections;
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 export function isWorkshopClosed(date: Date, config: WorkshopAvailabilityConfig): boolean {
@@ -269,7 +406,10 @@ export function validateAvailabilityForSlot(input: {
     }
 
     // 2. Check workshop closed or outside working windows
-    const windows = getEffectiveWorkshopWindows(s, input.config);
+    const windows = getEffectiveWorkshopWindowsForResource(s, input.config, {
+      technicianId: input.technicianId,
+      bayId: input.bayId,
+    });
     if (windows.length === 0) {
       if (!codes.includes("workshop-closed")) {
         codes.push("workshop-closed");
@@ -412,7 +552,10 @@ export function findNextAvailableWorkingSlot(input: {
     let checkDate = new Date(d);
     for (let dayOffset = 0; dayOffset < 90; dayOffset++) {
       const testDate = new Date(checkDate.getTime() + dayOffset * 24 * 3600 * 1000);
-      const windows = getEffectiveWorkshopWindows(testDate, input.config);
+      const windows = getEffectiveWorkshopWindowsForResource(testDate, input.config, {
+        technicianId: input.technicianId,
+        bayId: input.bayId,
+      });
       if (windows.length > 0) {
         const lastWin = windows[windows.length - 1];
         const [lh, lm] = lastWin.end.split(":").map(Number);
@@ -453,7 +596,10 @@ export function findNextAvailableWorkingSlot(input: {
   while (remainingMinutes > 0 && cursor.getTime() < horizon.getTime() && iterations < maxIterations) {
     iterations += 1;
 
-    const windows = getEffectiveWorkshopWindows(cursor, input.config);
+    const windows = getEffectiveWorkshopWindowsForResource(cursor, input.config, {
+      technicianId: input.technicianId,
+      bayId: input.bayId,
+    });
     if (windows.length === 0) {
       const nextDay = new Date(cursor.getTime() + 24 * 3600 * 1000);
       nextDay.setHours(8, 0, 0, 0);

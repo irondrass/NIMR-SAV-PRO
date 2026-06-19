@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, RepairOrderStatus, UserRole, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -19,12 +19,11 @@ import {
   validatePlanningAssignment
 } from "../sav-core";
 import { 
-  findNextAvailableWorkingSlot, 
-  validateAvailabilityForSlot,
   isWorkshopClosed,
   isTechnicianAbsent,
   isBayUnavailable,
-  getEffectiveWorkshopWindows
+  getEffectiveWorkshopWindowsForResource,
+  getDefaultWorkshopShiftProfiles
 } from "../workshop-availability";
 import { 
   Calendar, 
@@ -39,11 +38,19 @@ import {
   Check, 
   ChevronLeft, 
   ChevronRight, 
-  Printer, 
-  Save 
+  Save,
+  FileText
 } from "lucide-react";
 import { LicencePlate, StatusBadge } from "./UIParts";
+import PrintDocuments from "./PrintDocuments";
 import * as perm from "../permissions";
+import { maskPhoneNumber } from "../field-validations";
+import { TASK_STATUS_VISUAL_ORDER, getTaskStatusVisual } from "../task-status-visual";
+import {
+  findTaskPlanningTarget,
+  getCurrentGanttTaskStatus,
+  getUnplannedRepairOrderTargets,
+} from "../workshop-planning-helpers";
 import {
   calculateReservationDuration,
   createReservationNeed,
@@ -53,30 +60,6 @@ import {
   cancelReservation,
   convertReservationToPlanning
 } from "../workshop-reservations";
-
-const getTaskStatusLabel = (status: RepairOrderStatus) => {
-  switch (status) {
-    case "pending": return "À faire";
-    case "in_progress": return "En cours";
-    case "paused": return "En pause";
-    case "blocked": return "Bloquée";
-    case "done": return "Terminée";
-    case "reopened": return "Réouverte";
-    default: return status;
-  }
-};
-
-const getTaskStatusTestId = (status: RepairOrderStatus) => {
-  switch (status) {
-    case "pending": return "gantt-task-status-pending";
-    case "in_progress": return "gantt-task-status-in-progress";
-    case "paused": return "gantt-task-status-paused";
-    case "blocked": return "gantt-task-status-blocked";
-    case "done": return "gantt-task-status-done";
-    case "reopened": return "gantt-task-status-reopened";
-    default: return "";
-  }
-};
 
 interface WorkshopPlanningProps {
   techniciens: TechnicienResource[];
@@ -118,6 +101,7 @@ export default function WorkshopPlanning({
   // Suggestion states
   const [suggestionTargetId, setSuggestionTargetId] = useState("");
   const [suggestion, setSuggestion] = useState<WorkshopSlotSuggestion | null>(null);
+  const [suggestions, setSuggestions] = useState<WorkshopSlotSuggestion[]>([]);
   const [suggestionError, setSuggestionError] = useState("");
 
   // Manual planning form states
@@ -132,6 +116,15 @@ export default function WorkshopPlanning({
   const [showSavedIndicator, setShowSavedIndicator] = useState(false);
   const [ganttSearchQuery, setGanttSearchQuery] = useState("");
   const [expandedResId, setExpandedResId] = useState<string | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<{ dossierId: string; lineId: string } | null>(null);
+  const [rescheduleTechId, setRescheduleTechId] = useState("");
+  const [rescheduleBayId, setRescheduleBayId] = useState("");
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleStart, setRescheduleStart] = useState("08:00");
+  const [rescheduleDurationMinutes, setRescheduleDurationMinutes] = useState(60);
+  const [rescheduleError, setRescheduleError] = useState("");
+  const [draggingTask, setDraggingTask] = useState<{ dossierId: string; lineId: string } | null>(null);
+  const [taskSheetTarget, setTaskSheetTarget] = useState<{ dossier: DossierSAV; line: RepairOrderLine } | null>(null);
 
   // Local helper to format Date to YYYY-MM-DD
   const getLocalDateStr = (d: Date) => {
@@ -186,8 +179,9 @@ export default function WorkshopPlanning({
     dossier.ordresReparation.some(line => normalizeRepairOrderStatus(line.status) !== "done")
   );
 
-  const selectedTargetIdForSuggest = suggestionTargetId || targetDossiers[0]?.id || "";
-  const selectedTargetForSuggest = targetDossiers.find(dossier => dossier.id === selectedTargetIdForSuggest);
+  const taskPlanningTargets = getUnplannedRepairOrderTargets(dossiers);
+  const selectedTargetIdForSuggest = suggestionTargetId || taskPlanningTargets[0]?.key || "";
+  const selectedTargetForSuggest = findTaskPlanningTarget(taskPlanningTargets, selectedTargetIdForSuggest);
 
   const activeManualDossier = dossiers.find(d => d.id === manualDossierId);
   const pendingManualTasks = activeManualDossier 
@@ -229,6 +223,7 @@ export default function WorkshopPlanning({
     }
     setSelectedDate(prev);
     setSuggestion(null);
+    setSuggestions([]);
   };
 
   const handleNextDay = () => {
@@ -239,68 +234,96 @@ export default function WorkshopPlanning({
     }
     setSelectedDate(next);
     setSuggestion(null);
+    setSuggestions([]);
   };
 
   const handleToday = () => {
     setSelectedDate(new Date());
     setSuggestion(null);
+    setSuggestions([]);
+  };
+
+  const buildSuggestionCandidates = (): WorkshopSlotSuggestion[] => {
+    if (!selectedTargetForSuggest) return [];
+    const candidates: WorkshopSlotSuggestion[] = [];
+    const seen = new Set<string>();
+    const offsets = [0, 30, 60];
+
+    for (const offsetMinutes of offsets) {
+      const targetDesiredDate = new Date(selectedDate);
+      targetDesiredDate.setHours(8, offsetMinutes, 0, 0);
+      const result = suggestWorkshopSlot({
+        dossiers,
+        technicians: techniciens,
+        workshopBays: DEFAULT_WORKSHOP_BAYS,
+        estimatedHours: selectedTargetForSuggest.line.tempsEstime || 1,
+        desiredDate: targetDesiredDate,
+        dossierId: selectedTargetForSuggest.dossier.id,
+        reservations,
+        availabilityConfig,
+      }, getSystemTime());
+
+      const key = `${result.technicianId}-${result.bayId}-${result.startTime}-${result.endTime}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        candidates.push({
+          ...result,
+          rankLabel: candidates.length === 0 ? "Meilleur créneau" : `Alternative ${candidates.length + 1}`,
+        });
+      }
+      if (candidates.length >= 3) break;
+    }
+
+    return candidates;
   };
 
   // Suggest slot
   const handleSuggestSlot = () => {
     if (!selectedTargetForSuggest) {
-      setSuggestionError("Aucun dossier actif disponible pour planification.");
+      setSuggestionError("Aucune tâche non planifiée disponible pour suggestion.");
       setSuggestion(null);
+      setSuggestions([]);
       return;
     }
 
-    const estimatedHours = selectedTargetForSuggest.ordresReparation.reduce((total, line) => (
-      normalizeRepairOrderStatus(line.status) === "done" ? total : total + line.tempsEstime
-    ), 0) || 1;
-    
-    // Set suggestion target date to currently navigated planning date
-    const targetDesiredDate = new Date(selectedDate);
-    targetDesiredDate.setHours(8, 0, 0, 0);
-
     try {
-      const res = suggestWorkshopSlot({
-        dossiers,
-        technicians: techniciens,
-        workshopBays: DEFAULT_WORKSHOP_BAYS,
-        estimatedHours,
-        desiredDate: targetDesiredDate,
-        dossierId: selectedTargetIdForSuggest,
-        reservations,
-        availabilityConfig,
-      }, getSystemTime());
+      const candidates = buildSuggestionCandidates();
+      if (candidates.length === 0) {
+        setSuggestionError("Aucun créneau compatible trouvé.");
+        setSuggestion(null);
+        setSuggestions([]);
+        return;
+      }
 
-      setSuggestion(res);
+      setSuggestion(candidates[0]);
+      setSuggestions(candidates);
       setSuggestionError("");
     } catch (err: any) {
       setSuggestionError(err.message || "Erreur de suggestion");
       setSuggestion(null);
+      setSuggestions([]);
     }
   };
 
   // Apply suggestion
-  const handleApplySuggestion = () => {
-    if (!selectedTargetForSuggest || !suggestion) return;
+  const handleApplySuggestion = (selectedSuggestion = suggestion) => {
+    if (!selectedTargetForSuggest || !selectedSuggestion) return;
     
-    // Update all pending repair order lines with suggestion
-    const start = new Date(suggestion.startTime);
-    const end = new Date(suggestion.endTime);
-    const segments = suggestion.segments.length > 0 ? suggestion.segments : buildPlanningSegments(start, end);
+    const { dossier, line: targetLine } = selectedTargetForSuggest;
+    const start = new Date(selectedSuggestion.startTime);
+    const end = new Date(selectedSuggestion.endTime);
+    const segments = selectedSuggestion.segments.length > 0 ? selectedSuggestion.segments : buildPlanningSegments(start, end);
     const planningDate = getLocalDateStr(start);
 
-    const updatedLines = selectedTargetForSuggest.ordresReparation.map(line => {
-      if (normalizeRepairOrderStatus(line.status) !== "done") {
+    const updatedLines = dossier.ordresReparation.map(line => {
+      if (line.id === targetLine.id) {
         return {
           ...line,
-          planningStart: suggestion.startTime,
-          planningEnd: suggestion.endTime,
+          planningStart: selectedSuggestion.startTime,
+          planningEnd: selectedSuggestion.endTime,
           planningSegments: segments,
-          plannedTechnicianId: suggestion.technicianId,
-          plannedBayId: suggestion.bayId,
+          plannedTechnicianId: selectedSuggestion.technicianId,
+          plannedBayId: selectedSuggestion.bayId,
           planningDate: planningDate
         };
       }
@@ -308,18 +331,20 @@ export default function WorkshopPlanning({
     });
 
     onUpdateDossier({
-      ...selectedTargetForSuggest,
+      ...dossier,
       ordresReparation: updatedLines,
-      technicienId: suggestion.technicianId,
-      workshopBayId: suggestion.bayId,
-      datePlanningDebut: suggestion.startTime,
-      datePlanningFin: suggestion.endTime,
+      technicienId: selectedSuggestion.technicianId,
+      workshopBayId: selectedSuggestion.bayId,
+      datePlanningDebut: selectedSuggestion.startTime,
+      datePlanningFin: selectedSuggestion.endTime,
       statut: DossierStatus.TRAVAUX_PLANIFIES,
       dateDernierStatut: new Date().toISOString(),
-      prochaineActionRecommended: `Planifiée sur ${suggestion.bayName} avec ${suggestion.technicianName} le ${new Date(suggestion.startTime).toLocaleDateString("fr-FR")} de ${new Date(suggestion.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} à ${new Date(suggestion.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`,
+      prochaineActionRecommended: `Tâche "${targetLine.designation}" planifiée sur ${selectedSuggestion.bayName} avec ${selectedSuggestion.technicianName} le ${new Date(selectedSuggestion.startTime).toLocaleDateString("fr-FR")} de ${new Date(selectedSuggestion.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} à ${new Date(selectedSuggestion.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`,
     });
 
     setSuggestion(null);
+    setSuggestions([]);
+    setSuggestionTargetId("");
     setShowSavedIndicator(true);
     setTimeout(() => setShowSavedIndicator(false), 3000);
   };
@@ -411,18 +436,6 @@ export default function WorkshopPlanning({
 
     setShowSavedIndicator(true);
     setTimeout(() => setShowSavedIndicator(false), 3000);
-  };
-
-  const handlePrintGantt = () => {
-    setShowSavedIndicator(true);
-    setTimeout(() => setShowSavedIndicator(false), 1200);
-    window.print();
-  };
-
-  const handlePrintTable = () => {
-    setShowSavedIndicator(true);
-    setTimeout(() => setShowSavedIndicator(false), 1200);
-    window.print();
   };
 
   // Filtering technicians and bays
@@ -547,6 +560,123 @@ export default function WorkshopPlanning({
     onUpdateReservations(nextRes);
   };
 
+  const openRescheduleModal = (
+    dossier: DossierSAV,
+    line: RepairOrderLine,
+    overrides: { technicianId?: string; bayId?: string; start?: Date } = {}
+  ) => {
+    const currentStart = overrides.start || (line.planningStart ? new Date(line.planningStart) : selectedDate);
+    const durationMinutes = line.planningStart && line.planningEnd
+      ? Math.max(15, Math.round((new Date(line.planningEnd).getTime() - new Date(line.planningStart).getTime()) / 60000))
+      : Math.max(15, Math.ceil((line.tempsEstime || 1) * 60));
+
+    setRescheduleTarget({ dossierId: dossier.id, lineId: line.id });
+    setRescheduleTechId(overrides.technicianId || line.plannedTechnicianId || dossier.technicienId || techniciens[0]?.id || "");
+    setRescheduleBayId(overrides.bayId || line.plannedBayId || DEFAULT_WORKSHOP_BAYS[0]?.id || "");
+    setRescheduleDate(getLocalDateStr(currentStart));
+    setRescheduleStart(`${String(currentStart.getHours()).padStart(2, "0")}:${String(currentStart.getMinutes()).padStart(2, "0")}`);
+    setRescheduleDurationMinutes(durationMinutes);
+    setRescheduleError("");
+  };
+
+  const closeRescheduleModal = () => {
+    setRescheduleTarget(null);
+    setRescheduleError("");
+  };
+
+  const handleSaveReschedule = () => {
+    if (!rescheduleTarget || !rescheduleTechId || !rescheduleBayId || !rescheduleDate || !rescheduleStart) return;
+    const dossier = dossiers.find(current => current.id === rescheduleTarget.dossierId);
+    const line = dossier?.ordresReparation.find(current => current.id === rescheduleTarget.lineId);
+    if (!dossier || !line) return;
+
+    const [hour, minute] = rescheduleStart.split(":").map(Number);
+    const start = new Date(`${rescheduleDate}T00:00:00`);
+    start.setHours(hour, minute, 0, 0);
+    const end = addWorkingMinutes(start, Math.max(15, rescheduleDurationMinutes));
+    const validation = validatePlanningAssignment({
+      dossiers,
+      dossierId: dossier.id,
+      lineId: line.id,
+      technicianId: rescheduleTechId,
+      bayId: rescheduleBayId,
+      start,
+      end,
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+      reservations,
+      availabilityConfig,
+    }, getSystemTime());
+
+    if (!validation.allowed) {
+      setRescheduleError(validation.reasons.join(" "));
+      return;
+    }
+
+    const techName = techniciens.find(tech => tech.id === rescheduleTechId)?.nom || rescheduleTechId;
+    const bayName = DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === rescheduleBayId)?.name || rescheduleBayId;
+    const confirmed = window.confirm(`Déplacer la tâche "${line.designation}" vers ${techName} / ${bayName} le ${start.toLocaleString("fr-FR")} ?`);
+    if (!confirmed) return;
+
+    const segments = validation.segments.length > 0 ? validation.segments : buildPlanningSegments(start, end);
+    const nextLines = dossier.ordresReparation.map(current => current.id === line.id ? {
+      ...current,
+      planningStart: start.toISOString(),
+      planningEnd: end.toISOString(),
+      planningSegments: segments,
+      plannedTechnicianId: rescheduleTechId,
+      plannedBayId: rescheduleBayId,
+      planningDate: rescheduleDate,
+    } : current);
+
+    onUpdateDossier({
+      ...dossier,
+      ordresReparation: nextLines,
+      technicienId: rescheduleTechId,
+      workshopBayId: rescheduleBayId,
+      datePlanningDebut: start.toISOString(),
+      datePlanningFin: end.toISOString(),
+      statut: DossierStatus.TRAVAUX_PLANIFIES,
+      dateDernierStatut: new Date().toISOString(),
+      prochaineActionRecommended: `Créneau modifié pour "${line.designation}" sur ${bayName} avec ${techName}.`,
+    });
+    closeRescheduleModal();
+    setShowSavedIndicator(true);
+    setTimeout(() => setShowSavedIndicator(false), 3000);
+  };
+
+  const getDropStartDate = (event: React.DragEvent<HTMLElement>): Date => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    const rawMinutes = ratio * totalGanttMinutes;
+    const snappedMinutes = Math.round(rawMinutes / 15) * 15;
+    const start = new Date(selectedDate);
+    start.setHours(8, 0, 0, 0);
+    start.setMinutes(start.getMinutes() + snappedMinutes);
+    return start;
+  };
+
+  const handleDropTask = (
+    event: React.DragEvent<HTMLElement>,
+    defaults: { technicianId?: string; bayId?: string }
+  ) => {
+    event.preventDefault();
+    if (!draggingTask) return;
+    const dossier = dossiers.find(current => current.id === draggingTask.dossierId);
+    const line = dossier?.ordresReparation.find(current => current.id === draggingTask.lineId);
+    if (!dossier || !line) return;
+    openRescheduleModal(dossier, line, { ...defaults, start: getDropStartDate(event) });
+    setDraggingTask(null);
+  };
+
+  const handlePrintTaskSheet = (dossier: DossierSAV, line: RepairOrderLine) => {
+    setTaskSheetTarget({ dossier, line });
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => setTaskSheetTarget(null), 750);
+    }, 50);
+  };
+
   // Find all tasks planned on the selected date
   const activePlannedLines: Array<{ dossier: DossierSAV; line: RepairOrderLine }> = [];
   dossiers.forEach(dossier => {
@@ -572,10 +702,21 @@ export default function WorkshopPlanning({
     }
   });
 
+  const rescheduleDossier = rescheduleTarget
+    ? dossiers.find(dossier => dossier.id === rescheduleTarget.dossierId)
+    : undefined;
+  const rescheduleLine = rescheduleDossier && rescheduleTarget
+    ? rescheduleDossier.ordresReparation.find(line => line.id === rescheduleTarget.lineId)
+    : undefined;
+  const shiftProfiles = availabilityConfig?.shiftProfiles?.length
+    ? availabilityConfig.shiftProfiles
+    : getDefaultWorkshopShiftProfiles();
+  const canShowPhone = perm.canViewVehicleSensitiveFields(activeRole);
+
   return (
     <div className="space-y-6">
       
-      {/* Title, Date selector & Print actions */}
+      {/* Title & Date selector */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
@@ -604,23 +745,6 @@ export default function WorkshopPlanning({
               </span>
             )}
 
-            {/* Print buttons */}
-            <button 
-              onClick={handlePrintGantt}
-              data-testid="planning-print-gantt"
-              className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              Imprimer Gantt
-            </button>
-            <button 
-              onClick={handlePrintTable}
-              data-testid="planning-print-table"
-              className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              Imprimer Tableau
-            </button>
           </div>
         </div>
 
@@ -667,6 +791,7 @@ export default function WorkshopPlanning({
                 nextDate.setHours(8, 0, 0, 0);
                 setSelectedDate(nextDate);
                 setSuggestion(null);
+                setSuggestions([]);
               }}
             />
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">
@@ -701,7 +826,7 @@ export default function WorkshopPlanning({
           </h3>
           <div className="flex flex-col sm:flex-row sm:items-end gap-3">
             <div className="flex-1 space-y-1">
-              <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Véhicule à planifier :</label>
+              <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Tâche à planifier :</label>
               <select
                 data-testid="planning-suggest-dossier"
                 className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -709,23 +834,33 @@ export default function WorkshopPlanning({
                 onChange={(e) => {
                   setSuggestionTargetId(e.target.value);
                   setSuggestion(null);
+                  setSuggestions([]);
                   setSuggestionError("");
                 }}
               >
-                {targetDossiers.length === 0 ? (
-                  <option value="">Aucun dossier en attente de planification</option>
+                {taskPlanningTargets.length === 0 ? (
+                  <option value="">Aucune tâche en attente de planification</option>
                 ) : (
-                  targetDossiers.map(dossier => (
-                    <option key={dossier.id} value={dossier.id}>
-                      {dossier.id} - {dossier.vehiculeMarque} {dossier.vehiculeModele} ({dossier.clientNom})
-                    </option>
-                  ))
+                  <>
+                    {taskPlanningTargets
+                      .filter((target, index, all) => all.findIndex(current => current.dossier.id === target.dossier.id) === index)
+                      .map(target => (
+                        <option key={`legacy-${target.dossier.id}`} value={target.dossier.id} hidden>
+                          {target.dossier.id}
+                        </option>
+                      ))}
+                    {taskPlanningTargets.map(target => (
+                      <option key={target.key} value={target.key}>
+                        {target.dossier.id} - {target.line.designation} ({target.dossier.vehiculeImmatriculation})
+                      </option>
+                    ))}
+                  </>
                 )}
               </select>
             </div>
             <button
               onClick={handleSuggestSlot}
-              disabled={targetDossiers.length === 0}
+              disabled={taskPlanningTargets.length === 0}
               data-testid="planning-suggest-submit"
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
             >
@@ -738,45 +873,52 @@ export default function WorkshopPlanning({
             <p data-testid="planning-suggest-error" className="text-xs font-bold text-rose-600">{suggestionError}</p>
           )}
 
-          {suggestion && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-blue-50/40 border border-blue-100 rounded-xl text-xs">
-              <div className="space-y-1.5">
-                <div>
-                  <span className="text-[10px] text-gray-400 font-bold uppercase block">Technicien proposé</span>
-                  <strong data-testid="planning-suggest-tech" className="text-gray-800 text-sm font-black">{suggestion.technicianName}</strong>
+          {suggestion && suggestions.length > 0 && (
+            <div className="space-y-2">
+              {suggestions.slice(0, 3).map((candidate, index) => (
+                <div key={`${candidate.technicianId}-${candidate.bayId}-${candidate.startTime}`} className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-blue-50/40 border border-blue-100 rounded-xl text-xs">
+                  <div className="space-y-1.5">
+                    <span className="inline-flex w-fit rounded-full bg-white px-2 py-0.5 text-[9px] font-black uppercase text-blue-700 border border-blue-100">
+                      {candidate.rankLabel || `Suggestion ${index + 1}`}
+                    </span>
+                    <div>
+                      <span className="text-[10px] text-gray-400 font-bold uppercase block">Technicien proposé</span>
+                      <strong data-testid={index === 0 ? "planning-suggest-tech" : undefined} className="text-gray-800 text-sm font-black">{candidate.technicianName}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-400 font-bold uppercase block">Pont proposé</span>
+                      <strong data-testid={index === 0 ? "planning-suggest-bay" : undefined} className="text-gray-800 text-sm font-black">{candidate.bayName}</strong>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div>
+                      <span className="text-[10px] text-gray-400 font-bold uppercase block">Horaires de début / fin</span>
+                      <strong data-testid={index === 0 ? "planning-suggest-start" : undefined} className="text-gray-800 font-bold block">
+                        Début : {new Date(candidate.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                      </strong>
+                      <strong data-testid={index === 0 ? "planning-suggest-end" : undefined} className="text-gray-800 font-bold block">
+                        Fin : {new Date(candidate.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                      </strong>
+                    </div>
+                    <div className="pt-2 border-t border-blue-100/60">
+                      <p className="text-blue-800 font-semibold leading-normal">{candidate.reason}</p>
+                      {candidate.reason.includes("Créneau proposé à partir de l’heure actuelle.") && (
+                        <p data-testid={index === 0 ? "planning-suggest-shifted-warning" : undefined} className="text-amber-600 font-bold text-[10px] mt-1">
+                          Créneau proposé à partir de l'heure actuelle.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleApplySuggestion(candidate)}
+                    data-testid={index === 0 ? "planning-suggest-apply" : `planning-suggest-apply-${index + 1}`}
+                    className="sm:col-span-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
+                  >
+                    <Check className="w-4 h-4" />
+                    Appliquer cette suggestion
+                  </button>
                 </div>
-                <div>
-                  <span className="text-[10px] text-gray-400 font-bold uppercase block">Pont proposé</span>
-                  <strong data-testid="planning-suggest-bay" className="text-gray-800 text-sm font-black">{suggestion.bayName}</strong>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <div>
-                  <span className="text-[10px] text-gray-400 font-bold uppercase block">Horaires de début / fin</span>
-                  <strong data-testid="planning-suggest-start" className="text-gray-800 font-bold block">
-                    Début : {new Date(suggestion.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                  </strong>
-                  <strong data-testid="planning-suggest-end" className="text-gray-800 font-bold block">
-                    Fin : {new Date(suggestion.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                  </strong>
-                </div>
-                <div className="pt-2 border-t border-blue-100/60">
-                  <p className="text-blue-800 font-semibold leading-normal">{suggestion.reason}</p>
-                  {suggestion.reason.includes("Créneau proposé à partir de l’heure actuelle.") && (
-                    <p data-testid="planning-suggest-shifted-warning" className="text-amber-600 font-bold text-[10px] mt-1">
-                      Créneau proposé à partir de l'heure actuelle.
-                    </p>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={handleApplySuggestion}
-                data-testid="planning-suggest-apply"
-                className="sm:col-span-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
-              >
-                <Check className="w-4 h-4" />
-                Appliquer la suggestion automatique
-              </button>
+              ))}
             </div>
           )}
         </div>
@@ -1273,7 +1415,7 @@ export default function WorkshopPlanning({
                 let techCapacity = 0;
                 if (!isClosed && !isAbsent) {
                   if (availabilityConfig) {
-                    const effWindows = getEffectiveWorkshopWindows(selectedDate, availabilityConfig);
+                    const effWindows = getEffectiveWorkshopWindowsForResource(selectedDate, availabilityConfig, { technicianId: tech.id });
                     techCapacity = effWindows.reduce((sum, win) => {
                       const [sh, sm] = win.start.split(":").map(Number);
                       const [eh, em] = win.end.split(":").map(Number);
@@ -1392,7 +1534,11 @@ export default function WorkshopPlanning({
                     </div>
 
                     {/* Right: Gantt timeline bar row */}
-                    <div className="col-span-9 relative h-10 bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner">
+                    <div
+                      className="col-span-9 relative h-14 bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => handleDropTask(event, { technicianId: tech.id })}
+                    >
                       
                       {/* Midday Lunch break shaded area */}
                       {!isSat && (
@@ -1439,14 +1585,8 @@ export default function WorkshopPlanning({
                           const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
 
                           const isPast = e.getTime() < now.getTime();
-                          let blockBg = "bg-blue-500 hover:bg-blue-600 border-blue-600";
-                          if (isPast) {
-                            blockBg = "bg-gray-400 hover:bg-gray-400 border-gray-400 opacity-60 text-gray-100";
-                          } else if (line.status === "done") {
-                            blockBg = "bg-green-500 hover:bg-green-600 border-green-600";
-                          } else if (line.status === "blocked" || dossier.statut === DossierStatus.BLOQUE) {
-                            blockBg = "bg-red-500 hover:bg-red-600 border-red-600";
-                          }
+                          const currentStatus = getCurrentGanttTaskStatus(dossier, line.id, line.status);
+                          const statusVisual = getTaskStatusVisual(currentStatus);
 
                           return (
                             <div
@@ -1456,7 +1596,12 @@ export default function WorkshopPlanning({
                               data-start={s.toISOString()}
                               data-end={e.toISOString()}
                               onClick={() => onSelectDossier(dossier.id)}
-                              className={`absolute top-1 bottom-1 ${blockBg} border text-white text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20`}
+                              draggable
+                              onDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = "move";
+                                setDraggingTask({ dossierId: dossier.id, lineId: line.id });
+                              }}
+                              className={`absolute top-1 bottom-1 ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
                               style={{
                                 left: `${leftPct}%`,
                                 width: `${widthPct}%`
@@ -1466,16 +1611,46 @@ export default function WorkshopPlanning({
                               <div className="flex items-center justify-between gap-1 overflow-hidden">
                                 <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
                                 <span
-                                  data-testid={getTaskStatusTestId(line.status)}
-                                  className="px-1 py-0.2 text-[7px] bg-black/25 text-white rounded font-black whitespace-nowrap"
+                                  data-testid={statusVisual.testId}
+                                  className={`px-1 py-0.2 text-[7px] rounded border font-black whitespace-nowrap ${statusVisual.badgeClassName}`}
                                 >
-                                  {getTaskStatusLabel(line.status)}
+                                  {statusVisual.label}
                                 </span>
                               </div>
-                              <span className="truncate block text-[7px] opacity-90 leading-none">{dossier.vehiculeImmatriculation}</span>
+                              <span className="truncate block text-[7px] opacity-90 leading-none">
+                                {dossier.vehiculeImmatriculation}
+                                {(line.complaintBadge || line.sourceComplaintId) && (
+                                  <span data-testid={`gantt-complaint-badge-${line.id}`} className="ml-1 rounded bg-red-600 px-1 py-0.2 text-white">REC</span>
+                                )}
+                              </span>
                               <span className="truncate block text-[7px] opacity-80 leading-none">
                                 {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                               </span>
+                              <div className="mt-0.5 flex gap-1">
+                                <button
+                                  type="button"
+                                  data-testid={`gantt-reschedule-${line.id}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openRescheduleModal(dossier, line);
+                                  }}
+                                  className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
+                                >
+                                  Modifier créneau
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid={`gantt-task-sheet-${line.id}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handlePrintTaskSheet(dossier, line);
+                                  }}
+                                  className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
+                                  title="Fiche tâche technicien"
+                                >
+                                  <FileText className="inline h-2.5 w-2.5" />
+                                </button>
+                              </div>
                             </div>
                           );
                         });
@@ -1587,7 +1762,7 @@ export default function WorkshopPlanning({
             let bayCapacity = 0;
             if (!isClosedDay && !isBayUnav) {
               if (availabilityConfig) {
-                const effWindows = getEffectiveWorkshopWindows(selectedDate, availabilityConfig);
+                const effWindows = getEffectiveWorkshopWindowsForResource(selectedDate, availabilityConfig, { bayId: bay.id });
                 bayCapacity = effWindows.reduce((sum, win) => {
                   const [sh, sm] = win.start.split(":").map(Number);
                   const [eh, em] = win.end.split(":").map(Number);
@@ -1668,7 +1843,11 @@ export default function WorkshopPlanning({
                 </div>
 
                 {/* Right: Gantt timeline bar row */}
-                <div className="col-span-9 relative h-10 bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner">
+                <div
+                  className="col-span-9 relative h-14 bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => handleDropTask(event, { bayId: bay.id })}
+                >
                   
                   {/* Midday Lunch break shaded area */}
                   {!isSat && (
@@ -1714,14 +1893,8 @@ export default function WorkshopPlanning({
                       const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
 
                       const isPast = e.getTime() < now.getTime();
-                      let blockBg = "bg-blue-500 hover:bg-blue-600 border-blue-600";
-                      if (isPast) {
-                        blockBg = "bg-gray-400 hover:bg-gray-400 border-gray-400 opacity-60 text-gray-100";
-                      } else if (line.status === "done") {
-                        blockBg = "bg-green-500 hover:bg-green-600 border-green-600";
-                      } else if (line.status === "blocked" || dossier.statut === DossierStatus.BLOQUE) {
-                        blockBg = "bg-red-500 hover:bg-red-600 border-red-600";
-                      }
+                      const currentStatus = getCurrentGanttTaskStatus(dossier, line.id, line.status);
+                      const statusVisual = getTaskStatusVisual(currentStatus);
 
                       return (
                         <div
@@ -1731,7 +1904,12 @@ export default function WorkshopPlanning({
                           data-start={s.toISOString()}
                           data-end={e.toISOString()}
                           onClick={() => onSelectDossier(dossier.id)}
-                          className={`absolute top-1 bottom-1 ${blockBg} border text-white text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20`}
+                          draggable
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            setDraggingTask({ dossierId: dossier.id, lineId: line.id });
+                          }}
+                          className={`absolute top-1 bottom-1 ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
                           style={{
                             left: `${leftPct}%`,
                             width: `${widthPct}%`
@@ -1741,13 +1919,43 @@ export default function WorkshopPlanning({
                           <div className="flex items-center justify-between gap-1 overflow-hidden">
                             <span className="truncate block leading-tight font-extrabold">{dossier.id}</span>
                             <span
-                              data-testid={getTaskStatusTestId(line.status)}
-                              className="px-1 py-0.2 text-[7px] bg-black/25 text-white rounded font-black whitespace-nowrap"
+                              data-testid={statusVisual.testId}
+                              className={`px-1 py-0.2 text-[7px] rounded border font-black whitespace-nowrap ${statusVisual.badgeClassName}`}
                             >
-                              {getTaskStatusLabel(line.status)}
+                              {statusVisual.label}
                             </span>
                           </div>
-                          <span className="truncate block text-[7px] opacity-80 leading-none">{line.designation}</span>
+                          <span className="truncate block text-[7px] opacity-80 leading-none">
+                            {line.designation}
+                            {(line.complaintBadge || line.sourceComplaintId) && (
+                              <span data-testid={`gantt-bay-complaint-badge-${line.id}`} className="ml-1 rounded bg-red-600 px-1 py-0.2 text-white">REC</span>
+                            )}
+                          </span>
+                          <div className="mt-0.5 flex gap-1">
+                            <button
+                              type="button"
+                              data-testid={`gantt-bay-reschedule-${line.id}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openRescheduleModal(dossier, line);
+                              }}
+                              className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
+                            >
+                              Modifier créneau
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`gantt-bay-task-sheet-${line.id}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handlePrintTaskSheet(dossier, line);
+                              }}
+                              className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
+                              title="Fiche tâche technicien"
+                            >
+                              <FileText className="inline h-2.5 w-2.5" />
+                            </button>
+                          </div>
                         </div>
                       );
                     });
@@ -1821,12 +2029,15 @@ export default function WorkshopPlanning({
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded border border-indigo-500 bg-indigo-100/90"></span> Réservation confirmée</span>
 
           <span className="font-bold ml-4">Légende statut tâche :</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-blue-500"></span> À faire</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-orange-500"></span> En cours</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-yellow-500"></span> En pause</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-red-500"></span> Bloquée</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-green-500"></span> Terminée</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-purple-500"></span> Réouverte</span>
+          {TASK_STATUS_VISUAL_ORDER.map(status => {
+            const visual = getTaskStatusVisual(status);
+            return (
+              <span key={status} className="flex items-center gap-1">
+                <span className={`w-2.5 h-2.5 rounded ${visual.dotClassName}`}></span>
+                {visual.label}
+              </span>
+            );
+          })}
         </div>
 
       </div>
@@ -1862,6 +2073,135 @@ export default function WorkshopPlanning({
               <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl">
                 <strong className="text-gray-900 block mb-1">Dimanche</strong>
                 Fermé
+              </div>
+            </div>
+          </div>
+
+          <div data-testid="workshop-shifts-panel" className="space-y-4 pt-4 border-t border-gray-100">
+            <h4 className="text-xs font-extrabold text-gray-800 uppercase tracking-wider">Horaires & Équipes</h4>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+              {shiftProfiles.map(profile => (
+                <div key={profile.id} data-testid={`shift-profile-${profile.id}`} className="rounded-xl border border-gray-150 bg-gray-50 p-3">
+                  <strong className="block text-gray-900">{profile.name}</strong>
+                  <span className="text-[10px] font-semibold text-gray-500">{profile.description}</span>
+                </div>
+              ))}
+            </div>
+
+            {perm.canManageWorkshopAvailability(activeRole) && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <form
+                  data-testid="shift-assignment-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    const technicianId = String(formData.get("technicianId") || "");
+                    const shiftProfileId = String(formData.get("shiftProfileId") || "");
+                    const startDate = String(formData.get("startDate") || selectedDateStr);
+                    const endDate = String(formData.get("endDate") || "");
+                    if (!technicianId || !shiftProfileId || !startDate) return;
+
+                    onUpdateAvailabilityConfig({
+                      ...availabilityConfig,
+                      shiftProfiles,
+                      technicianShiftAssignments: [
+                        ...(availabilityConfig.technicianShiftAssignments ?? []),
+                        {
+                          id: `shift_tech_${Date.now()}`,
+                          technicianId,
+                          shiftProfileId,
+                          startDate,
+                          endDate: endDate || undefined,
+                        },
+                      ],
+                    });
+                    event.currentTarget.reset();
+                  }}
+                  className="space-y-3 rounded-xl border border-gray-150 bg-gray-50 p-3 text-xs"
+                >
+                  <h5 className="text-[10px] font-black uppercase tracking-widest text-gray-600">Affecter équipe technicien</h5>
+                  <select data-testid="shift-assignment-tech" name="technicianId" className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" required>
+                    {techniciens.map(tech => <option key={tech.id} value={tech.id}>{tech.nom}</option>)}
+                  </select>
+                  <select data-testid="shift-assignment-profile" name="shiftProfileId" className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" required>
+                    {shiftProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input data-testid="shift-assignment-start" name="startDate" type="date" defaultValue={selectedDateStr} className="rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" required />
+                    <input data-testid="shift-assignment-end" name="endDate" type="date" className="rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" />
+                  </div>
+                  <button data-testid="shift-assignment-add" type="submit" className="w-full rounded-lg bg-indigo-600 py-2 text-xs font-black text-white hover:bg-indigo-700">
+                    Affecter équipe
+                  </button>
+                </form>
+
+                <form
+                  data-testid="shift-bay-assignment-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    const bayId = String(formData.get("bayId") || "");
+                    const shiftProfileId = String(formData.get("shiftProfileId") || "");
+                    const startDate = String(formData.get("startDate") || selectedDateStr);
+                    const endDate = String(formData.get("endDate") || "");
+                    if (!bayId || !shiftProfileId || !startDate) return;
+
+                    onUpdateAvailabilityConfig({
+                      ...availabilityConfig,
+                      shiftProfiles,
+                      bayShiftAssignments: [
+                        ...(availabilityConfig.bayShiftAssignments ?? []),
+                        {
+                          id: `shift_bay_${Date.now()}`,
+                          bayId,
+                          shiftProfileId,
+                          startDate,
+                          endDate: endDate || undefined,
+                        },
+                      ],
+                    });
+                    event.currentTarget.reset();
+                  }}
+                  className="space-y-3 rounded-xl border border-gray-150 bg-gray-50 p-3 text-xs"
+                >
+                  <h5 className="text-[10px] font-black uppercase tracking-widest text-gray-600">Affecter équipe pont</h5>
+                  <select data-testid="shift-assignment-bay" name="bayId" className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" required>
+                    {DEFAULT_WORKSHOP_BAYS.map(bay => <option key={bay.id} value={bay.id}>{bay.name}</option>)}
+                  </select>
+                  <select name="shiftProfileId" className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" required>
+                    {shiftProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input name="startDate" type="date" defaultValue={selectedDateStr} className="rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" required />
+                    <input name="endDate" type="date" className="rounded-lg border border-gray-200 bg-white p-2 text-xs font-bold" />
+                  </div>
+                  <button data-testid="shift-bay-assignment-add" type="submit" className="w-full rounded-lg bg-slate-900 py-2 text-xs font-black text-white hover:bg-slate-700">
+                    Affecter pont
+                  </button>
+                </form>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] font-semibold text-gray-600">
+              <div data-testid="shift-tech-assignments" className="rounded-xl border border-gray-150 p-3">
+                <strong className="block text-gray-900 mb-1">Techniciens</strong>
+                {(availabilityConfig.technicianShiftAssignments ?? []).length === 0 ? (
+                  <span className="text-gray-400">Aucune affectation équipe.</span>
+                ) : (
+                  (availabilityConfig.technicianShiftAssignments ?? []).map(assignment => (
+                    <p key={assignment.id}>{techniciens.find(tech => tech.id === assignment.technicianId)?.nom || assignment.technicianId} → {shiftProfiles.find(profile => profile.id === assignment.shiftProfileId)?.name || assignment.shiftProfileId}</p>
+                  ))
+                )}
+              </div>
+              <div data-testid="shift-bay-assignments" className="rounded-xl border border-gray-150 p-3">
+                <strong className="block text-gray-900 mb-1">Ponts</strong>
+                {(availabilityConfig.bayShiftAssignments ?? []).length === 0 ? (
+                  <span className="text-gray-400">Aucune affectation équipe.</span>
+                ) : (
+                  (availabilityConfig.bayShiftAssignments ?? []).map(assignment => (
+                    <p key={assignment.id}>{DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === assignment.bayId)?.name || assignment.bayId} → {shiftProfiles.find(profile => profile.id === assignment.shiftProfileId)?.name || assignment.shiftProfileId}</p>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -2238,6 +2578,80 @@ export default function WorkshopPlanning({
           </div>
         </div>
       )}
+
+      {rescheduleTarget && rescheduleDossier && rescheduleLine && (
+        <div data-testid="planning-reschedule-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xl">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-900">Modifier créneau</h3>
+              <p className="mt-1 font-semibold text-slate-500">{rescheduleDossier.id} - {rescheduleLine.designation}</p>
+            </div>
+
+            {rescheduleError && (
+              <div data-testid="planning-reschedule-error" className="rounded-lg border border-rose-200 bg-rose-50 p-3 font-bold text-rose-700">
+                {rescheduleError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="block font-black text-slate-600 uppercase">Technicien</span>
+                <select data-testid="planning-reschedule-tech" value={rescheduleTechId} onChange={(event) => setRescheduleTechId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold">
+                  {techniciens.map(tech => <option key={tech.id} value={tech.id}>{tech.nom}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block font-black text-slate-600 uppercase">Pont</span>
+                <select data-testid="planning-reschedule-bay" value={rescheduleBayId} onChange={(event) => setRescheduleBayId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold">
+                  {DEFAULT_WORKSHOP_BAYS.map(bay => <option key={bay.id} value={bay.id}>{bay.name}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block font-black text-slate-600 uppercase">Date</span>
+                <input data-testid="planning-reschedule-date" type="date" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold" />
+              </label>
+              <label className="space-y-1">
+                <span className="block font-black text-slate-600 uppercase">Début</span>
+                <input data-testid="planning-reschedule-start" type="time" step="900" value={rescheduleStart} onChange={(event) => setRescheduleStart(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold" />
+              </label>
+              <label className="space-y-1 sm:col-span-2">
+                <span className="block font-black text-slate-600 uppercase">Durée prévue</span>
+                <input
+                  data-testid="planning-reschedule-duration"
+                  type="number"
+                  min={15}
+                  step={15}
+                  value={rescheduleDurationMinutes}
+                  onChange={(event) => setRescheduleDurationMinutes(Number(event.target.value))}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button type="button" data-testid="planning-reschedule-cancel" onClick={closeRescheduleModal} className="rounded-lg bg-slate-100 px-4 py-2 font-black text-slate-700 hover:bg-slate-200">
+                Annuler
+              </button>
+              <button type="button" data-testid="planning-reschedule-confirm" onClick={handleSaveReschedule} className="rounded-lg bg-emerald-600 px-4 py-2 font-black text-white hover:bg-emerald-700">
+                Valider déplacement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div id="nimr-planning-task-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!taskSheetTarget}>
+        {taskSheetTarget && (
+          <PrintDocuments
+            type="task"
+            dossier={taskSheetTarget.dossier}
+            task={taskSheetTarget.line}
+            clientPhoneToShow={canShowPhone ? taskSheetTarget.dossier.clientTelephone : maskPhoneNumber(taskSheetTarget.dossier.clientTelephone)}
+            technicianName={techniciens.find(tech => tech.id === (taskSheetTarget.line.plannedTechnicianId || taskSheetTarget.dossier.technicienId))?.nom}
+            bayName={DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === taskSheetTarget.line.plannedBayId)?.name}
+          />
+        )}
+      </div>
 
     </div>
   );

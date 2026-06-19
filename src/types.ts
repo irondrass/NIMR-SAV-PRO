@@ -194,6 +194,11 @@ export interface RepairOrderLine {
   plannedTechnicianId?: string;
   plannedBayId?: string;
   planningDate?: string;
+  sourceComplaintId?: string;
+  complaintSeverity?: ComplaintCriticity;
+  complaintBadge?: boolean;
+  workshopZoneNote?: string;
+  chefNotes?: string;
 }
 
 export interface ComplementTravail {
@@ -256,6 +261,11 @@ export type ComplaintStatus =
   | "resolue"
   | "cloturee"
   | "reouverte"
+  | "tache_corrective_creee"
+  | "en_cours_atelier"
+  | "attente_qc"
+  | "action_realisee"
+  | "rejetee_non_fondee"
   | "en_cours"
   | "classee";
 
@@ -289,6 +299,11 @@ export interface ReclammationClient {
   dateDerniereModification?: string;
   historiqueActions?: ComplaintHistoryEntry[];
   historiqueLogs: string[];
+  linkedDossierId?: string;
+  linkedRepairOrderIds?: string[];
+  correctiveTaskCreated?: boolean;
+  correctiveTaskId?: string;
+  source?: "reception" | "livraison" | "qc" | "direction" | "client";
 }
 
 export interface ActiviteLog {
@@ -415,6 +430,32 @@ export interface WorkshopSchedule {
   days: WorkshopDaySchedule[];
 }
 
+export interface WorkshopShiftProfile {
+  id: string;
+  name: string;
+  description?: string;
+  active: boolean;
+  schedule: WorkshopSchedule;
+}
+
+export interface TechnicianShiftAssignment {
+  id: string;
+  technicianId: string;
+  shiftProfileId: string;
+  startDate: string;
+  endDate?: string;
+  daysOfWeek?: number[];
+}
+
+export interface BayShiftAssignment {
+  id: string;
+  bayId: string;
+  shiftProfileId: string;
+  startDate: string;
+  endDate?: string;
+  daysOfWeek?: number[];
+}
+
 export interface WorkshopExceptionDay {
   id: string;
   date: string; // YYYY-MM-DD
@@ -455,6 +496,9 @@ export interface WorkshopAvailabilityConfig {
   absences: TechnicianAbsence[];
   bayUnavailabilities: BayUnavailability[];
   holidays: WorkshopHoliday[];
+  shiftProfiles?: WorkshopShiftProfile[];
+  technicianShiftAssignments?: TechnicianShiftAssignment[];
+  bayShiftAssignments?: BayShiftAssignment[];
 }
 
 export interface VehicleMasterRecord {
@@ -628,5 +672,4 @@ export interface OperationalKpiReport {
   criticalPriorityDossiersCount: number;
   averageStayDays: number; // average stay duration from reception to delivery/ERP
 }
-
 

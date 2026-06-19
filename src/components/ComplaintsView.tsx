@@ -34,11 +34,15 @@ import {
   changeComplaintStatus,
   closeComplaint,
   createComplaint,
+  addCorrectiveComplaintTaskToDossier,
+  applyComplaintTaskLinkToDossier,
+  createCorrectiveTaskFromComplaint,
   filterComplaints,
   getComplaintTimeline,
   isComplaintLinkedToReadyDelivery,
   isComplaintOpen,
   isComplaintOverdue,
+  linkComplaintToRepairOrder,
   normalizeComplaint,
   normalizeComplaintStatus,
   reopenComplaint,
@@ -54,6 +58,7 @@ interface ComplaintsViewProps {
   currentUserLabel: string;
   onAddReclamation: (rec: ReclammationClient) => void;
   onUpdateReclamation: (updated: ReclammationClient) => void;
+  onUpdateDossier: (updated: DossierSAV) => void;
   onSelectDossier: (dossierId: string) => void;
 }
 
@@ -74,6 +79,11 @@ const statusFilterLabels: Record<StatusFilter, string> = {
   en_analyse: "En analyse",
   action_corrective: "Action corrective en cours",
   attente_client: "En attente client",
+  tache_corrective_creee: "Tâches correctives",
+  en_cours_atelier: "En cours atelier",
+  attente_qc: "En attente QC",
+  action_realisee: "Actions réalisées",
+  rejetee_non_fondee: "Rejetées non fondées",
   resolue: "Résolues",
   cloturee: "Clôturées",
   reouverte: "Réouvertes",
@@ -91,6 +101,11 @@ const statusClasses: Record<ActiveComplaintStatus, string> = {
   en_analyse: "bg-indigo-50 text-indigo-700 border-indigo-100",
   action_corrective: "bg-amber-50 text-amber-800 border-amber-100",
   attente_client: "bg-violet-50 text-violet-700 border-violet-100",
+  tache_corrective_creee: "bg-cyan-50 text-cyan-800 border-cyan-100",
+  en_cours_atelier: "bg-orange-50 text-orange-800 border-orange-100",
+  attente_qc: "bg-fuchsia-50 text-fuchsia-800 border-fuchsia-100",
+  action_realisee: "bg-teal-50 text-teal-800 border-teal-100",
+  rejetee_non_fondee: "bg-stone-100 text-stone-700 border-stone-200",
   resolue: "bg-emerald-50 text-emerald-700 border-emerald-100",
   cloturee: "bg-slate-100 text-slate-700 border-slate-200",
   reouverte: "bg-red-50 text-red-700 border-red-100",
@@ -104,6 +119,7 @@ export default function ComplaintsView({
   currentUserLabel,
   onAddReclamation,
   onUpdateReclamation,
+  onUpdateDossier,
   onSelectDossier,
 }: ComplaintsViewProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("toutes");
@@ -114,6 +130,7 @@ export default function ComplaintsView({
   const [showAddForm, setShowAddForm] = useState(false);
   const [formError, setFormError] = useState("");
   const [drafts, setDrafts] = useState<Record<string, ComplaintDraft>>({});
+  const [taskLinkDrafts, setTaskLinkDrafts] = useState<Record<string, string>>({});
   const [form, setForm] = useState({
     dossierId: "",
     clientNom: "",
@@ -264,6 +281,27 @@ export default function ComplaintsView({
   };
 
   const findLinkedDossier = (rec: ReclammationClient) => dossiers.find(dossier => dossier.id === rec.dossierId);
+
+  const handleLinkComplaintTask = (rec: ReclammationClient, repairOrderId: string) => {
+    const linkedDossier = findLinkedDossier(rec);
+    if (!linkedDossier || !repairOrderId || !canEditComplaint(userRole, rec)) return;
+
+    const linkedComplaint = linkComplaintToRepairOrder(rec, repairOrderId, actor);
+    onUpdateReclamation(linkedComplaint);
+    onUpdateDossier(applyComplaintTaskLinkToDossier(linkedDossier, linkedComplaint, repairOrderId));
+    setTaskLinkDrafts(prev => ({ ...prev, [rec.id]: repairOrderId }));
+  };
+
+  const handleCreateCorrectiveTask = (rec: ReclammationClient) => {
+    const linkedDossier = findLinkedDossier(rec);
+    if (!linkedDossier || !canEditComplaint(userRole, rec)) return;
+
+    const existingIds = linkedDossier.ordresReparation.map(line => line.id);
+    const { complaint, line } = createCorrectiveTaskFromComplaint(rec, existingIds, actor);
+    onUpdateReclamation(complaint);
+    onUpdateDossier(addCorrectiveComplaintTaskToDossier(linkedDossier, line, complaint));
+    setTaskLinkDrafts(prev => ({ ...prev, [rec.id]: line.id }));
+  };
 
   return (
     <div className="space-y-5">
@@ -579,12 +617,74 @@ export default function ComplaintsView({
                 </div>
 
                 {linkedDossier && (
-                  <div data-testid="complaint-linked-dossier-summary" className="mt-4 grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-blue-50/40 p-3 text-[11px] md:grid-cols-2">
-                    <div><span className="text-slate-500">Statut dossier : </span><StatusBadge status={linkedDossier.statut} /></div>
-                    <div><span className="text-slate-500">Client : </span><strong>{linkedDossier.clientNom}</strong></div>
-                    <div><span className="text-slate-500">Véhicule : </span><strong>{linkedDossier.vehiculeMarque} {linkedDossier.vehiculeModele}</strong></div>
-                    <div><span className="text-slate-500">QC / Livraison : </span><strong>{linkedDossier.checklistQC.validationGlobale} / {linkedDossier.livraison.confirmationReceptionClient ? "livraison confirmée" : "livraison non confirmée"}</strong></div>
-                  </div>
+                  <>
+                    <div data-testid="complaint-linked-dossier-summary" className="mt-4 grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-blue-50/40 p-3 text-[11px] md:grid-cols-2">
+                      <div><span className="text-slate-500">Statut dossier : </span><StatusBadge status={linkedDossier.statut} /></div>
+                      <div><span className="text-slate-500">Client : </span><strong>{linkedDossier.clientNom}</strong></div>
+                      <div><span className="text-slate-500">Véhicule : </span><strong>{linkedDossier.vehiculeMarque} {linkedDossier.vehiculeModele}</strong></div>
+                      <div><span className="text-slate-500">QC / Livraison : </span><strong>{linkedDossier.checklistQC.validationGlobale} / {linkedDossier.livraison.confirmationReceptionClient ? "livraison confirmée" : "livraison non confirmée"}</strong></div>
+                    </div>
+
+                    <div data-testid="complaint-task-link-panel" className="mt-3 rounded-lg border border-cyan-100 bg-cyan-50/40 p-3 text-[11px]">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                        <FormField label="Tâche atelier liée">
+                          <select
+                            data-testid="complaint-task-link-select"
+                            className="w-full rounded border border-cyan-100 bg-white p-2 font-semibold text-slate-800"
+                            value={taskLinkDrafts[normalized.id] || normalized.linkedRepairOrderIds?.[0] || linkedDossier.ordresReparation[0]?.id || ""}
+                            onChange={(event) => setTaskLinkDrafts(prev => ({ ...prev, [normalized.id]: event.target.value }))}
+                          >
+                            {linkedDossier.ordresReparation.map(line => (
+                              <option key={line.id} value={line.id}>
+                                {line.designation} ({line.status})
+                              </option>
+                            ))}
+                          </select>
+                        </FormField>
+
+                        <div className="flex flex-wrap gap-2">
+                          {editable && linkedDossier.ordresReparation.length > 0 && (
+                            <button
+                              type="button"
+                              data-testid="complaint-link-task-button"
+                              onClick={() => handleLinkComplaintTask(
+                                normalized,
+                                taskLinkDrafts[normalized.id] || normalized.linkedRepairOrderIds?.[0] || linkedDossier.ordresReparation[0]?.id || ""
+                              )}
+                              className="rounded bg-cyan-700 px-3 py-2 text-[10px] font-black text-white hover:bg-cyan-800"
+                            >
+                              Lier tâche
+                            </button>
+                          )}
+                          {editable && (
+                            <button
+                              type="button"
+                              data-testid="complaint-create-corrective-task-button"
+                              onClick={() => handleCreateCorrectiveTask(normalized)}
+                              className="rounded bg-slate-900 px-3 py-2 text-[10px] font-black text-white hover:bg-slate-700"
+                            >
+                              Créer tâche corrective
+                            </button>
+                          )}
+                          {(normalized.linkedRepairOrderIds?.length ?? 0) > 0 && (
+                            <button
+                              type="button"
+                              data-testid="complaint-view-linked-task"
+                              onClick={() => onSelectDossier(linkedDossier.id)}
+                              className="rounded border border-cyan-200 bg-white px-3 py-2 text-[10px] font-black text-cyan-800 hover:bg-cyan-50"
+                            >
+                              Voir tâche liée
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {(normalized.linkedRepairOrderIds?.length ?? 0) > 0 && (
+                        <p data-testid="complaint-linked-task-badge" className="mt-2 font-black uppercase text-cyan-800">
+                          REC liée aux tâches : {normalized.linkedRepairOrderIds?.join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
 
                 <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">

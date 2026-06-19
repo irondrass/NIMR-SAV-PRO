@@ -136,8 +136,8 @@ test.describe("Rôle : Directeur SAV", () => {
     // Modal should be gone
     await expect(modal).toHaveCount(0);
  
-    // Expect task to change back to reopened status
-    await expect(page.locator('[data-testid="task-status-ro_dir_1"]')).toHaveText(/Réouvert/i);
+    // Expect task to change back to resumed/reopened status
+    await expect(page.locator('[data-testid="task-status-ro_dir_1"]')).toHaveText(/Reprise/i);
   });
 
   test("Dashboard KPI Directeur Lot 5 visible, filtrable et sans périmètre interdit", async ({ page }) => {

@@ -232,7 +232,7 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
 
     // Programmatic click should do nothing
     await startBtn.evaluate(node => (node as HTMLButtonElement).click());
-    await expect(page.locator('[data-testid="task-status-task_pending"]')).toHaveText(/à faire/i);
+    await expect(page.locator('[data-testid="task-status-task_pending"]')).toHaveText(/en attente/i);
   });
 
   test("Technicien : message de blocage non dupliqué", async ({ page }) => {

@@ -10,6 +10,7 @@ import {
   DossierSAV,
   DossierStatus,
   ReclammationClient,
+  RepairOrderLine,
   UserRole,
 } from "./types";
 import { normalizePlateNumber, sanitizeFreeText } from "./field-validations";
@@ -21,6 +22,11 @@ export const COMPLAINT_STATUSES: ActiveComplaintStatus[] = [
   "en_analyse",
   "action_corrective",
   "attente_client",
+  "tache_corrective_creee",
+  "en_cours_atelier",
+  "attente_qc",
+  "action_realisee",
+  "rejetee_non_fondee",
   "resolue",
   "cloturee",
   "reouverte",
@@ -31,6 +37,11 @@ export const COMPLAINT_STATUS_LABELS: Record<ActiveComplaintStatus, string> = {
   en_analyse: "En analyse",
   action_corrective: "Action corrective en cours",
   attente_client: "En attente client",
+  tache_corrective_creee: "Tâche corrective créée",
+  en_cours_atelier: "En cours atelier",
+  attente_qc: "En attente QC",
+  action_realisee: "Action réalisée",
+  rejetee_non_fondee: "Rejetée non fondée",
   resolue: "Résolue",
   cloturee: "Clôturée",
   reouverte: "Réouverte",
@@ -151,6 +162,138 @@ export function updateComplaint(
     comment,
     now,
   });
+}
+
+export function linkComplaintToRepairOrder(
+  complaint: ReclammationClient,
+  repairOrderId: string,
+  actor: ComplaintActor = DEFAULT_ACTOR,
+  now = new Date()
+): ReclammationClient {
+  assertComplaintEditable(complaint);
+  const normalized = normalizeComplaint(complaint);
+  const safeRepairOrderId = sanitizeFreeText(repairOrderId);
+  if (!safeRepairOrderId) {
+    throw new Error("Tâche atelier obligatoire pour lier la réclamation.");
+  }
+
+  const linkedRepairOrderIds = Array.from(new Set([
+    ...(normalized.linkedRepairOrderIds ?? []),
+    safeRepairOrderId,
+  ]));
+  const nextStatus = normalizeComplaintStatus(normalized.statut) === "nouvelle"
+    ? "en_analyse"
+    : normalizeComplaintStatus(normalized.statut);
+
+  return appendComplaintHistory({
+    ...normalized,
+    statut: nextStatus,
+    linkedDossierId: normalized.linkedDossierId || normalized.dossierId,
+    linkedRepairOrderIds,
+  }, {
+    actor,
+    action: "Réclamation liée à une tâche atelier",
+    oldStatus: normalizeComplaintStatus(normalized.statut),
+    newStatus: nextStatus,
+    comment: `Tâche liée: ${safeRepairOrderId}`,
+    now,
+  });
+}
+
+export function createCorrectiveTaskFromComplaint(
+  complaint: ReclammationClient,
+  existingRepairOrderIds: string[] = [],
+  actor: ComplaintActor = DEFAULT_ACTOR,
+  now = new Date()
+): { complaint: ReclammationClient; line: RepairOrderLine } {
+  assertComplaintEditable(complaint);
+  const normalized = normalizeComplaint(complaint);
+  const taskId = normalized.correctiveTaskId || createCorrectiveTaskId(normalized, existingRepairOrderIds);
+  const line: RepairOrderLine = {
+    id: taskId,
+    designation: `Action corrective réclamation ${normalized.id}: ${sanitizeFreeText(normalized.motif).slice(0, 90)}`,
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "pending",
+    estimateSource: "manual",
+    isEstimatedDurationValidated: true,
+    sourceComplaintId: normalized.id,
+    complaintSeverity: normalized.criticite,
+    complaintBadge: true,
+    workshopZoneNote: "Réclamation client à traiter en atelier avant QC.",
+  };
+
+  const nextComplaint = appendComplaintHistory({
+    ...normalized,
+    statut: "tache_corrective_creee",
+    linkedDossierId: normalized.linkedDossierId || normalized.dossierId,
+    linkedRepairOrderIds: Array.from(new Set([
+      ...(normalized.linkedRepairOrderIds ?? []),
+      taskId,
+    ])),
+    correctiveTaskCreated: true,
+    correctiveTaskId: taskId,
+    actionCorrective: normalized.actionCorrective || "Tâche corrective atelier créée",
+  }, {
+    actor,
+    action: "Tâche corrective atelier créée",
+    oldStatus: normalizeComplaintStatus(normalized.statut),
+    newStatus: "tache_corrective_creee",
+    comment: `Tâche corrective: ${taskId}`,
+    now,
+  });
+
+  return { complaint: nextComplaint, line };
+}
+
+export function applyComplaintTaskLinkToDossier(
+  dossier: DossierSAV,
+  complaint: ReclammationClient,
+  repairOrderId: string,
+  now = new Date()
+): DossierSAV {
+  const normalized = normalizeComplaint(complaint);
+  const safeRepairOrderId = sanitizeFreeText(repairOrderId);
+  const nextLines = dossier.ordresReparation.map(line => line.id === safeRepairOrderId
+    ? {
+      ...line,
+      sourceComplaintId: normalized.id,
+      complaintSeverity: normalized.criticite,
+      complaintBadge: true,
+    }
+    : line
+  );
+
+  return {
+    ...dossier,
+    ordresReparation: nextLines,
+    historiqueLogs: [
+      `${now.toISOString()} - Réclamation ${normalized.id} liée à la tâche ${safeRepairOrderId}.`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+    dateDernierStatut: now.toISOString(),
+  };
+}
+
+export function addCorrectiveComplaintTaskToDossier(
+  dossier: DossierSAV,
+  line: RepairOrderLine,
+  complaint: ReclammationClient,
+  now = new Date()
+): DossierSAV {
+  const normalized = normalizeComplaint(complaint);
+  const alreadyExists = dossier.ordresReparation.some(current => current.id === line.id);
+  return {
+    ...dossier,
+    ordresReparation: alreadyExists
+      ? dossier.ordresReparation.map(current => current.id === line.id ? line : current)
+      : [...dossier.ordresReparation, line],
+    historiqueLogs: [
+      `${now.toISOString()} - Tâche corrective ${line.id} créée depuis réclamation ${normalized.id}.`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+    dateDernierStatut: now.toISOString(),
+  };
 }
 
 export function changeComplaintStatus(
@@ -413,6 +556,17 @@ function createSequentialComplaintId(prefix: string, existingIds: string[], now:
     return Number.isInteger(sequence) ? Math.max(max, sequence) : max;
   }, 0);
   return `${marker}${String(maxSequence + 1).padStart(3, "0")}`;
+}
+
+function createCorrectiveTaskId(complaint: ReclammationClient, existingIds: string[]): string {
+  const base = complaint.id.replace(/[^A-Z0-9]+/gi, "_").toLowerCase();
+  const marker = `task_${base}_`;
+  const maxSequence = existingIds.reduce((max, id) => {
+    if (!id.startsWith(marker)) return max;
+    const sequence = Number(id.slice(marker.length));
+    return Number.isInteger(sequence) ? Math.max(max, sequence) : max;
+  }, 0);
+  return `${marker}${String(maxSequence + 1).padStart(2, "0")}`;
 }
 
 function parseComplaintDeadline(value: string): Date | null {

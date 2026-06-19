@@ -31,7 +31,6 @@ import {
   confirmDelivery,
   createRuntimeId,
   finishRepairOrder,
-  getRepairOrderStatusLabel,
   isRepairOrderDone,
   markReadyForBilling,
   normalizeRepairOrderStatus,
@@ -45,6 +44,7 @@ import {
 import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
+import { getTaskStatusVisual } from "../task-status-visual";
 import { 
   ArrowLeft, 
   FileText, 
@@ -90,7 +90,8 @@ export default function DossierDetail({
   techniciensList
 }: DossierDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("resume");
-  const [printType, setPrintType] = useState<"reception" | "or" | "qc" | "delivery" | null>(null);
+  const [printType, setPrintType] = useState<"reception" | "or" | "qc" | "delivery" | "task" | null>(null);
+  const [printTask, setPrintTask] = useState<RepairOrderLine | null>(null);
   
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
@@ -120,10 +121,23 @@ export default function DossierDetail({
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
 
   const handlePrintDocument = (type: "reception" | "or" | "qc" | "delivery") => {
+    setPrintTask(null);
     setPrintType(type);
     window.setTimeout(() => {
       window.print();
       window.setTimeout(() => setPrintType(null), 750);
+    }, 50);
+  };
+
+  const handlePrintTaskDocument = (line: RepairOrderLine) => {
+    setPrintTask(line);
+    setPrintType("task");
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => {
+        setPrintType(null);
+        setPrintTask(null);
+      }, 750);
     }, 50);
   };
 
@@ -291,7 +305,7 @@ export default function DossierDetail({
 
   const handleQCSubmit = (globVal: "valide" | "refuse", comment?: string) => {
     if (globVal === "valide" && !isChecklistComplete) {
-      setQcError("Impossible de valider le QC sans checklist complÃ¨te.");
+      setQcError("Impossible de valider le QC sans checklist complète.");
       return;
     }
     if (globVal === "refuse" && !comment?.trim()) {
@@ -304,7 +318,7 @@ export default function DossierDetail({
 
   const handleQCValidationRequest = () => {
     if (!isChecklistComplete) {
-      setQcError("Impossible de valider le QC sans checklist complÃ¨te.");
+      setQcError("Impossible de valider le QC sans checklist complète.");
       return;
     }
     setQcError(null);
@@ -360,7 +374,7 @@ export default function DossierDetail({
     if (modalTargetLineId) {
       const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
       const taskName = line ? line.designation : modalTargetLineId;
-      const logMessage = `[${userRole}] - RÃ©ouverture TÃ¢che "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+      const logMessage = `[${userRole}] - Réouverture Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
       
       const result = reopenRepairOrder(dossiers, dossier.id, modalTargetLineId, userRole, fullReason);
       if (result.ok === false) {
@@ -422,7 +436,7 @@ export default function DossierDetail({
       validation: finishValidation,
     });
     if (!validation.valid || !validation.diagnostic) {
-      const reason = validation.reason || "Diagnostic structurÃ© obligatoire.";
+      const reason = validation.reason || "Diagnostic structuré obligatoire.";
       setFinishValidationError(reason);
       setTaskError(reason);
       return;
@@ -453,7 +467,7 @@ export default function DossierDetail({
     if (modalTargetLineId) {
       const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
       const taskName = line ? line.designation : modalTargetLineId;
-      const logMessage = `[${userRole}] - LevÃ©e Blocage TÃ¢che "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
+      const logMessage = `[${userRole}] - Levée Blocage Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
 
       const result = releaseRepairOrderBlock(dossiers, dossier.id, modalTargetLineId, userRole, fullReason);
       if (result.ok === false) {
@@ -499,12 +513,12 @@ export default function DossierDetail({
           className="inline-flex items-center gap-2 text-xs font-bold text-slate-600  hover:text-blue-600  transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          Retour Ã  la liste des dossiers
+          Retour à la liste des dossiers
         </button>
 
         {canManageDossier && (
           <div className="flex flex-wrap gap-2">
-            <span className="text-xs font-bold text-neutral-400 self-center">PrioritÃ© dossier :</span>
+            <span className="text-xs font-bold text-neutral-400 self-center">Priorité dossier :</span>
             <select
               data-testid="force-priority-select"
               className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
@@ -535,18 +549,18 @@ export default function DossierDetail({
               <h1 className="text-xl md:text-2xl font-black font-display tracking-tight uppercase">{dossier.clientNom}</h1>
               <div className="flex flex-wrap items-center gap-3 text-slate-400 text-xs">
                 <span className="font-bold text-slate-200 font-display">{dossier.vehiculeMarque} {dossier.vehiculeModele}</span>
-                <span>â€¢</span>
+                <span>•</span>
                 <LicencePlate plate={dossier.vehiculeImmatriculation} />
-                <span>â€¢</span>
+                <span>•</span>
                 <span>Kms: {dossier.vehiculeKilometrage.toLocaleString()}</span>
-                <span>â€¢</span>
+                <span>•</span>
                 <span>VIN: <span className="font-mono text-[11px] text-slate-300">{dossier.vehiculeVIN}</span></span>
               </div>
             </div>
           </div>
 
           <div className="flex flex-col md:items-end justify-center space-y-2">
-            <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Statut Actuel OpÃ©rationnel</span>
+            <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Statut Actuel Opérationnel</span>
             <StatusBadge status={dossier.statut} />
             
             {/* Progress indicator */}
@@ -554,7 +568,7 @@ export default function DossierDetail({
               <div className="w-24 bg-white/10 rounded-full h-1.5 overflow-hidden">
                 <div className="bg-green-500 h-full rounded-full transition-all" style={{ width: `${dossier.avancementGlobal}%` }}></div>
               </div>
-              <span className="text-xs font-mono font-bold text-green-400">{dossier.avancementGlobal}% terminÃ©</span>
+              <span className="text-xs font-mono font-bold text-green-400">{dossier.avancementGlobal}% terminé</span>
             </div>
           </div>
         </div>
@@ -563,14 +577,14 @@ export default function DossierDetail({
       {/* Tab Switcher */}
       <div className="border-b border-slate-200  flex overflow-x-auto bg-slate-50  p-1.5 rounded-lg">
         {[
-          { key: "resume", label: "RÃ©sumÃ© Action", icon: FileText },
-          { key: "client", label: "Client & VÃ©hicule", icon: User },
+          { key: "resume", label: "Résumé Action", icon: FileText },
+          { key: "client", label: "Client & Véhicule", icon: User },
           { key: "repair-orders", label: "Ordres Travaux", icon: Wrench },
           { key: "photos", label: "Dossier Photos", icon: Camera },
-          { key: "complements", label: "ComplÃ©ments & Accords", icon: ThumbsUp },
+          { key: "complements", label: "Compléments & Accords", icon: ThumbsUp },
           { key: "documents", label: "Documents", icon: Printer },
-          { key: "quality-control", label: "Checklist QualitÃ©", icon: CheckCircle2 },
-          { key: "deliveries", label: "Livraison VÃ©hicule", icon: FileCheck }
+          { key: "quality-control", label: "Checklist Qualité", icon: CheckCircle2 },
+          { key: "deliveries", label: "Livraison Véhicule", icon: FileCheck }
         ].map((tab) => {
           const TabIcon = tab.icon;
           const isSel = activeTab === tab.key;
@@ -595,7 +609,7 @@ export default function DossierDetail({
       {/* Tab Contents */}
       <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm">
         
-        {/* Tab 1: RÃ©sumÃ© */}
+        {/* Tab 1: Résumé */}
         {activeTab === "resume" && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -608,7 +622,7 @@ export default function DossierDetail({
                   <div className="flex gap-2 text-xs font-bold text-amber-800 ">
                     <CheckCircle className="w-4 h-4 mt-0.5 text-amber-700  flex-shrink-0" />
                     <div>
-                      <span className="uppercase block font-black leading-none">Prochaine action recommandÃ©e :</span>
+                      <span className="uppercase block font-black leading-none">Prochaine action recommandée :</span>
                       <span className="text-[13px] font-medium block mt-1 text-slate-900 ">
                         {dossier.prochaineActionRecommended}
                       </span>
@@ -619,23 +633,23 @@ export default function DossierDetail({
                 <div className="grid grid-cols-2 gap-4 text-xs font-semibold">
                   <div>
                     <span className="text-zinc-400 block font-normal">Responsable en cours :</span>
-                    <span className="text-zinc-700  font-bold block">{dossier.technicienId ? techniciensList.find(t=>t.id===dossier.technicienId)?.nom || "Technicien AffectÃ©" : "Non assignÃ©"}</span>
+                    <span className="text-zinc-700  font-bold block">{dossier.technicienId ? techniciensList.find(t=>t.id===dossier.technicienId)?.nom || "Technicien Affecté" : "Non assigné"}</span>
                   </div>
 
                   <div>
                     <span className="text-zinc-400 block font-normal">Zone de l'Atelier :</span>
-                    <span className="text-zinc-700  font-bold block">{dossier.zoneAtelier || "RÃ©ception"}</span>
+                    <span className="text-zinc-700  font-bold block">{dossier.zoneAtelier || "Réception"}</span>
                   </div>
 
                   <div>
-                    <span className="text-zinc-400 block font-normal">Date d'EntrÃ©e :</span>
+                    <span className="text-zinc-400 block font-normal">Date d'Entrée :</span>
                     <span className="text-zinc-700  font-bold block">
                       {new Date(dossier.dateReception).toLocaleDateString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
 
                   <div>
-                    <span className="text-zinc-400 block font-normal">Ã‰chÃ©ance de restitution :</span>
+                    <span className="text-zinc-400 block font-normal">Échéance de restitution :</span>
                     <span className="text-zinc-700  font-bold block">
                       {new Date(dossier.dateSouhaiteeLivraison).toLocaleDateString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                     </span>
@@ -656,7 +670,7 @@ export default function DossierDetail({
                   <div data-testid="dossier-linked-complaints" className="p-3 bg-red-50/50 border border-red-100 rounded-lg space-y-2 text-xs">
                     <div className="flex items-center gap-2 font-black uppercase text-red-700">
                       <ShieldAlert className="w-4 h-4" />
-                      RÃ©clamations liÃ©es au dossier
+                      Réclamations liées au dossier
                     </div>
                     <div className="space-y-2">
                       {linkedComplaints.map(reclamation => {
@@ -684,14 +698,14 @@ export default function DossierDetail({
               {/* Right: Quick action box */}
               {canManageDossier && (
                 <div className="p-4 bg-slate-50  border border-slate-200  rounded-xl space-y-4">
-                  <h4 className="font-bold text-xs text-slate-800  uppercase tracking-wider">Planifications & ContrÃ´les Rapides</h4>
+                  <h4 className="font-bold text-xs text-slate-800  uppercase tracking-wider">Planifications & Contrôles Rapides</h4>
                   <p className="text-xs text-slate-500">
-                    Attribuer rapidement le dossier Ã  un technicien disponible ou diriger le dossier vers la zone appropriÃ©e.
+                    Attribuer rapidement le dossier à un technicien disponible ou diriger le dossier vers la zone appropriée.
                   </p>
 
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-600  mb-1">Attribuer Ã  un technicien :</label>
+                      <label className="block text-xs font-bold text-slate-600  mb-1">Attribuer à un technicien :</label>
                       <select
                         data-testid="assign-technicien-select"
                         className="w-full p-2 bg-white  border border-slate-200  rounded font-semibold text-xs "
@@ -701,11 +715,11 @@ export default function DossierDetail({
                           updateDossierState({
                             technicienId: val || undefined,
                             statut: val ? DossierStatus.EN_TRAVAUX : DossierStatus.TRAVAUX_PLANIFIES,
-                            prochaineActionRecommended: val ? "Terminer les ordres de rÃ©paration affectÃ©s" : "Affecter un technicien"
+                            prochaineActionRecommended: val ? "Terminer les ordres de réparation affectés" : "Affecter un technicien"
                           });
                         }}
                       >
-                        <option value="">-- Non assignÃ© (File d'attente) --</option>
+                        <option value="">-- Non assigné (File d'attente) --</option>
                         {techniciensList.map(t => (
                           <option key={t.id} value={t.id}>{t.nom}</option>
                         ))}
@@ -713,13 +727,13 @@ export default function DossierDetail({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-600  mb-1">Zone de l'Atelier affectÃ©e :</label>
+                      <label className="block text-xs font-bold text-slate-600  mb-1">Zone de l'Atelier affectée :</label>
                       <select
                         className="w-full p-2 bg-white  border border-slate-200  rounded font-semibold text-xs "
                         value={dossier.zoneAtelier || ""}
                         onChange={(e) => updateDossierState({ zoneAtelier: e.target.value as AtelierZone })}
                       >
-                        <option value="">-- Non spÃ©cifiÃ©e (Lobby) --</option>
+                        <option value="">-- Non spécifiée (Lobby) --</option>
                         {Object.values(AtelierZone).map(z => (
                           <option key={z} value={z}>{z}</option>
                         ))}
@@ -728,7 +742,7 @@ export default function DossierDetail({
                   </div>
 
                   <div className="pt-2">
-                    <span className="text-[10px] text-zinc-400 block text-right">DerniÃ¨re mise Ã  jour : {new Date(dossier.dateDernierStatut).toLocaleTimeString("fr-FR")}</span>
+                    <span className="text-[10px] text-zinc-400 block text-right">Dernière mise à jour : {new Date(dossier.dateDernierStatut).toLocaleTimeString("fr-FR")}</span>
                   </div>
                 </div>
               )}
@@ -737,11 +751,11 @@ export default function DossierDetail({
           </div>
         )}
 
-        {/* Tab 2: Client & VÃ©hicule */}
+        {/* Tab 2: Client & Véhicule */}
         {activeTab === "client" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Fiche CoordonnÃ©es Client</h3>
+              <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Fiche Coordonnées Client</h3>
               
               <div className="grid grid-cols-2 gap-y-3.5 gap-x-4 text-xs font-semibold">
                 <div>
@@ -749,24 +763,24 @@ export default function DossierDetail({
                   <span className="text-zinc-950  font-bold block">{dossier.clientNom}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">TÃ©lÃ©phone Portable :</span>
+                  <span className="text-zinc-400 font-normal block">Téléphone Portable :</span>
                   <span className="text-blue-600 font-bold block font-mono">{dossier.clientTelephone}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">Nom DÃ©posant :</span>
+                  <span className="text-zinc-400 font-normal block">Nom Déposant :</span>
                   <span className="text-zinc-700  block">{dossier.deposantNom}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">TÃ©lÃ©phone DÃ©posant :</span>
+                  <span className="text-zinc-400 font-normal block">Téléphone Déposant :</span>
                   <span className="text-zinc-700  block font-mono">{dossier.deposantTelephone}</span>
                 </div>
               </div>
 
               {/* Objets check list display */}
               <div className="p-3.5 bg-neutral-50  rounded-xl border border-neutral-100  text-xs">
-                <span className="font-bold text-zinc-600  block mb-1.5 uppercase">Objets recensÃ©s Ã  bord :</span>
+                <span className="font-bold text-zinc-600  block mb-1.5 uppercase">Objets recensés à bord :</span>
                 {dossier.objetsLaisses.length === 0 ? (
-                  <p className="text-[11px] text-zinc-400 italic">Aucun objet listÃ©.</p>
+                  <p className="text-[11px] text-zinc-400 italic">Aucun objet listé.</p>
                 ) : (
                   <ul className="list-disc list-inside space-y-1 text-slate-600  font-medium">
                     {dossier.objetsLaisses.map((obj, idx) => (
@@ -779,7 +793,7 @@ export default function DossierDetail({
 
             {/* Vehicle spec block */}
             <div className="space-y-4">
-              <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Identifiants VÃ©hicule</h3>
+              <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Identifiants Véhicule</h3>
               
               <div className="grid grid-cols-2 gap-y-3.5 gap-x-4 text-xs font-medium">
                 <div>
@@ -787,7 +801,7 @@ export default function DossierDetail({
                   <span className="text-zinc-950  font-bold block">{dossier.vehiculeMarque}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">ModÃ¨le Commercial :</span>
+                  <span className="text-zinc-400 font-normal block">Modèle Commercial :</span>
                   <span className="text-zinc-950  font-bold block">{dossier.vehiculeModele}</span>
                 </div>
                 <div>
@@ -795,15 +809,15 @@ export default function DossierDetail({
                   <LicencePlate plate={dossier.vehiculeImmatriculation} />
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">NumÃ©ro de ChÃ¢ssis (VIN) :</span>
+                  <span className="text-zinc-400 font-normal block">Numéro de Châssis (VIN) :</span>
                   <span className="text-slate-800  font-mono text-[11px] font-bold block">{dossier.vehiculeVIN}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">Teinte ExtÃ©rieure :</span>
+                  <span className="text-zinc-400 font-normal block">Teinte Extérieure :</span>
                   <span className="text-slate-800  font-bold block">{dossier.vehiculeCouleur || "N/A"}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-400 font-normal block">KilomÃ©trage relevÃ© :</span>
+                  <span className="text-zinc-400 font-normal block">Kilométrage relevé :</span>
                   <span className="text-slate-800  font-bold block">{dossier.vehiculeKilometrage.toLocaleString()} km</span>
                 </div>
                 <div>
@@ -823,7 +837,7 @@ export default function DossierDetail({
                   <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase inline-block ${
                     dossier.statutGarantie === "Garantie active" 
                       ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
-                      : dossier.statutGarantie === "Garantie expirÃ©e"
+                      : dossier.statutGarantie === "Garantie expirée"
                       ? "bg-rose-50 text-rose-700 border border-rose-200"
                       : "bg-slate-100 text-slate-600 border border-slate-200"
                   }`} data-testid="detail-warranty-status">
@@ -832,13 +846,13 @@ export default function DossierDetail({
                 </div>
                 <div className="col-span-2">
                   <span className="text-zinc-400 font-normal block">Dernier entretien :</span>
-                  <span className="text-slate-800 font-bold block font-mono text-[11px]" data-testid="detail-last-service">{dossier.dernierEntretien || "Aucun entretien enregistrÃ©"}</span>
+                  <span className="text-slate-800 font-bold block font-mono text-[11px]" data-testid="detail-last-service">{dossier.dernierEntretien || "Aucun entretien enregistré"}</span>
                 </div>
               </div>
 
               {/* Fuel and paint panel */}
               <div className="p-3.5 bg-neutral-50  rounded-xl border border-neutral-100  space-y-2.5 text-xs">
-                <span className="font-bold text-zinc-600  block uppercase">Niveau dâ€™Ã‰thanol / Carburant</span>
+                <span className="font-bold text-zinc-600  block uppercase">Niveau d’Éthanol / Carburant</span>
                 <FuelIndicator level={dossier.niveauCarburant} />
                 
                 <div className="border-t border-neutral-200  pt-2 grid grid-cols-2 gap-1.5 text-[11px] font-semibold text-zinc-500">
@@ -852,11 +866,11 @@ export default function DossierDetail({
                   </div>
                   <div className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full inline-block ${dossier.etatCarrosserie.fissureParbrise ? "bg-red-500" : "bg-green-500"}`}></span>
-                    Pare-brise cassÃ©: {dossier.etatCarrosserie.fissureParbrise ? "OUI" : "NON"}
+                    Pare-brise cassé: {dossier.etatCarrosserie.fissureParbrise ? "OUI" : "NON"}
                   </div>
                   <div className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full inline-block ${dossier.etatCarrosserie.jantesAbimees ? "bg-amber-500" : "bg-green-500"}`}></span>
-                    Jante rayÃ©e: {dossier.etatCarrosserie.jantesAbimees ? "OUI" : "NON"}
+                    Jante rayée: {dossier.etatCarrosserie.jantesAbimees ? "OUI" : "NON"}
                   </div>
                 </div>
               </div>
@@ -865,13 +879,13 @@ export default function DossierDetail({
           </div>
         )}
 
-        {/* Tab 3: Ordres de rÃ©paration */}
+        {/* Tab 3: Ordres de réparation */}
         {activeTab === "repair-orders" && (
           <div className="space-y-4">
             <div className="flex justify-between items-center border-b pb-2">
               <div>
-                <h3 className="font-bold text-sm text-slate-800  font-display uppercase tracking-tight">Ordres de Travaux & Remplacement PiÃ¨ces</h3>
-                <p className="text-slate-400 text-xs">Suivi des travaux de main-d'Å“uvre spÃ©cifiques Ã  l'atelier</p>
+                <h3 className="font-bold text-sm text-slate-800  font-display uppercase tracking-tight">Ordres de Travaux & Remplacement Pièces</h3>
+                <p className="text-slate-400 text-xs">Suivi des travaux de main-d'œuvre spécifiques à l'atelier</p>
               </div>
               <div className="flex items-center gap-2">
                 {[UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole) && (
@@ -884,7 +898,7 @@ export default function DossierDetail({
                   </button>
                 )}
                 <span className="bg-blue-50  text-blue-700  text-xs font-bold px-3 py-1 rounded font-mono">
-                  Total estimÃ© : {dossier.ordresReparation.reduce((acc, current) => acc + current.tempsEstime, 0)} Heures
+                  Total estimé : {dossier.ordresReparation.reduce((acc, current) => acc + current.tempsEstime, 0)} Heures
                 </span>
               </div>
             </div>
@@ -911,23 +925,19 @@ export default function DossierDetail({
                   )
                   : undefined;
                 const startBlockedMessage = !assignedTechnicianId
-                  ? "Affecter un technicien avant de dÃ©marrer la tÃ¢che."
+                  ? "Affecter un technicien avant de démarrer la tâche."
                   : status === "blocked"
-                    ? "Lever le blocage avant de reprendre la tÃ¢che."
+                    ? "Lever le blocage avant de reprendre la tâche."
                     : activeLineInSameDossier
-                      ? "Une tÃ¢che est dÃ©jÃ  en cours pour ce dossier."
+                      ? "Une tâche est déjà en cours pour ce dossier."
                       : activeDossierForTechnician
-                        ? "Ce technicien a dÃ©jÃ  une tÃ¢che en cours."
+                        ? "Ce technicien a déjà une tâche en cours."
                         : "";
                 const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
-                const badgeStyle = {
-                  pending: "bg-stone-100 text-stone-600",
-                  in_progress: "bg-amber-50 text-amber-700 animate-pulse border border-amber-200",
-                  paused: "bg-sky-50 text-sky-700 border border-sky-200",
-                  blocked: "bg-rose-50 text-rose-700 border border-rose-200",
-                  done: "bg-green-50 text-green-700 border border-green-200",
-                  reopened: "bg-violet-50 text-violet-700 border border-violet-200",
-                }[status];
+                const statusVisual = getTaskStatusVisual(status);
+                const linkedComplaint = line.sourceComplaintId
+                  ? linkedComplaints.find(rec => rec.id === line.sourceComplaintId)
+                  : undefined;
 
                 return (
                   <div 
@@ -939,7 +949,7 @@ export default function DossierDetail({
                       <span className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
                       <div className="flex flex-wrap items-center gap-4 text-slate-400 text-[11px] font-semibold">
                         <span>Estimation: <span className="text-stone-700  font-bold font-mono">{line.tempsEstime}H</span></span>
-                        <span>PassÃ©: <span className="font-mono">{line.tempsPasse}H</span></span>
+                        <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
                         {line.estimateSource && (
                           <span
                             data-testid={`task-source-badge-${line.id}`}
@@ -953,7 +963,7 @@ export default function DossierDetail({
                             Source: {
                               line.estimateSource === "manual" ? "Manuel" :
                               line.estimateSource === "quote-import" ? "Devis" :
-                              line.estimateSource === "preset" ? "Preset" : "DÃ©mo"
+                              line.estimateSource === "preset" ? "Preset" : "Démo"
                             }
                           </span>
                         )}
@@ -966,13 +976,22 @@ export default function DossierDetail({
                                 : "bg-amber-50 text-amber-700 border border-amber-200"
                             }`}
                           >
-                            {line.isEstimatedDurationValidated ? "DurÃ©e validÃ©e" : "DurÃ©e preset Ã  valider"}
+                            {line.isEstimatedDurationValidated ? "Durée validée" : "Durée preset à valider"}
+                          </span>
+                        )}
+                        {(line.complaintBadge || line.sourceComplaintId) && (
+                          <span
+                            data-testid={`task-complaint-badge-${line.id}`}
+                            className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-red-50 text-red-700 border border-red-200"
+                            title={linkedComplaint ? `Réclamation ${linkedComplaint.id}` : "Réclamation liée"}
+                          >
+                            REC {line.sourceComplaintId || ""}
                           </span>
                         )}
                       </div>
                       {line.reopenedReason && (
                         <p className="text-[10px] text-violet-600  font-bold">
-                          Motif rÃ©ouverture : {line.reopenedReason}
+                          Motif réouverture : {line.reopenedReason}
                         </p>
                       )}
                       {status === "blocked" && (
@@ -987,13 +1006,13 @@ export default function DossierDetail({
                           )}
                           <span className="block">Suivi : {line.blockFollowUpOwner || dossier.bloqueResponsableSuivi || "Chef Atelier"}</span>
                           {(line.blockResolutionEta || dossier.bloqueResolutionEta) && (
-                            <span className="block">ETA rÃ©solution : {line.blockResolutionEta || dossier.bloqueResolutionEta}</span>
+                            <span className="block">ETA résolution : {line.blockResolutionEta || dossier.bloqueResolutionEta}</span>
                           )}
                           {(line.blockSparePartRef || dossier.bloqueSparePartRef) && (
-                            <span className="block">RÃ©f. piÃ¨ce demandÃ©e : {line.blockSparePartRef || dossier.bloqueSparePartRef}</span>
+                            <span className="block">Réf. pièce demandée : {line.blockSparePartRef || dossier.bloqueSparePartRef}</span>
                           )}
                           {(line.blockSparePartEta || dossier.bloqueSparePartEta) && (
-                            <span className="block">RÃ©ception piÃ¨ce estimÃ©e : {line.blockSparePartEta || dossier.bloqueSparePartEta}</span>
+                            <span className="block">Réception pièce estimée : {line.blockSparePartEta || dossier.bloqueSparePartEta}</span>
                           )}
                         </div>
                       )}
@@ -1007,10 +1026,20 @@ export default function DossierDetail({
                     <div className="flex flex-col items-start sm:items-end gap-2">
                       <span 
                         data-testid={`task-status-${line.id}`}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeStyle}`}
+                        className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${statusVisual.badgeClassName}`}
                       >
-                        {getRepairOrderStatusLabel(status)}
+                        {statusVisual.label}
                       </span>
+                      <button
+                        type="button"
+                        data-testid={`print-task-sheet-${line.id}`}
+                        onClick={() => handlePrintTaskDocument(line)}
+                        className="p-1 px-2.5 bg-white border border-slate-200 text-slate-700 rounded font-bold text-[10px] hover:bg-slate-50 cursor-pointer flex items-center gap-1"
+                        title="Imprimer la fiche tâche technicien"
+                      >
+                        <Printer className="w-3 h-3" />
+                        Fiche tâche technicien
+                      </button>
                       {startBlockedMessage && status !== "in_progress" && status !== "done" && (
                         <span className="text-[10px] text-rose-600  font-bold text-right">
                           {startBlockedMessage}
@@ -1022,17 +1051,17 @@ export default function DossierDetail({
                         status === "done" ? (
                           <div className="flex flex-wrap justify-end gap-1">
                             <span className="p-1 px-2.5 bg-green-50 text-green-700 border border-green-200 rounded font-bold text-[10px] uppercase">
-                              TerminÃ©
+                              Terminé
                             </span>
                             {canManageDossier && (
                               <button
                                 onClick={() => handleReopenROLine(line.id)}
                                 data-testid={`task-reopen-${line.id}`}
                                 className="p-1 px-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
-                                title="RÃ©ouvrir avec motif obligatoire"
+                                title="Réouvrir avec motif obligatoire"
                               >
                                 <RotateCcw className="w-3 h-3" />
-                                RÃ©ouvrir
+                                Réouvrir
                               </button>
                             )}
                           </div>
@@ -1043,9 +1072,9 @@ export default function DossierDetail({
                                 onClick={() => handleValidateDuration(line.id)}
                                 data-testid={`task-validate-duration-${line.id}`}
                                 className="p-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
-                                title="Valider la durÃ©e estimÃ©e"
+                                title="Valider la durée estimée"
                               >
-                                Valider durÃ©e
+                                Valider durée
                               </button>
                             )}
                             {status === "blocked" && canManageDossier && (
@@ -1069,9 +1098,9 @@ export default function DossierDetail({
                                 }}
                                 data-testid={`task-start-${line.id}`}
                                 className="p-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold text-[10px] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                                title={startBlockedMessage || "Lancer la tÃ¢che"}
+                                title={startBlockedMessage || "Lancer la tâche"}
                               >
-                                {status === "pending" ? "DÃ©marrer" : "Reprendre"}
+                                {status === "pending" ? "Démarrer" : "Reprendre"}
                               </button>
                             )}
                             {status === "in_progress" && (
@@ -1080,7 +1109,7 @@ export default function DossierDetail({
                                   onClick={() => handlePauseROLine(line.id)}
                                   data-testid={`task-pause-${line.id}`}
                                   className="p-1 px-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded font-bold text-[10px] cursor-pointer"
-                                  title="Suspendre cette tÃ¢che"
+                                  title="Suspendre cette tâche"
                                 >
                                   Suspendre
                                 </button>
@@ -1088,7 +1117,7 @@ export default function DossierDetail({
                                   onClick={() => handleBlockROLine(line.id)}
                                   data-testid={`task-block-${line.id}`}
                                   className="p-1 px-2.5 bg-rose-600 text-white rounded font-bold text-[10px] hover:bg-rose-700 cursor-pointer"
-                                  title="Bloquer cette tÃ¢che"
+                                  title="Bloquer cette tâche"
                                 >
                                   Bloquer
                                 </button>
@@ -1096,7 +1125,7 @@ export default function DossierDetail({
                                   onClick={() => handleFinishROLine(line.id)}
                                   data-testid={`task-finish-${line.id}`}
                                   className="p-1 px-2.5 bg-emerald-600 text-white rounded font-bold text-[10px] hover:bg-emerald-700 cursor-pointer"
-                                  title="Valider la fin de tÃ¢che"
+                                  title="Valider la fin de tâche"
                                 >
                                   Terminer
                                 </button>
@@ -1114,7 +1143,7 @@ export default function DossierDetail({
             {/* Form to append new repair order lines (Workshop Chief and Director only) */}
             {[UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole) && (
               <div className="p-4 bg-slate-50  border border-dashed border-slate-200  rounded-lg space-y-3 mt-4">
-                <span className="text-xs font-bold text-slate-700  uppercase block font-display">Ajouter une ligne de travaux (Main d'Å“uvre / Diagnostic)</span>
+                <span className="text-xs font-bold text-slate-700  uppercase block font-display">Ajouter une ligne de travaux (Main d'œuvre / Diagnostic)</span>
                 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                   <input 
@@ -1130,7 +1159,7 @@ export default function DossierDetail({
                     step="0.1"
                     data-testid="new-task-time"
                     className="p-2 bg-white  border border-slate-200  rounded font-bold  focus:outline-none" 
-                    placeholder="Temps estimÃ© (H)"
+                    placeholder="Temps estimé (H)"
                     value={newROLineTime}
                     onChange={(e) => setNewROLineTime(Number(e.target.value))}
                   />
@@ -1153,8 +1182,8 @@ export default function DossierDetail({
         {activeTab === "photos" && (
           <div className="space-y-4">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 ">Preuves Photos SAV (Avant / AprÃ¨s)</h3>
-              <p className="text-slate-400 text-xs">Historique visuel permettant de sÃ©curiser le client et la concession</p>
+              <h3 className="font-bold text-sm text-slate-800 ">Preuves Photos SAV (Avant / Après)</h3>
+              <p className="text-slate-400 text-xs">Historique visuel permettant de sécuriser le client et la concession</p>
             </div>
 
             <div className="p-4 bg-slate-50  border border-slate-200  rounded-lg space-y-3">
@@ -1164,7 +1193,7 @@ export default function DossierDetail({
                   type="text"
                   data-testid="photo-title-input"
                   className="md:col-span-2 p-2 bg-white  border border-slate-200  rounded font-semibold  placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  placeholder="Titre photo (ex: dÃ©faut aile droite)"
+                  placeholder="Titre photo (ex: défaut aile droite)"
                   value={dossierPhotoTitle}
                   onChange={(e) => setDossierPhotoTitle(e.target.value)}
                 />
@@ -1214,7 +1243,7 @@ export default function DossierDetail({
             </div>
 
             {dossier.photosAvant.length === 0 ? (
-              <p className="text-xs text-zinc-400 italic">Aucune photo enregistrÃ©e pour ce dossier.</p>
+              <p className="text-xs text-zinc-400 italic">Aucune photo enregistrée pour ce dossier.</p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {dossier.photosAvant.map((ph) => (
@@ -1230,7 +1259,7 @@ export default function DossierDetail({
                         className="absolute right-2 top-2 bg-red-600/90 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center hover:bg-red-700"
                         title="Supprimer la photo"
                       >
-                        Ã—
+                        ×
                       </button>
                     )}
                     <div className="p-2.5 space-y-1 text-[10px]">
@@ -1247,20 +1276,20 @@ export default function DossierDetail({
           </div>
         )}
 
-        {/* Tab 5: ComplÃ©ments & Accords */}
+        {/* Tab 5: Compléments & Accords */}
         {activeTab === "complements" && (
           <div className="space-y-6">
             
             {/* Complements of work */}
             <div className="space-y-4">
               <div className="border-b pb-1">
-                <h3 className="font-bold text-sm text-slate-800 ">Module de ComplÃ©ments de Travaux</h3>
-                <p className="text-slate-400 text-xs text-left">RÃ©parations complÃ©mentaires identifiÃ©es lors du dÃ©montage en atelier et nÃ©cessitant l'avis du client ou de l'assurance</p>
+                <h3 className="font-bold text-sm text-slate-800 ">Module de Compléments de Travaux</h3>
+                <p className="text-slate-400 text-xs text-left">Réparations complémentaires identifiées lors du démontage en atelier et nécessitant l'avis du client ou de l'assurance</p>
               </div>
 
               {dossier.complements.length === 0 ? (
                 <div className="p-4 bg-slate-50  rounded-xl text-center border text-xs text-slate-400">
-                  Aucune rÃ©paration complÃ©mentaire signalÃ©e pour l'instant.
+                  Aucune réparation complémentaire signalée pour l'instant.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1283,7 +1312,7 @@ export default function DossierDetail({
                         </div>
 
                         <div className="flex flex-wrap gap-4 text-xs font-semibold text-zinc-500 border-t border-purple-50  pt-2.5">
-                          <span>Main d'Å“uvre estimÃ©e : <strong className="text-zinc-700 ">{comp.tempsEstime} Heures</strong></span>
+                          <span>Main d'œuvre estimée : <strong className="text-zinc-700 ">{comp.tempsEstime} Heures</strong></span>
                           <span>Impact planning : <strong className="text-red-600 ">{comp.impactPlanning}</strong></span>
                           <span>Accord requis : <strong className="capitalize text-zinc-700 ">{comp.accordRequis}</strong></span>
                         </div>
@@ -1296,7 +1325,7 @@ export default function DossierDetail({
                               className="px-3 py-1 bg-green-600 text-white font-bold rounded hover:bg-green-700 flex items-center gap-1 transition"
                             >
                               <ThumbsUp className="w-3.5 h-3.5" />
-                              Accepter le complÃ©ment
+                              Accepter le complément
                             </button>
                             <button 
                               onClick={() => handleStatusComplement(comp.id, "refuse")}
@@ -1318,7 +1347,7 @@ export default function DossierDetail({
             <div className="space-y-4 pt-4 border-t border-zinc-200">
               <div className="border-b pb-1">
                 <h3 className="font-bold text-sm text-slate-800 ">Suivi Des Accords d'Assurance / Garantie</h3>
-                <p className="text-slate-400 text-xs">Validation de prises en charge avant raccordement final des piÃ¨ces de remplacement</p>
+                <p className="text-slate-400 text-xs">Validation de prises en charge avant raccordement final des pièces de remplacement</p>
               </div>
 
               {dossier.accords.length === 0 ? (
@@ -1337,13 +1366,13 @@ export default function DossierDetail({
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-slate-900 ">{acc.type}</span>
-                            <span className="text-slate-400">â€¢</span>
+                            <span className="text-slate-400">•</span>
                             <span className="text-slate-600  italic">Destinataire: {acc.destinataire}</span>
                           </div>
                           <p className="text-slate-500 text-[11px] font-medium leading-tight">{acc.commentaire}</p>
                           <div className="text-[10px] text-neutral-400 font-semibold">
                             Date d'envoi: {new Date(acc.dateEnvoi).toLocaleDateString()} 
-                            {acc.dateRelance && ` | RelancÃ© le: ${new Date(acc.dateRelance).toLocaleDateString()}`}
+                            {acc.dateRelance && ` | Relancé le: ${new Date(acc.dateRelance).toLocaleDateString()}`}
                           </div>
                         </div>
 
@@ -1364,7 +1393,7 @@ export default function DossierDetail({
                                 onClick={() => handleUpdateAccordStatut(acc.id, "refuse")}
                                 className="px-2 py-0.5 bg-red-600 text-white font-bold rounded text-[10px]"
                               >
-                                DÃ©cliner
+                                Décliner
                               </button>
                             </div>
                           )}
@@ -1383,13 +1412,13 @@ export default function DossierDetail({
         {activeTab === "documents" && (
           <div className="space-y-4">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800">Documents opÃ©rationnels internes</h3>
-              <p className="text-slate-400 text-xs">Sorties papier atelier sans donnÃ©es financiÃ¨res ni stock rÃ©el.</p>
+              <h3 className="font-bold text-sm text-slate-800">Documents opérationnels internes</h3>
+              <p className="text-slate-400 text-xs">Sorties papier atelier internes, sans données financières ni informations pièces sensibles.</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
               {[
-                { type: "reception" as const, label: "Fiche rÃ©ception" },
+                { type: "reception" as const, label: "Fiche réception" },
                 { type: "or" as const, label: "OR interne" },
                 { type: "qc" as const, label: "Fiche QC" },
                 { type: "delivery" as const, label: "Bon restitution" },
@@ -1409,12 +1438,12 @@ export default function DossierDetail({
           </div>
         )}
 
-        {/* Tab 6: ContrÃ´le qualitÃ© */}
+        {/* Tab 6: Contrôle qualité */}
         {activeTab === "quality-control" && (
           <div className="space-y-6">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 ">Protocole de ContrÃ´le de QualitÃ© Obligatoire</h3>
-              <p className="text-slate-400 text-xs">Checklist de sÃ©curitÃ© opÃ©rationnelle Ã  valider obligatoirement par l'essayeur contrÃ´leur technique</p>
+              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Contrôle de Qualité Obligatoire</h3>
+              <p className="text-slate-400 text-xs">Checklist de sécurité opérationnelle à valider obligatoirement par l'essayeur contrôleur technique</p>
             </div>
 
             {qcError && (
@@ -1428,13 +1457,13 @@ export default function DossierDetail({
               <div data-testid="qc-status-message" className="p-5 bg-green-50  border border-green-200  rounded-xl text-xs space-y-3">
                 <div className="flex items-center gap-2 text-green-700  font-bold">
                   <CheckCircle className="w-5 h-5" />
-                  CONTRÃ”LE QUALITÃ‰ VALIDÃ‰ - BON POUR LIVRAISON VÃ‰HICULE
+                  CONTRÔLE QUALITÉ VALIDÉ - BON POUR LIVRAISON VÉHICULE
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-600 ">
-                  <div>ValidÃ© par: <strong className="text-slate-800 ">{dossier.checklistQC.validePar || "Chef d'atelier"}</strong></div>
+                  <div>Validé par: <strong className="text-slate-800 ">{dossier.checklistQC.validePar || "Chef d'atelier"}</strong></div>
                   <div>Le: <strong className="text-slate-800 ">{new Date(dossier.checklistQC.dateValidation!).toLocaleString()}</strong></div>
                 </div>
-                <p className="text-slate-500  font-medium italic">Tous les voyants d'alerte moteur Ã©teints, essais statiques et routiers entiÃ¨rement concluants.</p>
+                <p className="text-slate-500  font-medium italic">Tous les voyants d'alerte moteur éteints, essais statiques et routiers entièrement concluants.</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -1442,14 +1471,14 @@ export default function DossierDetail({
                 {/* Checklist rendering with interactive buttons */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
                   {[
-                    { key: "essaiEffectue", label: "Essai routier / essai de conduite rÃ©alisÃ© Ã  bord" },
-                    { key: "defautRepare", label: "DÃ©faut d'origine du client confirmed comme rÃ©solu" },
-                    { key: "aucunVoyantAllume", label: "Aucun voyant de panne ou anomalie orange/rouge allumÃ©" },
-                    { key: "niveauxVerifies", label: "Niveaux de fluides et batteries contrÃ´lÃ©s et ajustÃ©s" },
-                    { key: "serrageSecurite", label: "Serrages dynamomÃ©triques et organes de sÃ©curitÃ© vÃ©rifiÃ©s" },
-                    { key: "propreteVehicule", label: "PropretÃ© impeccable du vÃ©hicule (volant, tapis, carrosserie)" },
-                    { key: "documentsPrets", label: "Tous les documents / fiches de travaux d'atelier signÃ©s" },
-                    { key: "photosApresOk", label: "Photos du vÃ©hicule aprÃ¨s travaux enregistrÃ©es sur l'app" }
+                    { key: "essaiEffectue", label: "Essai routier / essai de conduite réalisé à bord" },
+                    { key: "defautRepare", label: "Défaut d'origine du client confirmed comme résolu" },
+                    { key: "aucunVoyantAllume", label: "Aucun voyant de panne ou anomalie orange/rouge allumé" },
+                    { key: "niveauxVerifies", label: "Niveaux de fluides et batteries contrôlés et ajustés" },
+                    { key: "serrageSecurite", label: "Serrages dynamométriques et organes de sécurité vérifiés" },
+                    { key: "propreteVehicule", label: "Propreté impeccable du véhicule (volant, tapis, carrosserie)" },
+                    { key: "documentsPrets", label: "Tous les documents / fiches de travaux d'atelier signés" },
+                    { key: "photosApresOk", label: "Photos du véhicule après travaux enregistrées sur l'app" }
                   ].map((item) => (
                     <label 
                       key={item.key} 
@@ -1471,7 +1500,7 @@ export default function DossierDetail({
                 {/* Confirm QC Section (QC staff, Chief Workshop and Director only) */}
                 {canValidateQuality && (
                   <div className="p-4 bg-slate-50  border border-slate-200  rounded-xl space-y-4">
-                    <span className="text-xs font-bold text-slate-800  uppercase block">DÃ©cision Finale de Validation de QualitÃ© :</span>
+                    <span className="text-xs font-bold text-slate-800  uppercase block">Décision Finale de Validation de Qualité :</span>
                     
                     <div className="flex gap-2">
                       <button 
@@ -1480,7 +1509,7 @@ export default function DossierDetail({
                         className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
                       >
                         <CheckCircle className="w-4 h-4" />
-                        Valider & Marquer PrÃªt Ã  Livrer
+                        Valider & Marquer Prêt à Livrer
                       </button>
 
                       <button 
@@ -1491,7 +1520,7 @@ export default function DossierDetail({
                         className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
                       >
                         <XCircle className="w-4 h-4" />
-                        Refuser (Renvoi Ã  l'atelier)
+                        Refuser (Renvoi à l'atelier)
                       </button>
                     </div>
                   </div>
@@ -1506,8 +1535,8 @@ export default function DossierDetail({
         {activeTab === "deliveries" && (
           <div className="space-y-6">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 ">Protocole de ClÃ´ture et Restitution d'VÃ©hicules</h3>
-              <p className="text-slate-400 text-xs">Validation de conformitÃ© d'exploitation avec signature manuelle du client final</p>
+              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Clôture et Restitution d'Véhicules</h3>
+              <p className="text-slate-400 text-xs">Validation de conformité d'exploitation avec signature manuelle du client final</p>
             </div>
 
             {deliveryError && (
@@ -1518,17 +1547,17 @@ export default function DossierDetail({
 
             {/* Check requirements */}
             <div className="p-4 bg-slate-50  rounded-xl border border-slate-200  text-xs space-y-3.5">
-              <span className="font-bold text-neutral-800  block uppercase">PrÃ©-requis opÃ©rationnels :</span>
+              <span className="font-bold text-neutral-800  block uppercase">Pré-requis opérationnels :</span>
               
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white font-bold ${
                     dossier.checklistQC.validationGlobale === "valide" ? "bg-green-500" : "bg-red-500"
                   }`}>
-                    {dossier.checklistQC.validationGlobale === "valide" ? "âœ“" : "!"}
+                    {dossier.checklistQC.validationGlobale === "valide" ? "✓" : "!"}
                   </span>
                   <span className="font-semibold text-slate-700 ">
-                    ContrÃ´le qualitÃ© validÃ© par l'essayeur : 
+                    Contrôle qualité validé par l'essayeur :
                     <strong className="text-slate-900  ml-1">
                       {dossier.checklistQC.validationGlobale === "valide" ? "OUI" : "NON (En cours de validation)"}
                     </strong>
@@ -1539,12 +1568,12 @@ export default function DossierDetail({
                   <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white font-bold ${
                     dossier.ordresReparation.every(isRepairOrderDone) ? "bg-green-500" : "bg-red-500"
                   }`}>
-                    {dossier.ordresReparation.every(isRepairOrderDone) ? "âœ“" : "!"}
+                    {dossier.ordresReparation.every(isRepairOrderDone) ? "✓" : "!"}
                   </span>
                   <span className="font-semibold text-slate-700 ">
-                    Tous les ordres de rÃ©paration d'origine validÃ©s : 
+                    Tous les ordres de réparation d'origine validés :
                     <strong className="text-slate-900  ml-1">
-                      {dossier.ordresReparation.every(isRepairOrderDone) ? "OUI (100% terminÃ©s)" : "NON (Certaines tÃ¢ches suspendues ou en cours)"}
+                      {dossier.ordresReparation.every(isRepairOrderDone) ? "OUI (100% terminés)" : "NON (Certaines tâches suspendues ou en cours)"}
                     </strong>
                   </span>
                 </div>
@@ -1562,7 +1591,7 @@ export default function DossierDetail({
             {dossier.statut === DossierStatus.PRET_A_LIVRER && canDeliverVehicle ? (
               <div className="space-y-4">
                 <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
-                  <span className="font-bold text-blue-800  block uppercase font-display">Signature client lors de la remise des clÃ©s :</span>
+                  <span className="font-bold text-blue-800  block uppercase font-display">Signature client lors de la remise des clés :</span>
                   
                   {/* Visual Signature Mock */}
                   <div 
@@ -1570,10 +1599,10 @@ export default function DossierDetail({
                     className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
                     onClick={() => setSignatureCaptured(true)}
                   >
-                    {signatureCaptured ? "[ Signature client capturÃ©e ]" : "[ Cliquer ici pour simuler la signature tactile du client ]"}
+                    {signatureCaptured ? "[ Signature client capturée ]" : "[ Cliquer ici pour simuler la signature tactile du client ]"}
                   </div>
 
-                  <p className="text-[10px] text-zinc-400">La signature certifie la restitution du vÃ©hicule, le contrÃ´le de propretÃ© et la remise des objets personnels listÃ©s.</p>
+                  <p className="text-[10px] text-zinc-400">La signature certifie la restitution du véhicule, le contrôle de propreté et la remise des objets personnels listés.</p>
                 </div>
 
                 <div className="flex gap-2">
@@ -1582,17 +1611,17 @@ export default function DossierDetail({
                     data-testid="delivery-submit"
                     disabled={!deliveryGate.allowed}
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:hover:bg-gray-300 disabled:text-gray-500 text-white font-bold rounded text-xs transition duration-200 cursor-pointer disabled:cursor-not-allowed"
-                    title={deliveryGate.allowed ? "Restituer le vÃ©hicule" : deliveryGate.reasons.join(" ")}
+                    title={deliveryGate.allowed ? "Restituer le véhicule" : deliveryGate.reasons.join(" ")}
                   >
-                    Restituer le VÃ©hicule au client
+                    Restituer le Véhicule au client
                   </button>
                 </div>
               </div>
             ) : dossier.statut === DossierStatus.LIVRE ? (
               <div className="space-y-4">
                 <div className="p-4 bg-emerald-50  border border-emerald-200  rounded-lg text-xs space-y-1 text-emerald-800 ">
-                  <span className="font-bold block">âœ“ VÃ©hicule remis en main propre au client. ClÃ´ture en transit.</span>
-                  <p className="font-medium text-slate-600 ">Restitution confirmÃ©e et signÃ©e. Le dossier passe au suivi administratif interne.</p>
+                  <span className="font-bold block">✓ Véhicule remis en main propre au client. Clôture en transit.</span>
+                  <p className="font-medium text-slate-600 ">Restitution confirmée et signée. Le dossier passe au suivi administratif interne.</p>
                   {dossier.livraison.statutRestitution && (
                     <p data-testid="delivery-restitution-status-detail" className="font-black text-emerald-900">
                       Statut restitution : {dossier.livraison.statutRestitution}
@@ -1611,13 +1640,13 @@ export default function DossierDetail({
                     data-testid="delivery-billing"
                     className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition cursor-pointer"
                   >
-                    ClÃ´turer opÃ©rationnellement le dossier
+                    Clôturer opérationnellement le dossier
                   </button>
                 )}
               </div>
             ) : (
               <p className="text-xs text-zinc-400 italic">
-                La remise des clÃ©s n'est autorisÃ©e qu'aprÃ¨s validation complÃ¨te du contrÃ´le routier de qualitÃ©.
+                La remise des clés n'est autorisée qu'après validation complète du contrôle routier de qualité.
               </p>
             )}
 
@@ -1631,7 +1660,7 @@ export default function DossierDetail({
                 <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
                 <div>
                   <h3 className="font-black text-slate-900">Confirmer la validation QC</h3>
-                  <p className="mt-1 font-semibold text-slate-600">Le dossier sera dÃ©clarÃ© conforme et prÃªt Ã  livrer.</p>
+                  <p className="mt-1 font-semibold text-slate-600">Le dossier sera déclaré conforme et prêt à livrer.</p>
                 </div>
               </div>
               <div className="flex justify-end gap-2">
@@ -1666,7 +1695,7 @@ export default function DossierDetail({
                 <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
                 <div>
                   <h3 className="font-black text-slate-900">Confirmer la restitution</h3>
-                  <p className="mt-1 font-semibold text-slate-600">La signature client est capturÃ©e et le dossier passera au statut livrÃ©.</p>
+                  <p className="mt-1 font-semibold text-slate-600">La signature client est capturée et le dossier passera au statut livré.</p>
                 </div>
               </div>
               <div className="flex justify-end gap-2">
@@ -1697,9 +1726,9 @@ export default function DossierDetail({
               <div className="flex items-start gap-3">
                 <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
                 <div>
-                  <h3 className="font-black uppercase text-slate-900">Diagnostic structurÃ© obligatoire</h3>
+                  <h3 className="font-black uppercase text-slate-900">Diagnostic structuré obligatoire</h3>
                   <p className="mt-1 font-semibold text-slate-600">
-                    La clÃ´ture tÃ¢che exige une cause, une action rÃ©alisÃ©e et un test final exploitables.
+                    La clôture tâche exige une cause, une action réalisée et un test final exploitables.
                   </p>
                 </div>
               </div>
@@ -1712,7 +1741,7 @@ export default function DossierDetail({
 
               <div className="space-y-3">
                 <label className="block space-y-1.5">
-                  <span className="font-black text-slate-700">Cause constatÃ©e</span>
+                  <span className="font-black text-slate-700">Cause constatée</span>
                   <textarea
                     data-testid="detail-task-finish-cause"
                     value={finishCause}
@@ -1721,11 +1750,11 @@ export default function DossierDetail({
                       setFinishValidationError(null);
                     }}
                     className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
-                    placeholder="Ex: Usure avancÃ©e des plaquettes avant constatÃ©e aprÃ¨s contrÃ´le visuel."
+                    placeholder="Ex: Usure avancée des plaquettes avant constatée après contrôle visuel."
                   />
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="font-black text-slate-700">Action rÃ©alisÃ©e</span>
+                  <span className="font-black text-slate-700">Action réalisée</span>
                   <textarea
                     data-testid="detail-task-finish-action"
                     value={finishAction}
@@ -1734,7 +1763,7 @@ export default function DossierDetail({
                       setFinishValidationError(null);
                     }}
                     className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
-                    placeholder="Ex: Remplacement des plaquettes et contrÃ´le du serrage sur les deux roues avant."
+                    placeholder="Ex: Remplacement des plaquettes et contrôle du serrage sur les deux roues avant."
                   />
                 </label>
                 <label className="block space-y-1.5">
@@ -1747,7 +1776,7 @@ export default function DossierDetail({
                       setFinishValidationError(null);
                     }}
                     className="min-h-[70px] w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800"
-                    placeholder="Ex: Essai statique et freinage progressif conformes, aucun bruit rÃ©siduel dÃ©tectÃ©."
+                    placeholder="Ex: Essai statique et freinage progressif conformes, aucun bruit résiduel détecté."
                   />
                 </label>
               </div>
@@ -1785,11 +1814,11 @@ export default function DossierDetail({
           isOpen={modalActive === "qc-refuse"}
           onClose={() => setModalActive(null)}
           onConfirm={handleQCRefuseConfirm}
-          title="Refus du ContrÃ´le QualitÃ©"
-          description="Veuillez sÃ©lectionner le motif principal de refus pour renvoyer le dossier Ã  l'atelier."
+          title="Refus du Contrôle Qualité"
+          description="Veuillez sélectionner le motif principal de refus pour renvoyer le dossier à l'atelier."
           reasons={[
-            "Essai routier non validÃ©",
-            "DÃ©faut d'aspect carrosserie",
+            "Essai routier non validé",
+            "Défaut d'aspect carrosserie",
             "Bruit ou vibration persistant",
             "Voyant anomalie actif",
             "Autre (saisie libre)"
@@ -1804,11 +1833,11 @@ export default function DossierDetail({
             setModalTargetLineId(null);
           }}
           onConfirm={handleReopenConfirm}
-          title="RÃ©ouverture de la tÃ¢che"
-          description="Le motif de rÃ©ouverture de la tÃ¢che est obligatoire."
+          title="Réouverture de la tâche"
+          description="Le motif de réouverture de la tâche est obligatoire."
           reasons={[
             "Retour client sous garantie",
-            "ComplÃ©ment de travaux requis",
+            "Complément de travaux requis",
             "Erreur de saisie statut",
             "Autre (saisie libre)"
           ]}
@@ -1822,12 +1851,12 @@ export default function DossierDetail({
             setModalTargetLineId(null);
           }}
           onConfirm={handleBlockConfirm}
-          title="Blocage de la tÃ¢che"
-          description="Veuillez spÃ©cifier la raison du blocage technique de cette tÃ¢che."
+          title="Blocage de la tâche"
+          description="Veuillez spécifier la raison du blocage technique de cette tâche."
           reasons={[
-            "Attente piÃ¨ce de rechange (Magasin)",
-            "Attente accord client complÃ©mentaire",
-            "Outillage spÃ©cifique indisponible",
+            "Attente pièce de rechange (Magasin)",
+            "Attente accord client complémentaire",
+            "Outillage spécifique indisponible",
             "Surcharge pont / ressource",
             "Autre (saisie libre)"
           ]}
@@ -1841,13 +1870,13 @@ export default function DossierDetail({
             setModalTargetLineId(null);
           }}
           onConfirm={handleUnblockConfirm}
-          title="LevÃ©e de blocage"
-          description="Le motif de levÃ©e de blocage est obligatoire avant toute reprise atelier."
+          title="Levée de blocage"
+          description="Le motif de levée de blocage est obligatoire avant toute reprise atelier."
           reasons={[
-            "PiÃ¨ce reÃ§ue et contrÃ´lÃ©e",
+            "Pièce reçue et contrôlée",
             "Accord client obtenu",
             "Outillage de nouveau disponible",
-            "Pont / ressource libÃ©rÃ©",
+            "Pont / ressource libéré",
             "Autre (saisie libre)"
           ]}
           testIdPrefix="modal-task-unblock"
@@ -1856,7 +1885,20 @@ export default function DossierDetail({
       </div>
 
       <div id="nimr-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!printType}>
-        {printType && <PrintDocuments type={printType} dossier={dossier} clientPhoneToShow={dossier.clientTelephone} />}
+        {printType && (
+          <PrintDocuments
+            type={printType}
+            dossier={dossier}
+            task={printTask || undefined}
+            clientPhoneToShow={dossier.clientTelephone}
+            technicianName={
+              printTask
+                ? techniciensList.find(t => t.id === (printTask.plannedTechnicianId || dossier.technicienId))?.nom
+                : undefined
+            }
+            linkedComplaint={printTask?.sourceComplaintId ? linkedComplaints.find(rec => rec.id === printTask.sourceComplaintId) : undefined}
+          />
+        )}
       </div>
 
       {showQuoteImport && (
