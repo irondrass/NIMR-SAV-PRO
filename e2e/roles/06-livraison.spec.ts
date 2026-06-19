@@ -72,7 +72,7 @@ test.describe("Rôle : Livraison", () => {
 
     // Click signature pad mock
     await humanClick(page, page.locator('[data-testid="delivery-signature"]'));
-    await expect(page.locator('[data-testid="delivery-signature"]')).toContainText(/Signature client captur/i);
+    await expect(page.locator('[data-testid="delivery-signature"]')).toContainText(/Acceptation simple client captur/i);
 
     // Click deliver
     await humanClick(page, page.locator('[data-testid="delivery-submit"]'));
