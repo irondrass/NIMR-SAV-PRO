@@ -1070,16 +1070,25 @@ import {
   convertReservationToPlanning
 } from "../src/workshop-reservations";
 import {
+  buildScheduleFromShiftProfileDraft,
   getDefaultWorkshopSchedule,
   getDefaultWorkshopShiftProfiles,
   getEffectiveWorkshopWindowsForResource,
   isWorkshopClosed,
   isTechnicianAbsent,
   isBayUnavailable,
+  SHIFT_PROFILES_STORAGE_KEY,
+  validateShiftProfileDraft,
   validateAvailabilityForSlot,
 } from "../src/workshop-availability";
 import { TASK_STATUS_VISUAL_ORDER, getTaskStatusVisual } from "../src/task-status-visual";
-import { getCurrentGanttTaskStatus, getUnplannedRepairOrderTargets } from "../src/workshop-planning-helpers";
+import {
+  getCurrentGanttTaskStatus,
+  getGanttTaskVisualState,
+  getRepairOrderPlanningSegmentsForDate,
+  getUnplannedRepairOrderTargets,
+  isActivePlannedTask,
+} from "../src/workshop-planning-helpers";
 
 registerCheck("Lot 5F-4A Invariants", "aucune réservation sans durée MO validée", () => {
   const dossier = getMockDossier({
@@ -2584,6 +2593,120 @@ registerCheck("Lot 6H Invariants", "shifts techniciens et ponts réduisent les c
   assert.equal(morningSlot.allowed, true);
   assert.equal(afternoonSlot.allowed, false);
   assert.ok(afternoonSlot.codes.includes("outside-effective-working-hours"));
+});
+
+registerCheck("Lot 6J Invariants", "Gantt conserve les tâches planifiées actives non terminées", () => {
+  const plannedLine = {
+    id: "ro_active_planned",
+    designation: "Diagnostic planifié actif",
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "pending" as const,
+    planningStart: "2026-06-15T09:00:00.000Z",
+    planningEnd: "2026-06-15T10:00:00.000Z",
+    plannedTechnicianId: "tech_01",
+    plannedBayId: "bay_01",
+  };
+  const dossier = getMockDossier({
+    id: "NIMR-QA-6J-GANTT",
+    statut: DossierStatus.TRAVAUX_PLANIFIES,
+    ordresReparation: [plannedLine],
+  });
+  assert.equal(isActivePlannedTask(plannedLine, dossier, "2026-06-15"), true);
+  assert.equal(getRepairOrderPlanningSegmentsForDate(plannedLine, "2026-06-15").length, 1);
+  assert.equal(getGanttTaskVisualState(plannedLine, new Date("2026-06-15T08:00:00.000Z"), dossier), "planned_future");
+  assert.equal(getGanttTaskVisualState(plannedLine, new Date("2026-06-15T09:30:00.000Z"), dossier), "due_now_not_started");
+  assert.equal(getGanttTaskVisualState({ ...plannedLine, status: "in_progress" as const }, new Date("2026-06-15T09:30:00.000Z"), dossier), "in_progress");
+  assert.equal(getGanttTaskVisualState({ ...plannedLine, status: "blocked" as const }, new Date("2026-06-15T09:30:00.000Z"), dossier), "blocked");
+  assert.equal(getGanttTaskVisualState({ ...plannedLine, status: "reopened" as const }, new Date("2026-06-15T09:30:00.000Z"), dossier), "qc_return");
+  assert.equal(getGanttTaskVisualState(plannedLine, new Date("2026-06-15T10:30:00.000Z"), dossier), "overdue_unfinished");
+  assert.equal(isActivePlannedTask({ ...plannedLine, status: "done" as const }, dossier, "2026-06-15"), false);
+  assert.equal(isActivePlannedTask(plannedLine, { ...dossier, statut: DossierStatus.ANNULE }, "2026-06-15"), false);
+
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(planningContent.includes("isActivePlannedTask(line, dossier, selectedDateStr)"), "Le Gantt doit utiliser le helper actif daté");
+  assert.ok(planningContent.includes("getRepairOrderPlanningSegmentsForDate(line, selectedDateStr)"), "Les blocs visibles doivent utiliser les segments datés");
+});
+
+registerCheck("Lot 6J Invariants", "horaires équipes configurables validés et persistés localement", () => {
+  const draft = {
+    name: "Équipe pilote",
+    dayStart: "07:30",
+    dayEnd: "18:00",
+    pauseEnabled: true,
+    pauseStart: "12:30",
+    pauseEnd: "13:15",
+    activeDays: [1, 2, 3, 4, 5, 6],
+  };
+  const validation = validateShiftProfileDraft(draft);
+  assert.equal(validation.valid, true);
+  assert.equal(validation.capacityMinutes, 585);
+  assert.deepEqual(buildScheduleFromShiftProfileDraft(draft).days.find(day => day.dayOfWeek === 1)?.windows, [
+    { start: "07:30", end: "12:30" },
+    { start: "13:15", end: "18:00" },
+  ]);
+  const schedule = buildScheduleFromShiftProfileDraft({
+    ...draft,
+    dayStart: "09:00",
+    dayEnd: "18:00",
+    pauseStart: "12:00",
+    pauseEnd: "13:00",
+  });
+  const config: WorkshopAvailabilityConfig = {
+    schedule,
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: [],
+    shiftProfiles: [{
+      id: "shift_standard",
+      name: "Équipe pilote",
+      active: true,
+      schedule,
+    }],
+  };
+  const dossier = getMockDossier({
+    id: "NIMR-QA-6J-SHIFT",
+    ordresReparation: [
+      { id: "ro_shift", designation: "Tâche horaire configurable", tempsEstime: 1, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true },
+    ],
+  });
+  const lateSlot = validatePlanningAssignment({
+    dossiers: [dossier],
+    dossierId: dossier.id,
+    lineId: "ro_shift",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: "2026-06-15T17:00:00",
+    end: "2026-06-15T18:00:00",
+    reservations: [],
+    availabilityConfig: config,
+  }, new Date("2026-06-15T07:00:00"));
+  const earlySlot = validatePlanningAssignment({
+    dossiers: [dossier],
+    dossierId: dossier.id,
+    lineId: "ro_shift",
+    technicianId: "tech_01",
+    bayId: "bay_01",
+    start: "2026-06-15T08:00:00",
+    end: "2026-06-15T09:00:00",
+    reservations: [],
+    availabilityConfig: config,
+  }, new Date("2026-06-15T07:00:00"));
+  assert.equal(lateSlot.allowed, true);
+  assert.equal(earlySlot.allowed, false);
+  assert.equal(validateShiftProfileDraft({ ...draft, dayEnd: "22:00" }).valid, false);
+  assert.equal(validateShiftProfileDraft({ ...draft, pauseStart: "06:30" }).valid, false);
+  assert.equal(SHIFT_PROFILES_STORAGE_KEY, "nimr-sav-pro-shift-profiles");
+
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const appContent = fs.readFileSync("src/App.tsx", "utf8");
+  assert.ok(planningContent.includes("Modifier les horaires de l'équipe"), "La modale d'édition horaires doit exister");
+  assert.ok(planningContent.includes("shift-profile-pause-enabled"), "La pause doit être configurable");
+  assert.ok(planningContent.includes("shift-profile-capacity"), "La capacité calculée doit être visible");
+  assert.ok(planningContent.includes("shift-profiles-reset-defaults"), "La réinitialisation horaires par défaut doit exister");
+  assert.ok(appContent.includes("SHIFT_PROFILES_STORAGE_KEY"), "App doit persister les profils horaires dans la clé unique");
+  assert.ok(fs.readFileSync("src/sav-core.ts", "utf8").includes("buildAvailabilityPlanningSegments"), "La validation planning doit construire les segments depuis les horaires configurés");
 });
 
 registerCheck("Lot 6H Invariants", "fiche tâche technicien imprimable et sans finance", () => {

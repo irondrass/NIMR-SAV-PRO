@@ -11,8 +11,6 @@ import {
   suggestWorkshopSlot, 
   WorkshopSlotSuggestion,
   isWorkingDay,
-  getWorkingWindowsForDate,
-  alignToWorkingTime,
   addWorkingMinutes,
   buildPlanningSegments,
   calculateTechnicianDailyLoad,
@@ -23,8 +21,17 @@ import {
   isWorkshopClosed,
   isTechnicianAbsent,
   isBayUnavailable,
+  getEffectiveWorkshopWindows,
   getEffectiveWorkshopWindowsForResource,
-  getDefaultWorkshopShiftProfiles
+  getDefaultWorkshopSchedule,
+  getDefaultWorkshopShiftProfiles,
+  buildScheduleFromShiftProfileDraft,
+  calculateShiftProfileCapacityMinutes,
+  deriveShiftProfileDraft,
+  formatCapacityHours,
+  ShiftProfileDraft,
+  summarizeShiftProfileDraft,
+  validateShiftProfileDraft
 } from "../workshop-availability";
 import { 
   Calendar, 
@@ -55,6 +62,7 @@ import {
   isActivePlannedTask,
   getGanttTaskVisualState,
   GANTT_STATE_VISUALS,
+  getRepairOrderPlanningSegmentsForDate,
 } from "../workshop-planning-helpers";
 import {
   calculateReservationDuration,
@@ -85,6 +93,57 @@ const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
   { id: "bay_body_01", name: "Pont carrosserie 1", zone: AtelierZone.CARROSSERIE },
   { id: "bay_general_01", name: "Pont polyvalent" },
 ];
+
+const SHIFT_EDIT_DAYS = [
+  { value: 1, label: "Lundi" },
+  { value: 2, label: "Mardi" },
+  { value: 3, label: "Mercredi" },
+  { value: 4, label: "Jeudi" },
+  { value: 5, label: "Vendredi" },
+  { value: 6, label: "Samedi" },
+];
+
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function mergeWorkshopWindows(windows: Array<{ start: string; end: string }>): Array<{ start: string; end: string }> {
+  const sorted = windows
+    .map(window => ({ start: timeToMinutes(window.start), end: timeToMinutes(window.end) }))
+    .filter(window => Number.isFinite(window.start) && Number.isFinite(window.end) && window.start < window.end)
+    .sort((left, right) => left.start - right.start);
+
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const window of sorted) {
+    const previous = merged[merged.length - 1];
+    if (!previous || window.start > previous.end) {
+      merged.push({ ...window });
+    } else {
+      previous.end = Math.max(previous.end, window.end);
+    }
+  }
+
+  return merged.map(window => ({
+    start: minutesToTime(window.start),
+    end: minutesToTime(window.end),
+  }));
+}
+
+function getScheduleWindowsForDay(profile: WorkshopShiftProfile, dayOfWeek: number): Array<{ start: string; end: string }> {
+  const day = profile.schedule.days.find(current => current.dayOfWeek === dayOfWeek);
+  return day && !day.isClosed ? day.windows : [];
+}
+
+function getCapacityHoursFromWindows(windows: Array<{ start: string; end: string }>): number {
+  return windows.reduce((sum, window) => sum + (timeToMinutes(window.end) - timeToMinutes(window.start)) / 60, 0);
+}
 
 export default function WorkshopPlanning({
   techniciens,
@@ -133,35 +192,43 @@ export default function WorkshopPlanning({
 
   // Shift profile editing (Part 3)
   const [editingProfile, setEditingProfile] = useState<WorkshopShiftProfile | null>(null);
-  const [editProfileName, setEditProfileName] = useState("");
-  const [editProfileWindows, setEditProfileWindows] = useState<Array<{ dayOfWeek: number; isClosed: boolean; start: string; end: string }>>([]);
+  const [editShiftDraft, setEditShiftDraft] = useState<ShiftProfileDraft>({
+    name: "",
+    dayStart: "08:00",
+    dayEnd: "17:00",
+    pauseEnabled: true,
+    pauseStart: "12:00",
+    pauseEnd: "13:00",
+    activeDays: [1, 2, 3, 4, 5],
+  });
   const [editProfileError, setEditProfileError] = useState<string | null>(null);
 
   const handleSaveShiftProfile = () => {
-    if (!onUpdateAvailabilityConfig || !availabilityConfig) return;
-    if (!editProfileName.trim()) {
-      setEditProfileError("Le nom de l'équipe est requis.");
+    if (!onUpdateAvailabilityConfig || !availabilityConfig || !editingProfile) return;
+    const validation = validateShiftProfileDraft(editShiftDraft);
+    if (!validation.valid) {
+      setEditProfileError(validation.error || "Horaires invalides.");
       return;
     }
-    
+
     const updatedProfile: WorkshopShiftProfile = {
-      ...(editingProfile as WorkshopShiftProfile),
-      name: editProfileName,
-      schedule: {
-        days: editProfileWindows.map(w => ({
-          dayOfWeek: w.dayOfWeek,
-          isClosed: w.isClosed,
-          windows: w.isClosed ? [] : [{ start: w.start, end: w.end }]
-        }))
-      }
+      ...editingProfile,
+      name: editShiftDraft.name.trim(),
+      description: summarizeShiftProfileDraft(editShiftDraft),
+      schedule: buildScheduleFromShiftProfileDraft(editShiftDraft)
     };
 
-    const newProfiles = (availabilityConfig?.shiftProfiles || []).map(p => 
+    const profileSource = availabilityConfig.shiftProfiles?.length
+      ? availabilityConfig.shiftProfiles
+      : getDefaultWorkshopShiftProfiles();
+    const hasProfile = profileSource.some(profile => profile.id === updatedProfile.id);
+    const newProfiles = hasProfile ? profileSource.map(p =>
       p.id === updatedProfile.id ? updatedProfile : p
-    );
+    ) : [...profileSource, updatedProfile];
 
     onUpdateAvailabilityConfig({
       ...availabilityConfig,
+      schedule: updatedProfile.id === "shift_standard" ? updatedProfile.schedule : availabilityConfig.schedule,
       shiftProfiles: newProfiles
     });
 
@@ -294,7 +361,8 @@ export default function WorkshopPlanning({
 
     for (const offsetMinutes of offsets) {
       const targetDesiredDate = new Date(selectedDate);
-      targetDesiredDate.setHours(8, offsetMinutes, 0, 0);
+      const desiredStartMinutes = ganttStartMinutes + offsetMinutes;
+      targetDesiredDate.setHours(Math.floor(desiredStartMinutes / 60), desiredStartMinutes % 60, 0, 0);
       const result = suggestWorkshopSlot({
         dossiers,
         technicians: techniciens,
@@ -490,21 +558,77 @@ export default function WorkshopPlanning({
     ? DEFAULT_WORKSHOP_BAYS
     : DEFAULT_WORKSHOP_BAYS.filter(b => b.id === filterBay);
 
-  // Gantt Chart hours mapping
-  const ganttHours = isSat 
-    ? [8, 9, 10, 11] 
-    : [8, 9, 10, 11, 12, 13, 14, 15, 16];
+  const shiftProfiles = availabilityConfig?.shiftProfiles?.length
+    ? availabilityConfig.shiftProfiles
+    : getDefaultWorkshopShiftProfiles();
 
-  const totalGanttMinutes = isSat ? 4 * 60 : 9 * 60; // 240 or 540 minutes
+  const effectiveWorkshopWindows = availabilityConfig
+    ? getEffectiveWorkshopWindows(selectedDate, { ...availabilityConfig, shiftProfiles })
+    : getScheduleWindowsForDay(
+        {
+          id: "default",
+          name: "Atelier",
+          active: true,
+          schedule: getDefaultWorkshopSchedule(),
+        },
+        selectedDate.getDay()
+      );
+  const visibleGanttWindows = mergeWorkshopWindows(effectiveWorkshopWindows);
+  const baseTimelineWindows = effectiveWorkshopWindows.length > 0
+    ? effectiveWorkshopWindows
+    : visibleGanttWindows;
+  const ganttStartMinutes = visibleGanttWindows.length > 0
+    ? Math.min(...visibleGanttWindows.map(window => timeToMinutes(window.start)))
+    : 8 * 60;
+  const ganttEndMinutes = visibleGanttWindows.length > 0
+    ? Math.max(...visibleGanttWindows.map(window => timeToMinutes(window.end)))
+    : (isSat ? 12 * 60 : 17 * 60);
+  const totalGanttMinutes = Math.max(60, ganttEndMinutes - ganttStartMinutes);
+  const ganttHours = Array.from(
+    { length: Math.max(1, Math.ceil(ganttEndMinutes / 60) - Math.floor(ganttStartMinutes / 60)) },
+    (_, index) => Math.floor(ganttStartMinutes / 60) + index
+  );
+  const ganttEndHourLabel = minutesToTime(ganttEndMinutes);
+  const ganttEndTestId = isSat && ganttEndMinutes === 12 * 60
+    ? "gantt-hour-12-end"
+    : `gantt-hour-${String(Math.floor(ganttEndMinutes / 60)).padStart(2, "0")}`;
+  const closedGanttRanges = (() => {
+    const ranges: Array<{ start: number; end: number; label: string }> = [];
+    const sortedBaseWindows = mergeWorkshopWindows(baseTimelineWindows)
+      .map(window => ({ start: timeToMinutes(window.start), end: timeToMinutes(window.end) }))
+      .sort((left, right) => left.start - right.start);
+    let cursor = ganttStartMinutes;
+    for (const window of sortedBaseWindows) {
+      if (window.start > cursor) {
+        ranges.push({ start: cursor, end: window.start, label: "Pause" });
+      }
+      cursor = Math.max(cursor, window.end);
+    }
+    if (cursor < ganttEndMinutes) {
+      ranges.push({ start: cursor, end: ganttEndMinutes, label: "Hors horaires" });
+    }
+    return ranges.filter(range => range.end > range.start);
+  })();
+  const getGanttBlockPosition = (start: Date, end: Date) => {
+    const startOffset = start.getHours() * 60 + start.getMinutes() - ganttStartMinutes;
+    const endOffset = end.getHours() * 60 + end.getMinutes() - ganttStartMinutes;
+    const leftMinutes = Math.max(0, Math.min(totalGanttMinutes, startOffset));
+    const rightMinutes = Math.max(leftMinutes, Math.min(totalGanttMinutes, endOffset));
+    const leftPct = (leftMinutes / totalGanttMinutes) * 100;
+    const widthPct = Math.max(2, ((rightMinutes - leftMinutes) / totalGanttMinutes) * 100);
+    return { leftPct, widthPct };
+  };
+  const manualHourOptions = Array.from(
+    { length: Math.max(1, Math.floor(ganttEndMinutes / 60) - Math.floor(ganttStartMinutes / 60) + 1) },
+    (_, index) => String(Math.floor(ganttStartMinutes / 60) + index).padStart(2, "0")
+  );
 
   const todayStrForLine = getLocalDateStr(now);
   const isSelectedDateTodayForLine = selectedDateStr === todayStrForLine;
-  const nowHourForLine = now.getHours();
-  const nowMinForLine = now.getMinutes();
-  const nowMinutesSince8ForLine = (nowHourForLine - 8) * 60 + nowMinForLine;
-  const isTimeInWorkingHoursForLine = nowMinutesSince8ForLine >= 0 && nowMinutesSince8ForLine <= totalGanttMinutes;
+  const nowMinutesSinceStartForLine = now.getHours() * 60 + now.getMinutes() - ganttStartMinutes;
+  const isTimeInWorkingHoursForLine = nowMinutesSinceStartForLine >= 0 && nowMinutesSinceStartForLine <= totalGanttMinutes;
   const showNowLine = isSelectedDateTodayForLine && isTimeInWorkingHoursForLine;
-  const nowPct = showNowLine ? (nowMinutesSince8ForLine / totalGanttMinutes) * 100 : 0;
+  const nowPct = showNowLine ? (nowMinutesSinceStartForLine / totalGanttMinutes) * 100 : 0;
 
   // Find all reservations active on the selected date
   const activeReservationsStr = reservations.filter(res => {
@@ -694,7 +818,7 @@ export default function WorkshopPlanning({
     const rawMinutes = ratio * totalGanttMinutes;
     const snappedMinutes = Math.round(rawMinutes / 15) * 15;
     const start = new Date(selectedDate);
-    start.setHours(8, 0, 0, 0);
+    start.setHours(Math.floor(ganttStartMinutes / 60), ganttStartMinutes % 60, 0, 0);
     start.setMinutes(start.getMinutes() + snappedMinutes);
     return start;
   };
@@ -740,10 +864,7 @@ export default function WorkshopPlanning({
   dossiers.forEach(dossier => {
     if (dossier.statut !== DossierStatus.LIVRE && dossier.statut !== DossierStatus.CLOTURE && dossier.statut !== DossierStatus.ANNULE) {
       dossier.ordresReparation.forEach(line => {
-        const hasSegmentOnDate = line.planningSegments && line.planningSegments.length > 0
-          ? line.planningSegments.some(seg => seg.start.split("T")[0] === selectedDateStr)
-          : line.planningDate === selectedDateStr;
-        if (hasSegmentOnDate && isActivePlannedTask(line, dossier)) {
+        if (isActivePlannedTask(line, dossier, selectedDateStr)) {
           if (ganttSearchQuery.trim()) {
             const query = ganttSearchQuery.toLowerCase().trim();
             const matchesImmat = dossier.vehiculeImmatriculation?.toLowerCase().includes(query);
@@ -766,10 +887,19 @@ export default function WorkshopPlanning({
   const rescheduleLine = rescheduleDossier && rescheduleTarget
     ? rescheduleDossier.ordresReparation.find(line => line.id === rescheduleTarget.lineId)
     : undefined;
-  const shiftProfiles = availabilityConfig?.shiftProfiles?.length
-    ? availabilityConfig.shiftProfiles
-    : getDefaultWorkshopShiftProfiles();
   const canShowPhone = perm.canViewVehicleSensitiveFields(activeRole);
+  const editShiftCapacityLabel = formatCapacityHours(calculateShiftProfileCapacityMinutes(editShiftDraft));
+  const updateEditShiftDraft = (patch: Partial<ShiftProfileDraft>) => {
+    setEditShiftDraft(current => ({ ...current, ...patch }));
+  };
+  const toggleEditShiftDay = (day: number) => {
+    setEditShiftDraft(current => {
+      const activeDays = current.activeDays.includes(day)
+        ? current.activeDays.filter(currentDay => currentDay !== day)
+        : [...current.activeDays, day].sort((left, right) => left - right);
+      return { ...current, activeDays };
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -1055,7 +1185,7 @@ export default function WorkshopPlanning({
                     value={manualStartHour}
                     onChange={(e) => setManualStartHour(e.target.value)}
                   >
-                    {["08", "09", "10", "11", "12", "13", "14", "15", "16", "17"].map(h => (
+                    {manualHourOptions.map(h => (
                       <option key={h} value={h}>{h}h</option>
                     ))}
                   </select>
@@ -1098,7 +1228,7 @@ export default function WorkshopPlanning({
                 {manualWarnings.includes("planning-collision-hours") && (
                   <p data-testid="planning-collision-hours" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    Créneau en dehors des horaires d'ouverture (08h-17h, Samedi matin 08h-12h).
+                    Créneau en dehors des horaires d'ouverture configurés.
                   </p>
                 )}
                 {manualWarnings.includes("planning-collision-sunday") && (
@@ -1446,7 +1576,7 @@ export default function WorkshopPlanning({
               {ganttHours.map(h => (
                 <span key={h} data-testid={`gantt-hour-${String(h).padStart(2, "0")}`} className="w-1/12 font-mono">{String(h).padStart(2, "0")}:00</span>
               ))}
-              <span data-testid={isSat ? "gantt-hour-12-end" : "gantt-hour-17"} className="w-1/12 font-mono">{isSat ? "12:00" : "17:00"}</span>
+              <span data-testid={ganttEndTestId} className="w-1/12 font-mono">{ganttEndHourLabel}</span>
             </div>
           </div>
         </div>
@@ -1474,11 +1604,7 @@ export default function WorkshopPlanning({
                 if (!isClosed && !isAbsent) {
                   if (availabilityConfig) {
                     const effWindows = getEffectiveWorkshopWindowsForResource(selectedDate, availabilityConfig, { technicianId: tech.id });
-                    techCapacity = effWindows.reduce((sum, win) => {
-                      const [sh, sm] = win.start.split(":").map(Number);
-                      const [eh, em] = win.end.split(":").map(Number);
-                      return sum + (eh * 60 + em - (sh * 60 + sm)) / 60;
-                    }, 0);
+                    techCapacity = getCapacityHoursFromWindows(effWindows);
                   } else {
                     techCapacity = isSat ? 4 : 8;
                   }
@@ -1505,35 +1631,16 @@ export default function WorkshopPlanning({
                 // Determine availability status
                 const isNonDisponible = tech.disponibilite === "absent" || tech.disponibilite === "formation";
 
-                const hasInProgressTask = dossiers.some(d => 
-                  d.ordresReparation.some(l => 
-                    l.plannedTechnicianId === tech.id && 
-                    normalizeRepairOrderStatus(l.status) === "in_progress"
-                  )
-                ) || dossiers.some(d => 
-                  d.technicienId === tech.id && 
-                  d.ordresReparation.some(l => normalizeRepairOrderStatus(l.status) === "in_progress")
+                const hasInProgressTask = techPlannedLines.some(({ line }) =>
+                  normalizeRepairOrderStatus(line.status) === "in_progress"
                 );
 
-                const todayTechSegments: Array<{ start: Date; end: Date }> = [];
-                const todayStr = getLocalDateStr(now);
-                dossiers.forEach(d => {
-                  if (d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE) {
-                    d.ordresReparation.forEach(l => {
-                      if (l.plannedTechnicianId === tech.id && l.planningStart && l.planningEnd) {
-                        const segments = l.planningSegments || [{ start: l.planningStart, end: l.planningEnd }];
-                        segments.forEach(seg => {
-                          if (seg.start.split("T")[0] === todayStr) {
-                            todayTechSegments.push({
-                              start: new Date(seg.start),
-                              end: new Date(seg.end)
-                            });
-                          }
-                        });
-                      }
-                    });
-                  }
-                });
+                const todayTechSegments: Array<{ start: Date; end: Date }> = techPlannedLines.flatMap(({ line }) =>
+                  getRepairOrderPlanningSegmentsForDate(line, selectedDateStr).map(seg => ({
+                    start: new Date(seg.start),
+                    end: new Date(seg.end)
+                  }))
+                );
 
                 const hasSegmentCoveringNow = todayTechSegments.some(seg => {
                   const t = now.getTime();
@@ -1541,6 +1648,7 @@ export default function WorkshopPlanning({
                 });
 
                 const hasSegmentsToday = todayTechSegments.length > 0;
+                const hasLoadWithoutVisibleBlock = dailyLoad > 0 && techPlannedLines.length === 0;
 
                 let statusLabel = "Disponible";
                 let statusColor = "bg-green-500 text-white";
@@ -1557,6 +1665,9 @@ export default function WorkshopPlanning({
                 } else if (hasSegmentsToday) {
                   statusLabel = "Planifié aujourd’hui";
                   statusColor = "bg-blue-500 text-white";
+                } else if (hasLoadWithoutVisibleBlock) {
+                  statusLabel = "Charge sans bloc visible";
+                  statusColor = "bg-amber-500 text-white";
                 } else {
                   statusLabel = "Disponible";
                   statusColor = "bg-green-500 text-white";
@@ -1598,21 +1709,22 @@ export default function WorkshopPlanning({
                       onDrop={(event) => handleDropTask(event, { technicianId: tech.id })}
                     >
                       
-                      {/* Midday Lunch break shaded area */}
-                      {!isSat && (
-                        <div 
-                          data-testid="gantt-lunch-break-shading"
-                          className="absolute top-0 bottom-0 bg-yellow-500/10 border-l border-r border-yellow-200/40 z-10 flex items-center justify-center"
+                      {/* Non-working ranges shaded from configured windows */}
+                      {closedGanttRanges.map((range, index) => (
+                        <div
+                          key={`${range.start}-${range.end}`}
+                          data-testid={index === 0 ? "gantt-lunch-break-shading" : "gantt-closed-range-shading"}
+                          className="absolute top-0 bottom-0 bg-slate-400/10 border-l border-r border-slate-200/60 z-10 flex items-center justify-center"
                           style={{
-                            left: `${(240 / 540) * 100}%`,
-                            width: `${(60 / 540) * 100}%`
+                            left: `${((range.start - ganttStartMinutes) / totalGanttMinutes) * 100}%`,
+                            width: `${((range.end - range.start) / totalGanttMinutes) * 100}%`
                           }}
                         >
-                          <span className="text-[8px] text-amber-600/60 font-black uppercase tracking-widest text-center block rotate-90 sm:rotate-0">
-                            Pause Midi
+                          <span className="text-[8px] text-slate-500/70 font-black uppercase tracking-widest text-center block rotate-90 sm:rotate-0">
+                            {range.label}
                           </span>
                         </div>
-                      )}
+                      ))}
 
                       {showNowLine && (
                         <div 
@@ -1628,22 +1740,15 @@ export default function WorkshopPlanning({
 
                       {/* Display task blocks on this row */}
                       {techPlannedLines.map(({ dossier, line }) => {
-                        const segments = (line.planningSegments && line.planningSegments.length > 0
-                          ? line.planningSegments
-                          : [{ start: line.planningStart!, end: line.planningEnd! }]
-                        ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
+                        const segments = getRepairOrderPlanningSegmentsForDate(line, selectedDateStr);
 
                         return segments.map((seg, sIdx) => {
                           const s = new Date(seg.start);
                           const e = new Date(seg.end);
-                          const startMin = (s.getHours() - 8) * 60 + s.getMinutes();
-                          const durMin = Math.round((e.getTime() - s.getTime()) / 60000);
-
-                          const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
-                          const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
+                          const { leftPct, widthPct } = getGanttBlockPosition(s, e);
 
                           const isPast = e.getTime() < now.getTime();
-                          const visualState = getGanttTaskVisualState(line, now);
+                          const visualState = getGanttTaskVisualState(line, now, dossier);
                           const statusVisual = GANTT_STATE_VISUALS[visualState];
 
                           return (
@@ -1727,11 +1832,7 @@ export default function WorkshopPlanning({
                         return segments.map((seg, sIdx) => {
                           const s = new Date(seg.start);
                           const e = new Date(seg.end);
-                          const startMin = (s.getHours() - 8) * 60 + s.getMinutes();
-                          const durMin = Math.round((e.getTime() - s.getTime()) / 60000);
-
-                          const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
-                          const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
+                          const { leftPct, widthPct } = getGanttBlockPosition(s, e);
 
                           const isProposed = res.status === "CRENEAU_PROPOSE";
                           const blockBg = isProposed
@@ -1821,11 +1922,7 @@ export default function WorkshopPlanning({
             if (!isClosedDay && !isBayUnav) {
               if (availabilityConfig) {
                 const effWindows = getEffectiveWorkshopWindowsForResource(selectedDate, availabilityConfig, { bayId: bay.id });
-                bayCapacity = effWindows.reduce((sum, win) => {
-                  const [sh, sm] = win.start.split(":").map(Number);
-                  const [eh, em] = win.end.split(":").map(Number);
-                  return sum + (eh * 60 + em - (sh * 60 + sm)) / 60;
-                }, 0);
+                bayCapacity = getCapacityHoursFromWindows(effWindows);
               } else {
                 bayCapacity = isSat ? 4 : 8;
               }
@@ -1907,20 +2004,22 @@ export default function WorkshopPlanning({
                   onDrop={(event) => handleDropTask(event, { bayId: bay.id })}
                 >
                   
-                  {/* Midday Lunch break shaded area */}
-                  {!isSat && (
-                    <div 
-                      className="absolute top-0 bottom-0 bg-yellow-500/10 border-l border-r border-yellow-200/40 z-10 flex items-center justify-center"
+                  {/* Non-working ranges shaded from configured windows */}
+                  {closedGanttRanges.map((range, index) => (
+                    <div
+                      key={`${range.start}-${range.end}`}
+                      data-testid={index === 0 ? "gantt-lunch-break-shading" : "gantt-closed-range-shading"}
+                      className="absolute top-0 bottom-0 bg-slate-400/10 border-l border-r border-slate-200/60 z-10 flex items-center justify-center"
                       style={{
-                        left: `${(240 / 540) * 100}%`,
-                        width: `${(60 / 540) * 100}%`
+                        left: `${((range.start - ganttStartMinutes) / totalGanttMinutes) * 100}%`,
+                        width: `${((range.end - range.start) / totalGanttMinutes) * 100}%`
                       }}
                     >
-                      <span className="text-[8px] text-amber-600/60 font-black uppercase tracking-widest text-center block rotate-90 sm:rotate-0">
-                        Pause Midi
+                      <span className="text-[8px] text-slate-500/70 font-black uppercase tracking-widest text-center block rotate-90 sm:rotate-0">
+                        {range.label}
                       </span>
                     </div>
-                  )}
+                  ))}
 
                   {showNowLine && (
                     <div 
@@ -1936,22 +2035,15 @@ export default function WorkshopPlanning({
 
                   {/* Display task blocks on this row */}
                   {bayPlannedLines.map(({ dossier, line }) => {
-                    const segments = (line.planningSegments && line.planningSegments.length > 0
-                      ? line.planningSegments
-                      : [{ start: line.planningStart!, end: line.planningEnd! }]
-                    ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
+                    const segments = getRepairOrderPlanningSegmentsForDate(line, selectedDateStr);
 
                     return segments.map((seg, sIdx) => {
                       const s = new Date(seg.start);
                       const e = new Date(seg.end);
-                      const startMin = (s.getHours() - 8) * 60 + s.getMinutes();
-                      const durMin = Math.round((e.getTime() - s.getTime()) / 60000);
-
-                      const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
-                      const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
+                      const { leftPct, widthPct } = getGanttBlockPosition(s, e);
 
                       const isPast = e.getTime() < now.getTime();
-                      const visualState = getGanttTaskVisualState(line, now);
+                      const visualState = getGanttTaskVisualState(line, now, dossier);
                       const statusVisual = GANTT_STATE_VISUALS[visualState];
 
                       return (
@@ -2032,11 +2124,7 @@ export default function WorkshopPlanning({
                     return segments.map((seg, sIdx) => {
                       const s = new Date(seg.start);
                       const e = new Date(seg.end);
-                      const startMin = (s.getHours() - 8) * 60 + s.getMinutes();
-                      const durMin = Math.round((e.getTime() - s.getTime()) / 60000);
-
-                      const leftPct = Math.max(0, Math.min(100, (startMin / totalGanttMinutes) * 100));
-                      const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
+                      const { leftPct, widthPct } = getGanttBlockPosition(s, e);
 
                       const isProposed = res.status === "CRENEAU_PROPOSE";
                       const blockBg = isProposed
@@ -2148,18 +2236,7 @@ export default function WorkshopPlanning({
                       data-testid={`shift-profile-edit-${profile.id}`}
                       onClick={() => {
                         setEditingProfile(profile);
-                        setEditProfileName(profile.name);
-                        const days = [1,2,3,4,5,6,0].map(dow => {
-                          const day = profile.schedule.days.find(d => d.dayOfWeek === dow);
-                          const win = day?.windows?.[0];
-                          return {
-                            dayOfWeek: dow,
-                            isClosed: day ? day.isClosed : dow === 0,
-                            start: win?.start ?? "08:00",
-                            end: win?.end ?? "17:00",
-                          };
-                        });
-                        setEditProfileWindows(days);
+                        setEditShiftDraft(deriveShiftProfileDraft(profile));
                         setEditProfileError(null);
                       }}
                       className="mt-2 px-2 py-1 bg-white border border-gray-200 hover:border-blue-300 text-gray-600 hover:text-blue-700 text-[10px] font-bold rounded-lg transition cursor-pointer"
@@ -2170,6 +2247,25 @@ export default function WorkshopPlanning({
                 </div>
               ))}
             </div>
+
+            {perm.canManageWorkshopAvailability(activeRole) && (
+              <button
+                type="button"
+                data-testid="shift-profiles-reset-defaults"
+                onClick={() => {
+                  const confirmed = window.confirm("Réinitialiser les horaires par défaut de l'atelier ?");
+                  if (!confirmed) return;
+                  onUpdateAvailabilityConfig({
+                    ...availabilityConfig,
+                    schedule: getDefaultWorkshopSchedule(),
+                    shiftProfiles: getDefaultWorkshopShiftProfiles(),
+                  });
+                }}
+                className="inline-flex min-h-12 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
+              >
+                Réinitialiser les horaires par défaut
+              </button>
+            )}
 
             {perm.canManageWorkshopAvailability(activeRole) && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -2744,82 +2840,109 @@ export default function WorkshopPlanning({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl bg-white rounded-xl shadow-xl flex flex-col max-h-[90vh]">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-display font-black text-slate-900">Modifier l'équipe : {editingProfile.name}</h3>
-              <button onClick={() => setEditingProfile(null)} className="text-gray-400 hover:text-gray-600">
+              <h3 className="font-display font-black text-slate-900">Modifier les horaires de l'équipe</h3>
+              <button onClick={() => setEditingProfile(null)} className="min-h-12 min-w-12 text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
             
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
               {editProfileError && (
-                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg">
+                <div data-testid="shift-profile-edit-error" className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg">
                   {editProfileError}
                 </div>
               )}
               
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 uppercase">Nom de l'équipe</label>
-                <input
-                  type="text"
-                  data-testid="shift-profile-name-input"
-                  value={editProfileName}
-                  onChange={e => setEditProfileName(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500"
-                />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label className="space-y-2 sm:col-span-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase">Nom du profil</span>
+                  <input
+                    type="text"
+                    data-testid="shift-profile-name-input"
+                    value={editShiftDraft.name}
+                    onChange={event => updateEditShiftDraft({ name: event.target.value })}
+                    className="w-full min-h-12 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase">Heure début journée</span>
+                  <input
+                    type="time"
+                    data-testid="shift-profile-day-start"
+                    value={editShiftDraft.dayStart}
+                    onChange={event => updateEditShiftDraft({ dayStart: event.target.value })}
+                    className="w-full min-h-12 rounded-lg border border-slate-200 bg-white p-2 text-sm font-bold text-slate-900"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase">Heure fin journée</span>
+                  <input
+                    type="time"
+                    data-testid="shift-profile-day-end"
+                    value={editShiftDraft.dayEnd}
+                    onChange={event => updateEditShiftDraft({ dayEnd: event.target.value })}
+                    className="w-full min-h-12 rounded-lg border border-slate-200 bg-white p-2 text-sm font-bold text-slate-900"
+                  />
+                </label>
+
+                <label className="flex min-h-12 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 sm:col-span-2">
+                  <span className="text-xs font-black uppercase text-slate-700">Pause activée</span>
+                  <input
+                    type="checkbox"
+                    data-testid="shift-profile-pause-enabled"
+                    checked={editShiftDraft.pauseEnabled}
+                    onChange={event => updateEditShiftDraft({ pauseEnabled: event.target.checked })}
+                    className="h-5 w-5 rounded border-slate-300 text-blue-600"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase">Heure début pause</span>
+                  <input
+                    type="time"
+                    data-testid="shift-profile-pause-start"
+                    value={editShiftDraft.pauseStart}
+                    disabled={!editShiftDraft.pauseEnabled}
+                    onChange={event => updateEditShiftDraft({ pauseStart: event.target.value })}
+                    className="w-full min-h-12 rounded-lg border border-slate-200 bg-white p-2 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase">Heure fin pause</span>
+                  <input
+                    type="time"
+                    data-testid="shift-profile-pause-end"
+                    value={editShiftDraft.pauseEnd}
+                    disabled={!editShiftDraft.pauseEnabled}
+                    onChange={event => updateEditShiftDraft({ pauseEnd: event.target.value })}
+                    className="w-full min-h-12 rounded-lg border border-slate-200 bg-white p-2 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </label>
               </div>
 
               <div className="space-y-3">
-                <label className="text-xs font-bold text-slate-700 uppercase">Horaires par jour</label>
-                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
-                  {editProfileWindows.map((win, idx) => {
-                    const daysMap = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
-                    return (
-                      <div key={win.dayOfWeek} className="p-3 flex items-center justify-between bg-white hover:bg-slate-50 transition">
-                        <div className="flex items-center gap-3 min-w-[120px]">
-                          <input
-                            type="checkbox"
-                            checked={!win.isClosed}
-                            onChange={(e) => {
-                              const newWins = [...editProfileWindows];
-                              newWins[idx].isClosed = !e.target.checked;
-                              setEditProfileWindows(newWins);
-                            }}
-                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                          />
-                          <span className={`font-bold text-sm ${win.isClosed ? "text-slate-400" : "text-slate-900"}`}>
-                            {daysMap[win.dayOfWeek]}
-                          </span>
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="time"
-                            value={win.start}
-                            disabled={win.isClosed}
-                            onChange={(e) => {
-                              const newWins = [...editProfileWindows];
-                              newWins[idx].start = e.target.value;
-                              setEditProfileWindows(newWins);
-                            }}
-                            className={`p-1.5 border rounded-md text-xs font-bold ${win.isClosed ? "bg-slate-100 border-transparent text-slate-400" : "bg-white border-slate-200 text-slate-900"}`}
-                          />
-                          <span className="text-slate-400">-</span>
-                          <input
-                            type="time"
-                            value={win.end}
-                            disabled={win.isClosed}
-                            onChange={(e) => {
-                              const newWins = [...editProfileWindows];
-                              newWins[idx].end = e.target.value;
-                              setEditProfileWindows(newWins);
-                            }}
-                            className={`p-1.5 border rounded-md text-xs font-bold ${win.isClosed ? "bg-slate-100 border-transparent text-slate-400" : "bg-white border-slate-200 text-slate-900"}`}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
+                <span className="text-xs font-bold text-slate-700 uppercase">Jours actifs lundi à samedi</span>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {SHIFT_EDIT_DAYS.map(day => (
+                    <label key={day.value} className="flex min-h-12 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">
+                      <input
+                        type="checkbox"
+                        data-testid={`shift-profile-day-${day.value}`}
+                        checked={editShiftDraft.activeDays.includes(day.value)}
+                        onChange={() => toggleEditShiftDay(day.value)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                      />
+                      {day.label}
+                    </label>
+                  ))}
                 </div>
+              </div>
+
+              <div data-testid="shift-profile-capacity" className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs font-black uppercase text-indigo-800">
+                Capacité journalière calculée : {editShiftCapacityLabel}
               </div>
             </div>
 
@@ -2827,13 +2950,17 @@ export default function WorkshopPlanning({
               <button
                 type="button"
                 onClick={() => {
-                  setEditProfileWindows(editProfileWindows.map(w => ({
-                    ...w,
-                    start: "08:00",
-                    end: "17:00"
-                  })));
+                  setEditShiftDraft({
+                    name: editingProfile.name,
+                    dayStart: "08:00",
+                    dayEnd: "17:00",
+                    pauseEnabled: true,
+                    pauseStart: "12:00",
+                    pauseEnd: "13:00",
+                    activeDays: [1, 2, 3, 4, 5],
+                  });
                 }}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200 bg-slate-100 rounded-lg transition"
+                className="min-h-12 px-4 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200 bg-slate-100 rounded-lg transition"
               >
                 Réinitialiser horaires standards
               </button>
@@ -2843,7 +2970,7 @@ export default function WorkshopPlanning({
                   type="button"
                   data-testid="shift-profile-edit-cancel"
                   onClick={() => setEditingProfile(null)}
-                  className="px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition"
+                  className="min-h-12 px-4 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition"
                 >
                   Annuler
                 </button>
@@ -2851,7 +2978,7 @@ export default function WorkshopPlanning({
                   type="button"
                   data-testid="shift-profile-edit-save"
                   onClick={handleSaveShiftProfile}
-                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition"
+                  className="min-h-12 px-4 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition"
                 >
                   Enregistrer modifications
                 </button>

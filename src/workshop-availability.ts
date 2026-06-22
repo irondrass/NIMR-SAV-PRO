@@ -17,6 +17,34 @@ import {
   BayShiftAssignment
 } from "./types";
 
+export const SHIFT_PROFILES_STORAGE_KEY = "nimr-sav-pro-shift-profiles";
+
+export interface ShiftProfileDraft {
+  name: string;
+  dayStart: string;
+  dayEnd: string;
+  pauseEnabled: boolean;
+  pauseStart: string;
+  pauseEnd: string;
+  activeDays: number[];
+}
+
+export interface ShiftProfileValidationResult {
+  valid: boolean;
+  error?: string;
+  capacityMinutes: number;
+}
+
+const SHIFT_ACTIVE_DAYS = [1, 2, 3, 4, 5, 6];
+const SHIFT_DAY_LABELS: Record<number, string> = {
+  1: "Lun",
+  2: "Mar",
+  3: "Mer",
+  4: "Jeu",
+  5: "Ven",
+  6: "Sam",
+};
+
 export function getDefaultWorkshopSchedule(): WorkshopSchedule {
   return {
     days: [
@@ -53,6 +81,132 @@ export function getDefaultWorkshopSchedule(): WorkshopSchedule {
       }
     ]
   };
+}
+
+export function deriveShiftProfileDraft(profile: WorkshopShiftProfile): ShiftProfileDraft {
+  const activeDays = SHIFT_ACTIVE_DAYS.filter(dayOfWeek => {
+    const day = profile.schedule.days.find(current => current.dayOfWeek === dayOfWeek);
+    return Boolean(day && !day.isClosed && day.windows.length > 0);
+  });
+  const firstActiveDay = activeDays[0] ?? 1;
+  const firstSchedule = profile.schedule.days.find(day => day.dayOfWeek === firstActiveDay);
+  const windows = firstSchedule?.windows ?? [];
+  const firstWindow = windows[0];
+  const lastWindow = windows[windows.length - 1];
+
+  return {
+    name: profile.name,
+    dayStart: firstWindow?.start ?? "08:00",
+    dayEnd: lastWindow?.end ?? "17:00",
+    pauseEnabled: windows.length >= 2,
+    pauseStart: firstWindow?.end ?? "12:00",
+    pauseEnd: windows[1]?.start ?? "13:00",
+    activeDays: activeDays.length > 0 ? activeDays : [1, 2, 3, 4, 5],
+  };
+}
+
+export function validateShiftProfileDraft(draft: ShiftProfileDraft): ShiftProfileValidationResult {
+  const activeDays = normalizeShiftActiveDays(draft.activeDays);
+  const dayStart = parseTimeToMinutesSafe(draft.dayStart);
+  const dayEnd = parseTimeToMinutesSafe(draft.dayEnd);
+  const pauseStart = parseTimeToMinutesSafe(draft.pauseStart);
+  const pauseEnd = parseTimeToMinutesSafe(draft.pauseEnd);
+
+  if (!draft.name.trim()) {
+    return { valid: false, error: "Le nom du profil est obligatoire.", capacityMinutes: 0 };
+  }
+  if (activeDays.length === 0) {
+    return { valid: false, error: "Sélectionner au moins un jour actif.", capacityMinutes: 0 };
+  }
+  if (dayStart === null || dayEnd === null) {
+    return { valid: false, error: "Les heures de début et fin de journée sont invalides.", capacityMinutes: 0 };
+  }
+  if (dayStart >= dayEnd) {
+    return { valid: false, error: "Le début de journée doit être avant la fin.", capacityMinutes: 0 };
+  }
+
+  let pauseMinutes = 0;
+  if (draft.pauseEnabled) {
+    if (pauseStart === null || pauseEnd === null) {
+      return { valid: false, error: "Les heures de pause sont invalides.", capacityMinutes: 0 };
+    }
+    if (pauseStart >= pauseEnd) {
+      return { valid: false, error: "Le début de pause doit être avant la fin de pause.", capacityMinutes: 0 };
+    }
+    if (pauseStart < dayStart || pauseEnd > dayEnd) {
+      return { valid: false, error: "La pause doit être comprise dans la journée.", capacityMinutes: 0 };
+    }
+    pauseMinutes = pauseEnd - pauseStart;
+  }
+
+  const capacityMinutes = dayEnd - dayStart - pauseMinutes;
+  if (capacityMinutes <= 0) {
+    return { valid: false, error: "La capacité journalière doit être positive.", capacityMinutes };
+  }
+  if (capacityMinutes > 12 * 60) {
+    return { valid: false, error: "La capacité journalière ne peut pas dépasser 12h.", capacityMinutes };
+  }
+
+  return { valid: true, capacityMinutes };
+}
+
+export function calculateShiftProfileCapacityMinutes(draft: ShiftProfileDraft): number {
+  return validateShiftProfileDraft({
+    ...draft,
+    name: draft.name.trim() || "Profil",
+    activeDays: draft.activeDays.length > 0 ? draft.activeDays : [1],
+  }).capacityMinutes;
+}
+
+export function buildScheduleFromShiftProfileDraft(draft: ShiftProfileDraft): WorkshopSchedule {
+  const activeDays = new Set(normalizeShiftActiveDays(draft.activeDays));
+  const windows = draft.pauseEnabled
+    ? [
+        { start: draft.dayStart, end: draft.pauseStart },
+        { start: draft.pauseEnd, end: draft.dayEnd },
+      ]
+    : [{ start: draft.dayStart, end: draft.dayEnd }];
+
+  return {
+    days: [0, 1, 2, 3, 4, 5, 6].map(dayOfWeek => ({
+      dayOfWeek,
+      isClosed: !activeDays.has(dayOfWeek),
+      windows: activeDays.has(dayOfWeek) ? windows : [],
+    })),
+  };
+}
+
+export function summarizeShiftProfileDraft(draft: ShiftProfileDraft): string {
+  const windows = draft.pauseEnabled
+    ? `${draft.dayStart}-${draft.pauseStart} / ${draft.pauseEnd}-${draft.dayEnd}`
+    : `${draft.dayStart}-${draft.dayEnd}`;
+  const days = normalizeShiftActiveDays(draft.activeDays).map(day => SHIFT_DAY_LABELS[day]).join("-");
+  const capacity = validateShiftProfileDraft({
+    ...draft,
+    name: draft.name.trim() || "Profil",
+    activeDays: draft.activeDays.length > 0 ? draft.activeDays : [1],
+  }).capacityMinutes;
+  return `${windows} · ${days || "Aucun jour"} · ${formatCapacityHours(capacity)}`;
+}
+
+export function formatCapacityHours(capacityMinutes: number): string {
+  const hours = Math.floor(Math.max(0, capacityMinutes) / 60);
+  const minutes = Math.max(0, capacityMinutes) % 60;
+  return minutes === 0 ? `${hours}h/j` : `${hours}h${String(minutes).padStart(2, "0")}/j`;
+}
+
+function normalizeShiftActiveDays(activeDays: number[]): number[] {
+  const active = new Set(activeDays.filter(day => SHIFT_ACTIVE_DAYS.includes(day)));
+  return SHIFT_ACTIVE_DAYS.filter(day => active.has(day));
+}
+
+function parseTimeToMinutesSafe(timeStr: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(timeStr)) return null;
+  const [h, m] = timeStr.split(":").map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return null;
+  }
+  return h * 60 + m;
 }
 
 export function getDefaultWorkshopShiftProfiles(): WorkshopShiftProfile[] {
@@ -167,7 +321,7 @@ export function getEffectiveWorkshopWindowsForResource(
 
   let storedShiftProfiles: WorkshopShiftProfile[] = [];
   try {
-    const rawVal = typeof window !== "undefined" ? window.localStorage.getItem("nimr-sav-pro-shift-profiles") : null;
+    const rawVal = typeof window !== "undefined" ? window.localStorage.getItem(SHIFT_PROFILES_STORAGE_KEY) : null;
     if (rawVal) {
       storedShiftProfiles = JSON.parse(rawVal);
     }

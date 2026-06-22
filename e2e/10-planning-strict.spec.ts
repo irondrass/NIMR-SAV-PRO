@@ -125,6 +125,83 @@ const dossierSplit = createMockDossier({
   ],
 });
 
+const dossierNoPlanningDate = createMockDossier({
+  id: "NIMR-GANTT-NO-DATE",
+  clientNom: "Client Démo Gantt Sans Date",
+  vehiculeMarque: "DFSK",
+  vehiculeModele: "E5",
+  vehiculeImmatriculation: "444 TU 4444",
+  statut: DossierStatus.TRAVAUX_PLANIFIES,
+  technicienId: techA.id,
+  ordresReparation: [
+    line({
+      id: "ro_no_date",
+      designation: "Tâche planifiée sans planningDate",
+      tempsEstime: 1,
+      plannedTechnicianId: techA.id,
+      plannedBayId: "bay_mech_01",
+      planningStart: localIso(PLANNING_DATE, 8, 0),
+      planningEnd: localIso(PLANNING_DATE, 9, 0),
+    }),
+  ],
+});
+
+const dossierInProgress = createMockDossier({
+  id: "NIMR-GANTT-INPROGRESS",
+  clientNom: "Client Démo Gantt En cours",
+  vehiculeMarque: "Forthing",
+  vehiculeModele: "Friday",
+  vehiculeImmatriculation: "555 TU 5555",
+  statut: DossierStatus.EN_TRAVAUX,
+  technicienId: techA.id,
+  ordresReparation: [
+    {
+      ...plannedLine("ro_in_progress", "Tâche démarrée", techA.id, "bay_fast_01", 9, 0, 11, 0),
+      status: "in_progress",
+    },
+  ],
+});
+
+const dossierQcReturn = createMockDossier({
+  id: "NIMR-GANTT-QC-RETURN",
+  clientNom: "Client Démo Gantt Retour QC",
+  vehiculeMarque: "DFSK",
+  vehiculeModele: "Seres",
+  vehiculeImmatriculation: "666 TU 6666",
+  statut: DossierStatus.EN_TRAVAUX,
+  technicienId: techB.id,
+  retourQualite: true,
+  ordresReparation: [
+    {
+      ...plannedLine("ro_qc_return", "Reprise retour qualité", techB.id, "bay_body_01", 15, 0, 16, 0),
+      status: "reopened",
+    },
+  ],
+});
+
+const dossierDoneHidden = createMockDossier({
+  id: "NIMR-GANTT-DONE-HIDDEN",
+  clientNom: "Client Démo Gantt Terminé",
+  statut: DossierStatus.TRAVAUX_PLANIFIES,
+  technicienId: techC.id,
+  ordresReparation: [
+    {
+      ...plannedLine("ro_done_hidden", "Tâche terminée masquée", techC.id, "bay_general_01", 8, 0, 9, 0),
+      status: "done",
+    },
+  ],
+});
+
+const dossierCancelledHidden = createMockDossier({
+  id: "NIMR-GANTT-CANCELLED-HIDDEN",
+  clientNom: "Client Démo Gantt Annulé",
+  statut: DossierStatus.ANNULE,
+  technicienId: techC.id,
+  ordresReparation: [
+    plannedLine("ro_cancelled_hidden", "Tâche annulée masquée", techC.id, "bay_general_01", 9, 0, 10, 0),
+  ],
+});
+
 const dossierUnplanned = createMockDossier({
   id: "NIMR-GANTT-MANUAL",
   clientNom: "Client Démo Gantt Manuel",
@@ -147,6 +224,11 @@ const seedDossiers: DossierSAV[] = [
   dossierMorning,
   dossierAfternoon,
   dossierSplit,
+  dossierNoPlanningDate,
+  dossierInProgress,
+  dossierQcReturn,
+  dossierDoneHidden,
+  dossierCancelledHidden,
   dossierUnplanned,
   dossierLongSaturday,
 ];
@@ -257,6 +339,33 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await expect(splitBlocks).toHaveCount(2);
     await expect(splitBlocks.nth(0)).toHaveAttribute("data-end", /T11:00:00\.000Z|T12:00:00\.000/);
     await expect(splitBlocks.nth(1)).toHaveAttribute("data-start", /T12:00:00\.000Z|T13:00:00\.000/);
+  });
+
+  test("Lot 6J - conserve les tâches planifiées non terminées avec badges Gantt", async ({ page }) => {
+    await expect(page.locator('[data-testid="gantt-block-ro_no_date"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid="gantt-block-ro_no_date"]').first()).toContainText("Planifié");
+    await expect(page.locator('[data-testid="gantt-block-ro_qc_return"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid="gantt-block-ro_qc_return"]').first()).toContainText("Retour QC");
+    await expect(page.locator('[data-testid="gantt-block-ro_done_hidden"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="gantt-block-ro_cancelled_hidden"]')).toHaveCount(0);
+
+    await page.addInitScript(() => {
+      (window as any).__mockNow = "2026-06-15T09:30:00";
+    });
+    await page.reload();
+    await changeUserRole(page, "role-option-chef-atelier");
+    await openPlanning(page);
+    await setPlanningDate(page, PLANNING_DATE);
+    await expect(page.locator('[data-testid="gantt-block-ro_in_progress"]').first()).toContainText("En cours");
+
+    await page.addInitScript(() => {
+      (window as any).__mockNow = "2026-06-15T13:00:00";
+    });
+    await page.reload();
+    await changeUserRole(page, "role-option-chef-atelier");
+    await openPlanning(page);
+    await setPlanningDate(page, PLANNING_DATE);
+    await expect(page.locator('[data-testid="gantt-block-ro_morning"]').first()).toContainText("Non terminé");
   });
 
   test("navigation jour précédent, aujourd'hui et jour suivant", async ({ page }) => {
@@ -450,5 +559,31 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
 
     // techFree n'a aucune tâche planifiée, donc il doit être "Disponible"
     await expect(page.locator(`[data-testid="tech-row-${techFree.id}"]`)).toContainText("Disponible");
+  });
+
+  test("Lot 6J - modifie les horaires équipe et recalcule le Gantt", async ({ page }) => {
+    await humanClick(page, page.locator('[data-testid="shift-profile-edit-shift_standard"]'));
+    await expect(page.getByText("Modifier les horaires de l'équipe")).toBeVisible();
+
+    await page.locator('[data-testid="shift-profile-day-start"]').fill("09:00");
+    await page.locator('[data-testid="shift-profile-day-end"]').fill("18:00");
+    await page.locator('[data-testid="shift-profile-pause-start"]').fill("12:00");
+    await page.locator('[data-testid="shift-profile-pause-end"]').fill("13:00");
+    await expect(page.locator('[data-testid="shift-profile-capacity"]')).toContainText("8h/j");
+    await humanClick(page, page.locator('[data-testid="shift-profile-edit-save"]'));
+
+    await expect(page.locator('[data-testid="shift-profile-shift_standard"]')).toContainText("09:00-12:00 / 13:00-18:00");
+    await expect(page.locator('[data-testid="gantt-hour-09"]')).toBeVisible();
+    await expect(page.locator('[data-testid="gantt-hour-18"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-manual-hour"] option[value="08"]')).toHaveCount(0);
+
+    await selectManualBase(page);
+    await selectManualSlot(page, techFree.id, "bay_general_01", "18", "00");
+    await expect(page.locator('[data-testid="planning-collision-hours"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeDisabled();
+
+    const storedProfiles = await page.evaluate(() => localStorage.getItem("nimr-sav-pro-shift-profiles") || "");
+    expect(storedProfiles).toContain("09:00");
+    expect(storedProfiles).toContain("18:00");
   });
 });

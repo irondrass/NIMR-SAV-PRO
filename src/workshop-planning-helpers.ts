@@ -22,7 +22,7 @@ export function isRepairOrderPlanifiable(line: RepairOrderLine): boolean {
 
 export function getUnplannedRepairOrderTargets(dossiers: DossierSAV[]): TaskPlanningTarget[] {
   return dossiers.flatMap(dossier => {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) {
+    if (isTerminalPlanningDossier(dossier)) {
       return [];
     }
 
@@ -53,23 +53,51 @@ export function getCurrentGanttTaskStatus(
   return normalizeRepairOrderStatus(currentLine?.status ?? fallbackStatus);
 }
 
-export function isActivePlannedTask(task: RepairOrderLine, dossier: DossierSAV): boolean {
-  if (!task.plannedTechnicianId) return false;
-  const hasSchedule = Boolean(
-    (task.planningStart && task.planningEnd) ||
-    (task.planningDate && task.planningStart) ||
-    (task.planningSegments && task.planningSegments.length > 0)
-  );
-  if (!hasSchedule) return false;
+export function getRepairOrderPlanningSegments(task: RepairOrderLine): Array<{ start: string; end: string }> {
+  if (task.planningSegments && task.planningSegments.length > 0) {
+    return task.planningSegments;
+  }
+  if (task.planningStart && task.planningEnd) {
+    return [{ start: task.planningStart, end: task.planningEnd }];
+  }
+  return [];
+}
 
-  if (task.status === "done") return false;
-  if (
+export function getRepairOrderPlanningSegmentsForDate(
+  task: RepairOrderLine,
+  dateStr: string
+): Array<{ start: string; end: string }> {
+  return getRepairOrderPlanningSegments(task).filter(segment => {
+    const start = new Date(segment.start);
+    const end = new Date(segment.end);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+      return false;
+    }
+    const dayStart = new Date(`${dateStr}T00:00:00`);
+    const dayEnd = new Date(`${dateStr}T23:59:59.999`);
+    return start.getTime() <= dayEnd.getTime() && end.getTime() >= dayStart.getTime();
+  });
+}
+
+export function isTerminalPlanningDossier(dossier: DossierSAV): boolean {
+  return (
     dossier.statut === DossierStatus.LIVRE ||
     dossier.statut === DossierStatus.CLOTURE ||
-    dossier.statut === DossierStatus.ANNULE
-  ) {
-    return false;
-  }
+    dossier.statut === DossierStatus.ANNULE ||
+    dossier.statut === DossierStatus.PRET_FACTURATION ||
+    Boolean(dossier.archiveOperationnelle) ||
+    dossier.checklistQC?.validationGlobale === "valide"
+  );
+}
+
+export function isActivePlannedTask(task: RepairOrderLine, dossier: DossierSAV, dateStr?: string): boolean {
+  if (!task.plannedTechnicianId) return false;
+  const hasSchedule = getRepairOrderPlanningSegments(task).length > 0;
+  if (!hasSchedule) return false;
+
+  if (normalizeRepairOrderStatus(task.status) === "done") return false;
+  if (isTerminalPlanningDossier(dossier)) return false;
+  if (dateStr && getRepairOrderPlanningSegmentsForDate(task, dateStr).length === 0) return false;
   return true;
 }
 
@@ -81,31 +109,27 @@ export type GanttTaskVisualState =
   | "blocked"
   | "qc_return";
 
-export function getGanttTaskVisualState(task: RepairOrderLine, now: Date): GanttTaskVisualState {
-  if (task.status === "blocked") return "blocked";
-  if (task.status === "reopened") return "qc_return";
-
-  const taskStart = task.planningStart ? new Date(task.planningStart) : null;
-  const taskEnd = task.planningEnd ? new Date(task.planningEnd) : null;
-
-  let start = taskStart;
-  let end = taskEnd;
-  if (!start && task.planningSegments && task.planningSegments.length > 0) {
-    const sorted = [...task.planningSegments].sort((a, b) => a.start.localeCompare(b.start));
-    start = new Date(sorted[0].start);
-    end = new Date(sorted[sorted.length - 1].end);
+export function getGanttTaskVisualState(task: RepairOrderLine, now: Date, dossier?: DossierSAV): GanttTaskVisualState {
+  const status = normalizeRepairOrderStatus(task.status);
+  if (status === "blocked") return "blocked";
+  if (status === "reopened" || dossier?.retourQualite || dossier?.checklistQC?.validationGlobale === "refuse") {
+    return "qc_return";
   }
+
+  const segments = getRepairOrderPlanningSegments(task).sort((a, b) => a.start.localeCompare(b.start));
+  const start = segments[0] ? new Date(segments[0].start) : null;
+  const end = segments[segments.length - 1] ? new Date(segments[segments.length - 1].end) : null;
 
   const nowTime = now.getTime();
 
-  if (task.status === "in_progress") {
+  if (status === "in_progress") {
     if (end && end.getTime() < nowTime) {
       return "overdue_unfinished";
     }
     return "in_progress";
   }
 
-  if (task.status === "pending" || task.status === "paused") {
+  if (status === "pending" || status === "paused") {
     if (start && start.getTime() > nowTime) {
       return "planned_future";
     }

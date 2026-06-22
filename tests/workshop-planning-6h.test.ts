@@ -3,11 +3,18 @@ import fs from "node:fs";
 import { getTaskStatusVisual } from "../src/task-status-visual";
 import {
   getCurrentGanttTaskStatus,
+  getGanttTaskVisualState,
+  getRepairOrderPlanningSegmentsForDate,
   getUnplannedRepairOrderTargets,
+  isActivePlannedTask,
 } from "../src/workshop-planning-helpers";
 import {
+  buildScheduleFromShiftProfileDraft,
+  deriveShiftProfileDraft,
   getDefaultWorkshopSchedule,
   getDefaultWorkshopShiftProfiles,
+  summarizeShiftProfileDraft,
+  validateShiftProfileDraft,
   validateAvailabilityForSlot,
 } from "../src/workshop-availability";
 import {
@@ -16,6 +23,7 @@ import {
   createCorrectiveTaskFromComplaint,
   linkComplaintToRepairOrder,
 } from "../src/complaints-workflow";
+import { validatePlanningAssignment } from "../src/sav-core";
 import {
   ComplaintHistoryEntry,
   DossierPriority,
@@ -124,6 +132,40 @@ function complaint(overrides: Partial<ReclammationClient> = {}): ReclammationCli
 }
 
 {
+  const planned = line({
+    id: "planned_no_date",
+    planningStart: "2026-06-19T08:00:00.000Z",
+    planningEnd: "2026-06-19T09:00:00.000Z",
+    plannedTechnicianId: "tech_1",
+    plannedBayId: "bay_1",
+  });
+  const d = dossier({ ordresReparation: [planned] });
+  assert.equal(isActivePlannedTask(planned, d, "2026-06-19"), true);
+  assert.equal(getRepairOrderPlanningSegmentsForDate(planned, "2026-06-19").length, 1);
+  assert.equal(getGanttTaskVisualState(planned, new Date("2026-06-19T07:00:00.000Z"), d), "planned_future");
+  assert.equal(getGanttTaskVisualState(planned, new Date("2026-06-19T08:30:00.000Z"), d), "due_now_not_started");
+  assert.equal(getGanttTaskVisualState(planned, new Date("2026-06-19T10:00:00.000Z"), d), "overdue_unfinished");
+
+  const running = line({ ...planned, id: "running", status: "in_progress" });
+  assert.equal(getGanttTaskVisualState(running, new Date("2026-06-19T08:30:00.000Z"), d), "in_progress");
+
+  const blocked = line({ ...planned, id: "blocked", status: "blocked" });
+  assert.equal(getGanttTaskVisualState(blocked, new Date("2026-06-19T08:30:00.000Z"), d), "blocked");
+
+  const qcReturn = line({ ...planned, id: "qc_return", status: "reopened" });
+  assert.equal(getGanttTaskVisualState(qcReturn, new Date("2026-06-19T08:30:00.000Z"), d), "qc_return");
+
+  const done = line({ ...planned, id: "done", status: "done" });
+  assert.equal(isActivePlannedTask(done, dossier({ ordresReparation: [done] }), "2026-06-19"), false);
+  assert.equal(isActivePlannedTask(planned, dossier({ statut: DossierStatus.ANNULE, ordresReparation: [planned] }), "2026-06-19"), false);
+  assert.equal(isActivePlannedTask(planned, dossier({
+    ordresReparation: [planned],
+    checklistQC: { ...d.checklistQC, validationGlobale: "valide" },
+  }), "2026-06-19"), false);
+  console.log("  OK Gantt tâches planifiées actives et états visuels");
+}
+
+{
   const config: WorkshopAvailabilityConfig = {
     schedule: getDefaultWorkshopSchedule(),
     exceptions: [],
@@ -152,6 +194,97 @@ function complaint(overrides: Partial<ReclammationClient> = {}): ReclammationCli
     config,
   }).allowed, false);
   console.log("  OK validation créneau respecte équipe technicien");
+}
+
+{
+  const draft = {
+    name: "Équipe pilote",
+    dayStart: "07:30",
+    dayEnd: "18:00",
+    pauseEnabled: true,
+    pauseStart: "12:30",
+    pauseEnd: "13:15",
+    activeDays: [1, 2, 3, 4, 5, 6],
+  };
+  const validation = validateShiftProfileDraft(draft);
+  assert.equal(validation.valid, true);
+  assert.equal(validation.capacityMinutes, 585);
+  const schedule = buildScheduleFromShiftProfileDraft(draft);
+  assert.deepEqual(schedule.days.find(day => day.dayOfWeek === 1)?.windows, [
+    { start: "07:30", end: "12:30" },
+    { start: "13:15", end: "18:00" },
+  ]);
+  assert.equal(schedule.days.find(day => day.dayOfWeek === 0)?.isClosed, true);
+  assert.ok(summarizeShiftProfileDraft(draft).includes("9h45/j"));
+
+  const restoredDraft = deriveShiftProfileDraft({
+    id: "shift_pilot",
+    name: "Équipe pilote",
+    active: true,
+    schedule,
+  });
+  assert.deepEqual(restoredDraft.activeDays, [1, 2, 3, 4, 5, 6]);
+  assert.equal(restoredDraft.pauseEnabled, true);
+  assert.equal(validateShiftProfileDraft({ ...draft, dayEnd: "22:00" }).valid, false);
+  assert.equal(validateShiftProfileDraft({ ...draft, pauseStart: "06:30" }).valid, false);
+  console.log("  OK profils horaires configurables validés");
+}
+
+{
+  const schedule = buildScheduleFromShiftProfileDraft({
+    name: "Équipe journée pilote",
+    dayStart: "09:00",
+    dayEnd: "18:00",
+    pauseEnabled: true,
+    pauseStart: "12:00",
+    pauseEnd: "13:00",
+    activeDays: [1, 2, 3, 4, 5, 6],
+  });
+  const config: WorkshopAvailabilityConfig = {
+    schedule,
+    exceptions: [],
+    absences: [],
+    bayUnavailabilities: [],
+    holidays: [],
+    shiftProfiles: [{
+      id: "shift_standard",
+      name: "Équipe journée pilote",
+      active: true,
+      schedule,
+    }],
+  };
+  const task = line({ id: "task_shift_validation", tempsEstime: 1 });
+  const d = dossier({ id: "NIMR-2026-6J-SHIFT", ordresReparation: [task] });
+
+  const allowed = validatePlanningAssignment({
+    dossiers: [d],
+    dossierId: d.id,
+    lineId: task.id,
+    technicianId: "tech_shift",
+    bayId: "bay_shift",
+    start: "2026-06-19T17:00:00",
+    end: "2026-06-19T18:00:00",
+    reservations: [],
+    availabilityConfig: config,
+  }, new Date("2026-06-19T07:00:00"));
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.segments.length, 1);
+  assert.equal(new Date(allowed.segments[0].start).getHours(), 17);
+
+  const tooEarly = validatePlanningAssignment({
+    dossiers: [d],
+    dossierId: d.id,
+    lineId: task.id,
+    technicianId: "tech_shift",
+    bayId: "bay_shift",
+    start: "2026-06-19T08:00:00",
+    end: "2026-06-19T09:00:00",
+    reservations: [],
+    availabilityConfig: config,
+  }, new Date("2026-06-19T07:00:00"));
+  assert.equal(tooEarly.allowed, false);
+  assert.ok(tooEarly.codes.includes("outside-effective-working-hours") || tooEarly.codes.includes("planning-segments-invalid"));
+  console.log("  OK validation planning respecte les horaires configurés");
 }
 
 {

@@ -36,6 +36,7 @@ import {
   isTechnicianAbsent,
   isBayUnavailable,
   getEffectiveWorkshopWindows,
+  getEffectiveWorkshopWindowsForResource,
   findNextAvailableWorkingSlot,
   getAbsenceIntervalsOnDay,
   getBayUnavailabilityIntervalsOnDay
@@ -1073,11 +1074,18 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     pushIssue("planning-in-past");
   }
 
+  const expectedSegments = input.availabilityConfig
+    ? buildAvailabilityPlanningSegments(start, end, input.availabilityConfig, input.technicianId, input.bayId)
+    : buildPlanningSegments(start, end);
+  const submittedSegments = input.planningSegments && input.planningSegments.length > 0
+    ? input.planningSegments
+    : expectedSegments;
+
   if (input.availabilityConfig) {
     const avail = validateAvailabilityForSlot({
       startTime: start.toISOString(),
       endTime: end.toISOString(),
-      segments: input.planningSegments || buildPlanningSegments(start, end),
+      segments: submittedSegments,
       technicianId: input.technicianId,
       bayId: input.bayId,
       config: input.availabilityConfig
@@ -1114,10 +1122,6 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     }
   }
 
-  if (!isWorkingDay(start)) {
-    pushIssue("planning-collision-sunday");
-  }
-
   if (!isSameLocalDate(start, end)) {
     pushIssue("planning-collision-hours");
   }
@@ -1126,23 +1130,32 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   const endMin = getMinutesSinceMidnight(end);
   const isSaturday = start.getDay() === 6;
 
-  if (isSaturday && (startMin >= LUNCH_START_HOUR * 60 || endMin > LUNCH_START_HOUR * 60)) {
-    pushIssue("planning-collision-saturday-afternoon");
+  if (!input.availabilityConfig) {
+    if (!isWorkingDay(start)) {
+      pushIssue("planning-collision-sunday");
+    }
+
+    if (isSaturday && (startMin >= LUNCH_START_HOUR * 60 || endMin > LUNCH_START_HOUR * 60)) {
+      pushIssue("planning-collision-saturday-afternoon");
+    }
+
+    if (!isStartInsideWorkingWindow(start) || !isEndAllowedForWorkingDate(end, isSaturday)) {
+      pushIssue("planning-collision-hours");
+    }
   }
 
-  if (!isStartInsideWorkingWindow(start) || !isEndAllowedForWorkingDate(end, isSaturday)) {
-    pushIssue("planning-collision-hours");
-  }
-
-  const expectedSegments = buildPlanningSegments(start, end);
-  const submittedSegments = input.planningSegments && input.planningSegments.length > 0
-    ? input.planningSegments
-    : expectedSegments;
-
-  if (!arePlanningSegmentsValidForInterval(start, end, submittedSegments, expectedSegments)) {
+  if (!arePlanningSegmentsValidForInterval(
+    start,
+    end,
+    submittedSegments,
+    expectedSegments,
+    input.availabilityConfig,
+    input.technicianId,
+    input.bayId
+  )) {
     pushIssue("planning-segments-invalid");
   }
-  if (submittedSegments.some(segmentOverlapsLunch)) {
+  if (!input.availabilityConfig && submittedSegments.some(segmentOverlapsLunch)) {
     pushIssue("planning-collision-lunch");
   }
 
@@ -1160,7 +1173,10 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   }
 
   const planningDate = getLocalDateKey(start);
-  const maxCapacity = input.technicianDailyCapacityHours ?? (isSaturday ? 4 : 8);
+  const maxCapacity = input.technicianDailyCapacityHours
+    ?? (input.availabilityConfig
+      ? calculateAvailabilityCapacityHours(start, input.availabilityConfig, input.technicianId)
+      : (isSaturday ? 4 : 8));
   const requestedHours = calculateSegmentHoursForDate(submittedSegments, planningDate);
   const currentDailyLoad = calculateTechnicianDailyLoad(input.technicianId, planningDate, input.dossiers, input.reservations, input.lineId);
   if (currentDailyLoad + requestedHours > maxCapacity) {
@@ -1934,6 +1950,51 @@ export function buildPlanningSegments(start: Date, end: Date): Array<{ start: st
   return segments;
 }
 
+function buildAvailabilityPlanningSegments(
+  start: Date,
+  end: Date,
+  config: WorkshopAvailabilityConfig,
+  technicianId?: string,
+  bayId?: string
+): Array<{ start: string; end: string }> {
+  const segments: Array<{ start: string; end: string }> = [];
+  let cursor = new Date(start);
+  const targetEnd = new Date(end);
+  let guard = 0;
+
+  while (cursor.getTime() < targetEnd.getTime() && guard < 500) {
+    guard += 1;
+    const windows = getAvailabilityWindowsAsDates(cursor, config, technicianId, bayId);
+    let activeWindowFound = false;
+
+    for (const window of windows) {
+      if (cursor.getTime() < window.start.getTime()) {
+        cursor = new Date(window.start);
+      }
+
+      if (cursor.getTime() >= window.start.getTime() && cursor.getTime() < window.end.getTime()) {
+        const segmentEnd = new Date(Math.min(window.end.getTime(), targetEnd.getTime()));
+        segments.push({
+          start: cursor.toISOString(),
+          end: segmentEnd.toISOString(),
+        });
+        cursor = segmentEnd;
+        activeWindowFound = true;
+        break;
+      }
+    }
+
+    if (!activeWindowFound) {
+      const nextDay = new Date(cursor);
+      nextDay.setDate(nextDay.getDate() + 1);
+      nextDay.setHours(0, 0, 0, 0);
+      cursor = nextDay;
+    }
+  }
+
+  return segments;
+}
+
 function buildPlanningValidationResult(
   codes: PlanningBlockingCode[],
   segments: Array<{ start: string; end: string }>
@@ -1979,7 +2040,10 @@ function arePlanningSegmentsValidForInterval(
   start: Date,
   end: Date,
   submittedSegments: Array<{ start: string; end: string }>,
-  expectedSegments: Array<{ start: string; end: string }>
+  expectedSegments: Array<{ start: string; end: string }>,
+  availabilityConfig?: WorkshopAvailabilityConfig,
+  technicianId?: string,
+  bayId?: string
 ): boolean {
   if (submittedSegments.length === 0 || expectedSegments.length === 0) return false;
   if (!segmentsMatch(submittedSegments, expectedSegments)) return false;
@@ -1992,7 +2056,9 @@ function arePlanningSegmentsValidForInterval(
     const segmentStart = parsePlanningDate(segment.start);
     const segmentEnd = parsePlanningDate(segment.end);
     if (!segmentStart || !segmentEnd || segmentEnd.getTime() <= segmentStart.getTime()) return false;
-    return isIntervalInsideWorkingWindow(segmentStart, segmentEnd);
+    return availabilityConfig
+      ? isIntervalInsideAvailabilityWindow(segmentStart, segmentEnd, availabilityConfig, technicianId, bayId)
+      : isIntervalInsideWorkingWindow(segmentStart, segmentEnd);
   });
 }
 
@@ -2015,6 +2081,52 @@ function isIntervalInsideWorkingWindow(start: Date, end: Date): boolean {
     start.getTime() >= window.start.getTime() &&
     end.getTime() <= window.end.getTime()
   );
+}
+
+function isIntervalInsideAvailabilityWindow(
+  start: Date,
+  end: Date,
+  config: WorkshopAvailabilityConfig,
+  technicianId?: string,
+  bayId?: string
+): boolean {
+  return getAvailabilityWindowsAsDates(start, config, technicianId, bayId).some(window =>
+    start.getTime() >= window.start.getTime() &&
+    end.getTime() <= window.end.getTime()
+  );
+}
+
+function calculateAvailabilityCapacityHours(
+  date: Date,
+  config: WorkshopAvailabilityConfig,
+  technicianId?: string
+): number {
+  return getAvailabilityWindowsAsDates(date, config, technicianId).reduce((sum, window) => {
+    return sum + Math.max(0, (window.end.getTime() - window.start.getTime()) / 3600000);
+  }, 0);
+}
+
+function getAvailabilityWindowsAsDates(
+  date: Date,
+  config: WorkshopAvailabilityConfig,
+  technicianId?: string,
+  bayId?: string
+): Array<{ start: Date; end: Date }> {
+  return getEffectiveWorkshopWindowsForResource(date, config, { technicianId, bayId })
+    .map(window => {
+      const start = setTimeOnDateFromHHMM(date, window.start);
+      const end = setTimeOnDateFromHHMM(date, window.end);
+      return { start, end };
+    })
+    .filter(window => window.end.getTime() > window.start.getTime())
+    .sort((left, right) => left.start.getTime() - right.start.getTime());
+}
+
+function setTimeOnDateFromHHMM(date: Date, time: string): Date {
+  const [hours, minutes] = time.split(":").map(Number);
+  const result = new Date(date);
+  result.setHours(hours, minutes, 0, 0);
+  return result;
 }
 
 function segmentOverlapsLunch(segment: { start: string; end: string }): boolean {
@@ -2055,9 +2167,10 @@ export function detectTechnicianCollision(
   const requestedSegments = buildPlanningSegments(start, end);
 
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (normalizeRepairOrderStatus(line.status) === "done") continue;
       if (line.plannedTechnicianId === techId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
           return true;
@@ -2079,9 +2192,10 @@ export function detectBayCollision(
   const requestedSegments = buildPlanningSegments(start, end);
 
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (normalizeRepairOrderStatus(line.status) === "done") continue;
       if (line.plannedBayId === bayId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
           return true;
@@ -2101,7 +2215,7 @@ export function calculateTechnicianDailyLoad(
 ): number {
   let total = 0;
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
+    if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
       
@@ -2150,7 +2264,7 @@ export function calculateBayDailyLoad(
 ): number {
   let total = 0;
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
+    if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
       
@@ -2188,6 +2302,17 @@ export function calculateBayDailyLoad(
   }
 
   return total;
+}
+
+function isPlanningTerminalDossier(dossier: DossierSAV): boolean {
+  return (
+    dossier.statut === DossierStatus.LIVRE ||
+    dossier.statut === DossierStatus.CLOTURE ||
+    dossier.statut === DossierStatus.PRET_FACTURATION ||
+    dossier.statut === DossierStatus.ANNULE ||
+    Boolean(dossier.archiveOperationnelle) ||
+    dossier.checklistQC?.validationGlobale === "valide"
+  );
 }
 
 function getLinePlanningSegments(line: RepairOrderLine): Array<{ start: string; end: string }> {

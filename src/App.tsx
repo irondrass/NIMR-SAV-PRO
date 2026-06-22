@@ -17,6 +17,7 @@ import {
   UserSession,
   WorkshopReservation,
   WorkshopAvailabilityConfig,
+  WorkshopShiftProfile,
   VehicleMasterRecord
 } from "./types";
 import { 
@@ -65,7 +66,11 @@ import {
 import { APP_NAME, APP_VERSION } from "./app-identity";
 import { getDefaultTabForRole, normalizeTabForRole, TabId } from "./roles";
 import { STORAGE_KEYS } from "./storage-keys";
-import { getDefaultWorkshopSchedule } from "./workshop-availability";
+import {
+  getDefaultWorkshopSchedule,
+  getDefaultWorkshopShiftProfiles,
+  SHIFT_PROFILES_STORAGE_KEY,
+} from "./workshop-availability";
 import { logAuditEvent } from "./audit-trail";
 import { canRunGuardedAction } from "./action-guard";
 
@@ -155,10 +160,37 @@ function loadStoredSession(): UserSession | null {
   }
 }
 
+function isStoredShiftProfile(value: unknown): value is WorkshopShiftProfile {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<WorkshopShiftProfile>;
+  return Boolean(
+    candidate.id &&
+    candidate.name &&
+    candidate.schedule &&
+    Array.isArray(candidate.schedule.days)
+  );
+}
+
+function loadStoredShiftProfiles(): WorkshopShiftProfile[] {
+  try {
+    const rawValue = localStorage.getItem(SHIFT_PROFILES_STORAGE_KEY);
+    if (!rawValue) return [];
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) && parsed.every(isStoredShiftProfile) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function loadStoredAvailabilityConfig(key: string, fallback: WorkshopAvailabilityConfig): WorkshopAvailabilityConfig {
+  const mergeStoredShiftProfiles = (config: WorkshopAvailabilityConfig): WorkshopAvailabilityConfig => {
+    const storedShiftProfiles = loadStoredShiftProfiles();
+    return storedShiftProfiles.length > 0 ? { ...config, shiftProfiles: storedShiftProfiles } : config;
+  };
+
   try {
     const rawValue = localStorage.getItem(key);
-    if (!rawValue) return fallback;
+    if (!rawValue) return mergeStoredShiftProfiles(fallback);
     const parsed = JSON.parse(rawValue);
     if (
       parsed &&
@@ -168,12 +200,12 @@ function loadStoredAvailabilityConfig(key: string, fallback: WorkshopAvailabilit
       Array.isArray(parsed.bayUnavailabilities) &&
       Array.isArray(parsed.holidays)
     ) {
-      return parsed as WorkshopAvailabilityConfig;
+      return mergeStoredShiftProfiles(parsed as WorkshopAvailabilityConfig);
     }
   } catch {
     // Ignore
   }
-  return fallback;
+  return mergeStoredShiftProfiles(fallback);
 }
 
 function loadStoredVehicleMaster(key: string): VehicleMasterRecord[] {
@@ -240,7 +272,8 @@ export default function App() {
     exceptions: [],
     absences: [],
     bayUnavailabilities: [],
-    holidays: []
+    holidays: [],
+    shiftProfiles: getDefaultWorkshopShiftProfiles(),
   });
 
   // Detailed selected folder id
@@ -320,7 +353,8 @@ export default function App() {
       exceptions: [],
       absences: [],
       bayUnavailabilities: [],
-      holidays: []
+      holidays: [],
+      shiftProfiles: getDefaultWorkshopShiftProfiles(),
     };
     setAvailabilityConfig(loadStoredAvailabilityConfig(STORAGE_KEYS.availability, defaultAvail));
 
@@ -487,6 +521,9 @@ export default function App() {
     if (!perm.canManageWorkshopAvailability(activeRole)) return;
     setAvailabilityConfig(nextConfig);
     writeLocalStorageJSON(STORAGE_KEYS.availability, nextConfig);
+    if (nextConfig.shiftProfiles) {
+      writeLocalStorageJSON(SHIFT_PROFILES_STORAGE_KEY, nextConfig.shiftProfiles);
+    }
     recordAudit({
       module: "atelier",
       action: "mise_a_jour_disponibilites",
