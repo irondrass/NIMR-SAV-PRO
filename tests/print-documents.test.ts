@@ -7,6 +7,10 @@ const source = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
 const detailSource = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
 const planningSource = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
 const cssSource = fs.readFileSync("src/index.css", "utf8");
+const taskSheetStart = source.indexOf("export function TechnicianTaskSheetPrint");
+assert.notEqual(taskSheetStart, -1, "Le composant TechnicianTaskSheetPrint doit exister.");
+const taskSheetSource = source.slice(taskSheetStart);
+const countOccurrences = (text: string, needle: string) => text.split(needle).length - 1;
 
 for (const expected of [
   "Document interne NIMR SAV PRO",
@@ -38,6 +42,11 @@ assert.ok(detailSource.includes("technician-task-print-root"), "DossierDetail do
 assert.ok(planningSource.includes("technician-task-print-root"), "WorkshopPlanning doit utiliser le root technician-task-print-root.");
 assert.match(detailSource, /createPortal\(\s*<div id="technician-task-print-root"[\s\S]*?<\/div>,\s*document\.body\s*\)/, "DossierDetail doit monter la fiche tâche via portal document.body.");
 assert.match(planningSource, /createPortal\(\s*<div id="technician-task-print-root"[\s\S]*?<\/div>,\s*document\.body\s*\)/, "WorkshopPlanning doit monter la fiche tâche via portal document.body.");
+assert.equal(countOccurrences(taskSheetSource, 'data-testid="technician-task-sheet-print"'), 1, "La fiche tâche doit avoir un seul wrapper principal.");
+assert.equal(countOccurrences(taskSheetSource, "Fiche tâche technicien"), 1, "La fiche tâche doit avoir un seul titre.");
+assert.equal(countOccurrences(taskSheetSource, "Dossier ID"), 1, "La fiche tâche doit avoir une seule ligne Dossier ID.");
+assert.equal(countOccurrences(taskSheetSource, "Technicien affecté"), 1, "La fiche tâche doit avoir une seule ligne technicien.");
+assert.equal(countOccurrences(taskSheetSource, 'data-testid="technician-task-sheet-signatures"'), 1, "La fiche tâche doit avoir une seule section signatures.");
 
 // Verifying that other prints still use nimr-print-container in DossierDetail
 assert.ok(detailSource.includes('id="nimr-print-container"'), "DossierDetail doit utiliser nimr-print-container pour les autres documents.");
