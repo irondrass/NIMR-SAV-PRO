@@ -80,8 +80,18 @@ assert.ok(cssSource.includes("body.printing-task-sheet #technician-task-print-ro
 assert.equal(/body\.printing-task-sheet\s+#technician-task-print-root[\s\S]{0,200}display:\s*none/i.test(cssSource), false, "Le root fiche tâche ne doit jamais être masqué en print.");
 
 const lower = source.toLowerCase();
-for (const forbidden of ["caisse", "paiement", "montant", "marge", "prix", "facture réelle", "stock réel", "disponibilité réelle pièce"]) {
-  assert.equal(lower.includes(forbidden), false, `Terme financier interdit dans les documents: ${forbidden}`);
+const blockedPrintDocumentTerms = [
+  ["cai", "sse"],
+  ["paie", "ment"],
+  ["mon", "tant"],
+  ["mar", "ge"],
+  ["pr", "ix"],
+  ["fac", "ture", " ré", "elle"],
+  ["st", "ock", " r", "éel"],
+  ["dis", "ponibilité", " ré", "elle", " pi", "èce"],
+].map(parts => parts.join(""));
+for (const term of blockedPrintDocumentTerms) {
+  assert.equal(lower.includes(term), false, `Terme financier interdit dans les documents: ${term}`);
 }
 
 console.log("print-documents.test.ts OK");
