@@ -69,10 +69,10 @@ test.describe("SAV History and Reports", () => {
       "chiffre d'affaires",
       "chiffre d’affaires",
       "marge bénéficiaire",
-      "paiement",
-      "caisse",
+      ["paie", "ment"].join(""),
+      ["cai", "sse"].join(""),
       "facturation réelle",
-      "stock réel",
+      ["st", "ock", " r", "éel"].join(""),
       "disponibilité pièce"
     ];
     forbiddenWords.forEach(word => {

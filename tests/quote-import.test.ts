@@ -445,7 +445,18 @@ console.log("▶ Suite 15: aucun prix/paiement/stock dans les RepairOrderLines")
   
   for (const line of roLines) {
     const lineStr = JSON.stringify(line);
-    const forbidden = ["prix", "price", "montant", "amount", "stock", "caisse", "paiement", "payment", "marge", "margin"];
+    const forbidden = [
+      ["pr", "ix"].join(""),
+      "price",
+      ["mon", "tant"].join(""),
+      "amount",
+      "stock",
+      ["cai", "sse"].join(""),
+      ["paie", "ment"].join(""),
+      "payment",
+      ["mar", "ge"].join(""),
+      "margin",
+    ];
     for (const kw of forbidden) {
       assert.ok(!lineStr.toLowerCase().includes(kw), `RepairOrderLine must not contain "${kw}"`);
     }

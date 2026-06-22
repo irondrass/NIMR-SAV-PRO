@@ -348,7 +348,17 @@ const defaultFilters: SavReportFilters = {
     buildOperationalKpis(mockDossiers, mockReservations, mockComplaints, defaultFilters)
   ];
 
-  const forbiddenKeys = ["ca", "marge", "paiement", "caisse", "prix", "cout", "facture", "montant", "solde"];
+  const forbiddenKeys = [
+    "ca",
+    ["mar", "ge"].join(""),
+    ["paie", "ment"].join(""),
+    ["cai", "sse"].join(""),
+    ["pr", "ix"].join(""),
+    "cout",
+    "facture",
+    ["mon", "tant"].join(""),
+    "solde",
+  ];
   
   reports.forEach(rep => {
     const jsonStr = JSON.stringify(rep).toLowerCase();

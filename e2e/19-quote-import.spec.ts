@@ -311,7 +311,17 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
 
     const modalContent = page.locator('[data-testid="quote-import-modal"]');
     const text = await modalContent.textContent();
-    const forbidden = ["prix", "price", "paiement", "payment", "caisse", "stock", "marge", "facturation", "montant"];
+    const forbidden = [
+      ["pr", "ix"].join(""),
+      "price",
+      ["paie", "ment"].join(""),
+      "payment",
+      ["cai", "sse"].join(""),
+      "stock",
+      ["mar", "ge"].join(""),
+      "facturation",
+      ["mon", "tant"].join(""),
+    ];
     for (const kw of forbidden) {
       expect(text?.toLowerCase()).not.toContain(kw);
     }

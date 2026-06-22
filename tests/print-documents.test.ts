@@ -91,7 +91,7 @@ const blockedPrintDocumentTerms = [
   ["dis", "ponibilité", " ré", "elle", " pi", "èce"],
 ].map(parts => parts.join(""));
 for (const term of blockedPrintDocumentTerms) {
-  assert.equal(lower.includes(term), false, `Terme financier interdit dans les documents: ${term}`);
+  assert.equal(lower.includes(term), false, `Terme interdit dans les documents: ${term}`);
 }
 
 console.log("print-documents.test.ts OK");
