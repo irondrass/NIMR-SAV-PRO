@@ -206,7 +206,7 @@ function findFirstCollisionInInterval(
 
   // 1. Check planning lines
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
     for (const line of dossier.ordresReparation) {
       if (line.planningStart && line.planningEnd && (line.plannedTechnicianId === techId || line.plannedBayId === bayId)) {
         const lineSegs = line.planningSegments || buildPlanningSegments(new Date(line.planningStart), new Date(line.planningEnd));

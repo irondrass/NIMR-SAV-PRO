@@ -383,7 +383,11 @@ export function TechnicianTaskSheetPrint({
   })();
 
   return (
-    <div className="p-6 bg-white text-slate-900 max-w-4xl mx-auto space-y-6">
+    <div
+      data-testid="technician-task-sheet-print"
+      className="p-6 bg-white text-slate-900 max-w-4xl mx-auto space-y-6"
+      style={{ breakAfter: "auto", pageBreakAfter: "auto" }}
+    >
       {/* Header */}
       <div className="border-b-2 border-slate-900 pb-4 flex justify-between items-start">
         <div>
@@ -391,7 +395,7 @@ export function TechnicianTaskSheetPrint({
           <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-0.5">Document interne NIMR SAV PRO</p>
         </div>
         <div className="text-right">
-          <span className="inline-block px-3 py-1 bg-slate-900 text-white font-mono text-xs font-bold uppercase rounded">
+          <span data-testid="technician-task-sheet-title" className="inline-block px-3 py-1 bg-slate-900 text-white font-mono text-xs font-bold uppercase rounded">
             Fiche tâche technicien
           </span>
           <p className="text-[9px] text-slate-500 mt-1 font-mono">Imprimé le: {printTime}</p>
@@ -402,7 +406,7 @@ export function TechnicianTaskSheetPrint({
       <div className="grid grid-cols-2 gap-4 text-xs">
         <div className="space-y-1 bg-slate-50 p-4 border border-slate-200 rounded-lg">
           <p className="text-slate-500 text-[10px] uppercase font-bold">Informations Dossier & Client</p>
-          <p><span className="font-bold text-slate-700">Dossier ID :</span> <span className="font-mono font-bold text-slate-900">{dossier.id}</span></p>
+          <p><span className="font-bold text-slate-700">Dossier ID :</span> <span data-testid="technician-task-sheet-dossier" className="font-mono font-bold text-slate-900">{dossier.id}</span></p>
           <p><span className="font-bold text-slate-700">Client :</span> <span className="font-bold text-slate-900">{dossier.clientNom}</span></p>
           {clientPhoneToShow && (
             <p><span className="font-bold text-slate-700">Téléphone :</span> <span className="font-mono text-slate-800">{clientPhoneToShow}</span></p>
@@ -431,7 +435,7 @@ export function TechnicianTaskSheetPrint({
       <div className="border border-slate-200 p-4 rounded-lg text-xs space-y-2">
         <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Opération à réaliser</h3>
         <p><span className="font-bold text-slate-700">Tâche / opération :</span> <span className="font-extrabold text-slate-900">{task.designation}</span></p>
-        <p><span className="font-bold text-slate-700">Technicien affecté :</span> <span className="font-semibold text-slate-800">{technicianName || "À affecter"}</span></p>
+        <p><span className="font-bold text-slate-700">Technicien affecté :</span> <span data-testid="technician-task-sheet-technician" className="font-semibold text-slate-800">{technicianName || "À affecter"}</span></p>
         <p><span className="font-bold text-slate-700">Statut :</span> <span className="font-black uppercase">{getTaskStatusVisual(task.status).label}</span></p>
         <p><span className="font-bold text-slate-700">Temps estimé :</span> {task.tempsEstime} h</p>
       </div>
@@ -496,7 +500,7 @@ export function TechnicianTaskSheetPrint({
       )}
 
       {/* Signatures */}
-      <div className="grid grid-cols-3 gap-5 text-xs pt-4">
+      <div data-testid="technician-task-sheet-signatures" className="grid grid-cols-3 gap-5 text-xs pt-4">
         <div className="border border-slate-300 rounded-lg p-4 h-28 flex flex-col justify-between">
           <span className="font-bold text-slate-700 uppercase tracking-wider text-[9px]">Signature Technicien</span>
           <span className="text-slate-300 text-center italic text-[9px]">Intervention réalisée</span>

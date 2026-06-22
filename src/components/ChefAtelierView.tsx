@@ -67,7 +67,7 @@ export default function ChefAtelierView({
   });
 
   // Get active files
-  const activeFolders = dossiers.filter(d => d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE);
+  const activeFolders = dossiers.filter(d => d.statut !== DossierStatus.LIVRE && d.statut !== DossierStatus.CLOTURE && d.statut !== DossierStatus.ANNULE);
   
   // Tasks requiring assignment
   const unassignedFolders = activeFolders.filter(d => !d.technicienId);

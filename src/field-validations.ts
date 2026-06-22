@@ -27,15 +27,15 @@ export interface ReceptionDateValidationContext {
   dateLivraison?: string;
   dateMiseCirculation?: string;
   typeDossier?: InterventionType | string;
+  vehiculeKilometrage?: number;
   now?: Date;
 }
 
 export function validateTunisianPhone(phone: string): boolean {
   const cleaned = phone.trim().replace(/[\s-]+/g, "");
   if (/[a-zA-Z]/.test(cleaned)) return false;
-  // Accept 8 digits, with or without +216
-  const match = cleaned.match(/^(?:\+216)?\d{8}$/);
-  return !!match;
+  // Accept 8 digits with optional +216 or 00216 prefix (Tunisian)
+  return /^(?:\+216|00216)?\d{8}$/.test(cleaned);
 }
 
 export function validateVin(vin: string): boolean {
@@ -68,7 +68,7 @@ export function validateMileage(km: number | string): { valid: boolean; mustConf
     return { valid: false, mustConfirm: false, reason: "Le kilométrage dépasse la limite maximale autorisée (999 999 km)." };
   }
   if (num > 500000) {
-    return { valid: true, mustConfirm: true, reason: "Kilométrage particulièrement élevé (> 500 000 km). Veuillez confirmer la plausibilité de cette saisie." };
+    return { valid: true, mustConfirm: true, reason: "Kilométrage très élevé, veuillez confirmer." };
   }
   return { valid: true, mustConfirm: false };
 }
@@ -224,9 +224,31 @@ export function validateReceptionDates(context: ReceptionDateValidationContext):
   if (deliveryDate && deliveryDate.getTime() > today && !pdiOrNewVehicle) {
     blockingReasons.push("Date livraison future interdite hors PDI/VN.");
   }
-  if (circulationDate && circulationDate.getTime() > today && !pdiOrNewVehicle) {
-    blockingReasons.push("Date mise en circulation future interdite hors PDI/VN.");
+
+  // MEC date validations
+  if (circulationDate) {
+    if (circulationDate.getTime() > today && !pdiOrNewVehicle) {
+      blockingReasons.push("La date de mise en circulation ne peut pas être dans le futur.");
+    } else if (!pdiOrNewVehicle) {
+      // Age in months
+      const ageMs = today - circulationDate.getTime();
+      const ageMonths = ageMs / (1000 * 60 * 60 * 24 * 30.44);
+      const km = context.vehiculeKilometrage;
+      if (km !== undefined && ageMonths > 36 && km < 1000) {
+        warnings.push("Véhicule de plus de 3 ans avec moins de 1000 km : vérifier la cohérence du kilométrage.");
+      }
+      if (km !== undefined && ageMonths < 3 && km > 30000) {
+        warnings.push("Véhicule de moins de 3 mois avec plus de 30000 km : vérifier la cohérence du kilométrage.");
+      }
+    }
+  } else if (!pdiOrNewVehicle) {
+    warnings.push("Date de mise en circulation manquante.");
   }
+
+  if (context.vehiculeKilometrage !== undefined && context.vehiculeKilometrage > 500000) {
+    warnings.push("Kilométrage très élevé, veuillez confirmer.");
+  }
+
   if (deliveryDate && circulationDate && circulationDate.getTime() < deliveryDate.getTime()) {
     warnings.push("Date de mise en circulation antérieure à la date de livraison : vérifier la cohérence dossier.");
   }

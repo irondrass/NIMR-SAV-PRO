@@ -23,37 +23,74 @@
 }
 
 @media print {
-  body * {
-    visibility: hidden;
-  }
-
-  body.printing-task-sheet #technician-task-print-root,
-  body.printing-task-sheet #technician-task-print-root * {
-    visibility: visible;
-  }
-
-  body.printing-standard-document #nimr-print-container,
-  body.printing-standard-document #nimr-print-container * {
-    visibility: visible;
-  }
-
-  body.printing-task-sheet #technician-task-print-root,
-  body.printing-standard-document #nimr-print-container {
-    display: block !important;
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    background: white !important;
-    color: black !important;
-  }
-
-  .no-print {
-    display: none !important;
-  }
-
   @page {
     size: A4 portrait;
     margin: 12mm;
+  }
+
+  html,
+  body {
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  /* The task sheet is mounted through a body portal, so the app root can be removed from print flow. */
+  body.printing-task-sheet #root {
+    display: none !important;
+  }
+
+  body.printing-task-sheet #nimr-print-container,
+  body.printing-task-sheet .no-print,
+  body.printing-task-sheet .screen-only,
+  body.printing-task-sheet .modal-backdrop,
+  body.printing-task-sheet .drawer,
+  body.printing-task-sheet .toast-container {
+    display: none !important;
+  }
+
+  body.printing-task-sheet #technician-task-print-root {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+    color: black !important;
+    visibility: visible !important;
+    page-break-before: auto !important;
+    page-break-after: auto !important;
+    break-before: auto !important;
+    break-after: auto !important;
+  }
+
+  body.printing-task-sheet #technician-task-print-root * {
+    visibility: visible !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body.printing-standard-document #root,
+  body.printing-standard-document #technician-task-print-root {
+    display: none !important;
+  }
+
+  body.printing-standard-document #nimr-print-container {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+    color: black !important;
   }
 }

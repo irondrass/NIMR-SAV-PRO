@@ -366,6 +366,7 @@ const ARCHIVED_OR_ERP_READY_STATUSES = new Set<DossierStatus>([
   DossierStatus.LIVRE,
   DossierStatus.NON_RETIRE,
   DossierStatus.CLOTURE,
+  DossierStatus.ANNULE,
 ]);
 
 const TECHNICIAN_VISIBLE_TASK_STATUSES = new Set<RepairOrderStatus>([
@@ -2100,7 +2101,7 @@ export function calculateTechnicianDailyLoad(
 ): number {
   let total = 0;
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
       
@@ -2149,7 +2150,7 @@ export function calculateBayDailyLoad(
 ): number {
   let total = 0;
   for (const dossier of dossiers) {
-    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
       

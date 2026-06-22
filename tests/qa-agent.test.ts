@@ -2554,15 +2554,40 @@ registerCheck("Lot 6H Invariants", "fiche tâche technicien imprimable et sans f
   const printContent = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
   const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
   const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const cssContent = fs.readFileSync("src/index.css", "utf8");
 
-  for (const expected of ["Fiche tâche technicien", "Signature Technicien", "Signature Chef Atelier", "Contrôle Qualité"]) {
+  for (const expected of [
+    "Fiche tâche technicien",
+    "Dossier ID",
+    "Client",
+    "Téléphone",
+    "Véhicule",
+    "Immatriculation",
+    "VIN",
+    "Kilométrage",
+    "Motif client / Plainte",
+    "Tâche / opération",
+    "Technicien affecté",
+    "Diagnostic technicien",
+    "Observations",
+    "Signature Technicien",
+    "Signature Chef Atelier",
+    "Contrôle Qualité",
+  ]) {
     assert.ok(printContent.includes(expected), `Fiche tâche technicien incomplète: ${expected}`);
   }
+  assert.ok(printContent.includes('data-testid="technician-task-sheet-print"'), "La fiche tâche doit exposer un root métier testable");
   assert.ok(printContent.includes('type === "task"'), "PrintDocuments doit gérer le type task");
   assert.ok(detailContent.includes("print-task-sheet-"), "DossierDetail doit proposer la fiche tâche");
   assert.ok(planningContent.includes("gantt-task-sheet-"), "Gantt doit proposer la fiche tâche");
+  assert.match(detailContent, /createPortal\(\s*<div id="technician-task-print-root"[\s\S]*?<\/div>,\s*document\.body\s*\)/, "DossierDetail doit portaler la fiche tâche hors #root");
+  assert.match(planningContent, /createPortal\(\s*<div id="technician-task-print-root"[\s\S]*?<\/div>,\s*document\.body\s*\)/, "WorkshopPlanning doit portaler la fiche tâche hors #root");
+  assert.ok(cssContent.includes("body.printing-task-sheet #technician-task-print-root"), "Le CSS print doit cibler le root fiche tâche");
+  assert.ok(cssContent.includes("body.printing-task-sheet #technician-task-print-root *"), "Le CSS print doit rendre les enfants de la fiche visibles");
+  assert.ok(cssContent.includes("position: absolute !important"), "La fiche tâche doit sortir du flux app en print");
+  assert.equal(/body\.printing-task-sheet\s+#technician-task-print-root[\s\S]{0,200}display:\s*none/i.test(cssContent), false, "Le root fiche tâche ne doit pas être masqué en print");
 
-  for (const forbidden of ["caisse", "paiement", "marge", "facture réelle", "stock réel", "montant", "solde"]) {
+  for (const forbidden of ["caisse", "paiement", "marge", "facture réelle", "stock réel", "montant", "solde", "prix", "disponibilité réelle pièce"]) {
     assert.equal(printContent.toLowerCase().includes(forbidden), false, `Fiche tâche contient ${forbidden}`);
   }
 });

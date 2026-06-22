@@ -165,10 +165,30 @@ export function getEffectiveWorkshopWindowsForResource(
     return baseWindows;
   }
 
-  const profilePool = [
+  let storedShiftProfiles: WorkshopShiftProfile[] = [];
+  try {
+    const rawVal = typeof window !== "undefined" ? window.localStorage.getItem("nimr-sav-pro-shift-profiles") : null;
+    if (rawVal) {
+      storedShiftProfiles = JSON.parse(rawVal);
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  const rawPool = [
+    ...storedShiftProfiles,
     ...(config.shiftProfiles ?? []),
     ...getDefaultWorkshopShiftProfiles(),
   ];
+
+  const profilePool: WorkshopShiftProfile[] = [];
+  const seenIds = new Set<string>();
+  for (const prof of rawPool) {
+    if (prof && !seenIds.has(prof.id)) {
+      seenIds.add(prof.id);
+      profilePool.push(prof);
+    }
+  }
 
   const technicianWindows = options.technicianId
     ? getAssignedShiftWindows(date, config.technicianShiftAssignments ?? [], profilePool, options.technicianId, "technicianId")
@@ -489,7 +509,7 @@ export function findNextAvailableWorkingSlot(input: {
   const checkOverlapWithTasksAndReservations = (start: Date, end: Date): { start: Date; end: Date } | null => {
     // 1. Check planning lines
     for (const dossier of input.dossiers) {
-      if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) continue;
+      if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
       for (const line of dossier.ordresReparation) {
         if (line.planningStart && line.planningEnd && (line.plannedTechnicianId === input.technicianId || line.plannedBayId === input.bayId)) {
           const lineSegs = line.planningSegments || [{ start: line.planningStart, end: line.planningEnd }];

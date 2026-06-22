@@ -50,7 +50,8 @@ export enum DossierStatus {
   NON_RETIRE = "Non retiré",
   LIVRE = "Livré",
   CLOTURE = "Clôturé opérationnellement",
-  PRET_FACTURATION = "Prêt pour facturation ERP"
+  PRET_FACTURATION = "Prêt pour facturation ERP",
+  ANNULE = "Annulé"
 }
 
 export enum DossierPriority {
@@ -412,6 +413,7 @@ export interface DossierSAV {
   satisfaction?: SatisfactionFeedback;
   archiveOperationnelle?: boolean;
   archiveDate?: string;
+  canceledReason?: string;
   prochaineActionRecommended: string;
   dateDernierStatut: string;
   avancementGlobal: number; // progress indicator 0 - 100

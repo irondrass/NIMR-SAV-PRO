@@ -374,6 +374,21 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     const taskSheetButton = page.locator('[data-testid="gantt-task-sheet-ro_morning"]').first();
     await expect(taskSheetButton).toBeVisible();
     await humanClick(page, taskSheetButton);
+
+    const printRoot = page.locator("#technician-task-print-root");
+    const taskSheet = page.locator('[data-testid="technician-task-sheet-print"]');
+    await expect(printRoot).toContainText("Fiche tâche technicien");
+    await expect(taskSheet).toContainText("NIMR-GANTT-0930");
+    await expect(taskSheet).toContainText("Alaa Ouerteni");
+    await expect(taskSheet).toContainText("Signature Technicien");
+    await expect(taskSheet).toContainText("Signature Chef Atelier");
+    await expect(taskSheet).toContainText("Contrôle Qualité");
+    const printableText = await printRoot.innerText({ timeout: 1000 });
+    expect(printableText.trim().length).toBeGreaterThan(250);
+    for (const forbidden of ["montant", "prix", "facture", "paiement", "caisse", "marge", "stock réel"]) {
+      expect(printableText.toLowerCase()).not.toContain(forbidden);
+    }
+
     await expect.poll(() => page.evaluate(() => (window as Window & { __printCalls?: number }).__printCalls ?? 0)).toBe(1);
   });
 

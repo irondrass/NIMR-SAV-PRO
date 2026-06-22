@@ -826,7 +826,8 @@ export function buildOperationalKpis(
     "Non retiré": 0,
     "Livré": 0,
     "Clôturé opérationnellement": 0,
-    "Prêt pour facturation ERP": 0
+    "Prêt pour facturation ERP": 0,
+    "Annulé": 0
   };
 
   let activeDossiersCount = 0;
@@ -838,7 +839,7 @@ export function buildOperationalKpis(
   filtered.forEach(d => {
     dossiersStatusCounts[d.statut] = (dossiersStatusCounts[d.statut] || 0) + 1;
 
-    if (d.statut !== "Livré" && d.statut !== "Non retiré" && d.statut !== "Clôturé opérationnellement" && d.statut !== "Prêt pour facturation ERP") {
+    if (d.statut !== "Livré" && d.statut !== "Non retiré" && d.statut !== "Clôturé opérationnellement" && d.statut !== "Prêt pour facturation ERP" && d.statut !== "Annulé") {
       activeDossiersCount++;
     }
 

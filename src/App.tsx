@@ -530,6 +530,50 @@ export default function App() {
     setShowExportConfirm(false);
   };
 
+  const handleExportDossiersCSV = () => {
+    handleTouchSession();
+    if (!perm.canExportData(activeRole)) return;
+    const headers = [
+      "ID","Statut","Priorité","Client","Téléphone","Marque","Modèle","Immatriculation","VIN","Km","Type","Date réception","Date dernier statut","Avancement %","Tâches","Prochain action"
+    ];
+    const rows = dossiers.map(d => [
+      d.id,
+      d.statut,
+      d.priorite,
+      d.clientNom,
+      perm.canViewVehicleSensitiveFields(activeRole) ? (d.clientTelephone || "") : "***",
+      d.vehiculeMarque,
+      d.vehiculeModele,
+      d.vehiculeImmatriculation,
+      perm.canViewVehicleSensitiveFields(activeRole) ? (d.vehiculeVIN || "") : "***",
+      String(d.vehiculeKilometrage ?? ""),
+      d.typeDossier,
+      d.dateReception?.slice(0, 10) ?? "",
+      d.dateDernierStatut?.slice(0, 10) ?? "",
+      String(d.avancementGlobal ?? 0),
+      String(d.ordresReparation?.length ?? 0),
+      d.prochaineActionRecommended ?? ""
+    ].map(val => `"${String(val).replace(/"/g, '""')}"`))
+    .map(row => row.join(","));
+    const csvContent = [headers.map(h => `"${h}"`).join(","), ...rows].join("\n");
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `NIMR_SAV_PRO_Dossiers_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    recordAudit({
+      module: "import_export",
+      action: "export_csv",
+      commentaire: `${dossiers.length} dossiers exportés en CSV`,
+      source: "dossier-list-csv",
+    });
+  };
+
+
   const handleImportDataJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     handleTouchSession();
     if (!perm.canImportData(activeRole)) return;
@@ -1180,6 +1224,17 @@ export default function App() {
                               <option key={pr} value={pr}>{pr}</option>
                             ))}
                           </select>
+
+                          {perm.canExportData(activeRole) && (
+                            <button
+                              type="button"
+                              data-testid="dossier-list-export-csv"
+                              onClick={handleExportDossiersCSV}
+                              className="px-3 py-1.5 rounded-md font-bold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition cursor-pointer"
+                            >
+                              Exporter CSV
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1280,7 +1335,6 @@ export default function App() {
                   activeRole={activeRole}
                 />
               )}
-
               {activeTab === "reclamations" && (
                 <ComplaintsView 
                   reclamations={reclamations}

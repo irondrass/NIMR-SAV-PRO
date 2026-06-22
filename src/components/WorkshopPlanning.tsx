@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
+import { createPortal } from "react-dom";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -39,7 +40,8 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Save,
-  FileText
+  FileText,
+  X
 } from "lucide-react";
 import { LicencePlate, StatusBadge } from "./UIParts";
 import PrintDocuments from "./PrintDocuments";
@@ -50,6 +52,9 @@ import {
   findTaskPlanningTarget,
   getCurrentGanttTaskStatus,
   getUnplannedRepairOrderTargets,
+  isActivePlannedTask,
+  getGanttTaskVisualState,
+  GANTT_STATE_VISUALS,
 } from "../workshop-planning-helpers";
 import {
   calculateReservationDuration,
@@ -125,6 +130,44 @@ export default function WorkshopPlanning({
   const [rescheduleError, setRescheduleError] = useState("");
   const [draggingTask, setDraggingTask] = useState<{ dossierId: string; lineId: string } | null>(null);
   const [taskSheetTarget, setTaskSheetTarget] = useState<{ dossier: DossierSAV; line: RepairOrderLine } | null>(null);
+
+  // Shift profile editing (Part 3)
+  const [editingProfile, setEditingProfile] = useState<WorkshopShiftProfile | null>(null);
+  const [editProfileName, setEditProfileName] = useState("");
+  const [editProfileWindows, setEditProfileWindows] = useState<Array<{ dayOfWeek: number; isClosed: boolean; start: string; end: string }>>([]);
+  const [editProfileError, setEditProfileError] = useState<string | null>(null);
+
+  const handleSaveShiftProfile = () => {
+    if (!onUpdateAvailabilityConfig || !availabilityConfig) return;
+    if (!editProfileName.trim()) {
+      setEditProfileError("Le nom de l'équipe est requis.");
+      return;
+    }
+    
+    const updatedProfile: WorkshopShiftProfile = {
+      ...(editingProfile as WorkshopShiftProfile),
+      name: editProfileName,
+      schedule: {
+        days: editProfileWindows.map(w => ({
+          dayOfWeek: w.dayOfWeek,
+          isClosed: w.isClosed,
+          windows: w.isClosed ? [] : [{ start: w.start, end: w.end }]
+        }))
+      }
+    };
+
+    const newProfiles = (availabilityConfig?.shiftProfiles || []).map(p => 
+      p.id === updatedProfile.id ? updatedProfile : p
+    );
+
+    onUpdateAvailabilityConfig({
+      ...availabilityConfig,
+      shiftProfiles: newProfiles
+    });
+
+    setEditingProfile(null);
+  };
+
 
   // Local helper to format Date to YYYY-MM-DD
   const getLocalDateStr = (d: Date) => {
@@ -695,12 +738,12 @@ export default function WorkshopPlanning({
   // Find all tasks planned on the selected date
   const activePlannedLines: Array<{ dossier: DossierSAV; line: RepairOrderLine }> = [];
   dossiers.forEach(dossier => {
-    if (dossier.statut !== DossierStatus.LIVRE && dossier.statut !== DossierStatus.CLOTURE) {
+    if (dossier.statut !== DossierStatus.LIVRE && dossier.statut !== DossierStatus.CLOTURE && dossier.statut !== DossierStatus.ANNULE) {
       dossier.ordresReparation.forEach(line => {
         const hasSegmentOnDate = line.planningSegments && line.planningSegments.length > 0
           ? line.planningSegments.some(seg => seg.start.split("T")[0] === selectedDateStr)
           : line.planningDate === selectedDateStr;
-        if (hasSegmentOnDate && line.planningStart && line.planningEnd) {
+        if (hasSegmentOnDate && isActivePlannedTask(line, dossier)) {
           if (ganttSearchQuery.trim()) {
             const query = ganttSearchQuery.toLowerCase().trim();
             const matchesImmat = dossier.vehiculeImmatriculation?.toLowerCase().includes(query);
@@ -1600,8 +1643,8 @@ export default function WorkshopPlanning({
                           const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
 
                           const isPast = e.getTime() < now.getTime();
-                          const currentStatus = getCurrentGanttTaskStatus(dossier, line.id, line.status);
-                          const statusVisual = getTaskStatusVisual(currentStatus);
+                          const visualState = getGanttTaskVisualState(line, now);
+                          const statusVisual = GANTT_STATE_VISUALS[visualState];
 
                           return (
                             <div
@@ -1908,8 +1951,8 @@ export default function WorkshopPlanning({
                       const widthPct = Math.max(2, Math.min(100 - leftPct, (durMin / totalGanttMinutes) * 100));
 
                       const isPast = e.getTime() < now.getTime();
-                      const currentStatus = getCurrentGanttTaskStatus(dossier, line.id, line.status);
-                      const statusVisual = getTaskStatusVisual(currentStatus);
+                      const visualState = getGanttTaskVisualState(line, now);
+                      const statusVisual = GANTT_STATE_VISUALS[visualState];
 
                       return (
                         <div
@@ -2099,6 +2142,31 @@ export default function WorkshopPlanning({
                 <div key={profile.id} data-testid={`shift-profile-${profile.id}`} className="rounded-xl border border-gray-150 bg-gray-50 p-3">
                   <strong className="block text-gray-900">{profile.name}</strong>
                   <span className="text-[10px] font-semibold text-gray-500">{profile.description}</span>
+                  {perm.canManageWorkshopAvailability(activeRole) && (
+                    <button
+                      type="button"
+                      data-testid={`shift-profile-edit-${profile.id}`}
+                      onClick={() => {
+                        setEditingProfile(profile);
+                        setEditProfileName(profile.name);
+                        const days = [1,2,3,4,5,6,0].map(dow => {
+                          const day = profile.schedule.days.find(d => d.dayOfWeek === dow);
+                          const win = day?.windows?.[0];
+                          return {
+                            dayOfWeek: dow,
+                            isClosed: day ? day.isClosed : dow === 0,
+                            start: win?.start ?? "08:00",
+                            end: win?.end ?? "17:00",
+                          };
+                        });
+                        setEditProfileWindows(days);
+                        setEditProfileError(null);
+                      }}
+                      className="mt-2 px-2 py-1 bg-white border border-gray-200 hover:border-blue-300 text-gray-600 hover:text-blue-700 text-[10px] font-bold rounded-lg transition cursor-pointer"
+                    >
+                      Modifier
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -2655,18 +2723,143 @@ export default function WorkshopPlanning({
         </div>
       )}
 
-      <div id="technician-task-print-root" className="print-only">
-        {taskSheetTarget && taskSheetTarget.line && (
-          <PrintDocuments
-            type="task"
-            dossier={taskSheetTarget.dossier}
-            task={taskSheetTarget.line}
-            clientPhoneToShow={canShowPhone ? taskSheetTarget.dossier.clientTelephone : maskPhoneNumber(taskSheetTarget.dossier.clientTelephone)}
-            technicianName={techniciens.find(tech => tech.id === (taskSheetTarget.line.plannedTechnicianId || taskSheetTarget.dossier.technicienId))?.nom}
-            bayName={DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === taskSheetTarget.line.plannedBayId)?.name}
-          />
-        )}
-      </div>
+      {createPortal(
+        <div id="technician-task-print-root" className="print-only">
+          {taskSheetTarget && taskSheetTarget.line && (
+            <PrintDocuments
+              type="task"
+              dossier={taskSheetTarget.dossier}
+              task={taskSheetTarget.line}
+              clientPhoneToShow={canShowPhone ? taskSheetTarget.dossier.clientTelephone : maskPhoneNumber(taskSheetTarget.dossier.clientTelephone)}
+              technicianName={techniciens.find(tech => tech.id === (taskSheetTarget.line.plannedTechnicianId || taskSheetTarget.dossier.technicienId))?.nom}
+              bayName={DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === taskSheetTarget.line.plannedBayId)?.name}
+            />
+          )}
+        </div>,
+        document.body
+      )}
+
+      {/* Shift Profile Edit Modal */}
+      {editingProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl bg-white rounded-xl shadow-xl flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-display font-black text-slate-900">Modifier l'équipe : {editingProfile.name}</h3>
+              <button onClick={() => setEditingProfile(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              {editProfileError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg">
+                  {editProfileError}
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 uppercase">Nom de l'équipe</label>
+                <input
+                  type="text"
+                  data-testid="shift-profile-name-input"
+                  value={editProfileName}
+                  onChange={e => setEditProfileName(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-slate-700 uppercase">Horaires par jour</label>
+                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
+                  {editProfileWindows.map((win, idx) => {
+                    const daysMap = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+                    return (
+                      <div key={win.dayOfWeek} className="p-3 flex items-center justify-between bg-white hover:bg-slate-50 transition">
+                        <div className="flex items-center gap-3 min-w-[120px]">
+                          <input
+                            type="checkbox"
+                            checked={!win.isClosed}
+                            onChange={(e) => {
+                              const newWins = [...editProfileWindows];
+                              newWins[idx].isClosed = !e.target.checked;
+                              setEditProfileWindows(newWins);
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                          <span className={`font-bold text-sm ${win.isClosed ? "text-slate-400" : "text-slate-900"}`}>
+                            {daysMap[win.dayOfWeek]}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            value={win.start}
+                            disabled={win.isClosed}
+                            onChange={(e) => {
+                              const newWins = [...editProfileWindows];
+                              newWins[idx].start = e.target.value;
+                              setEditProfileWindows(newWins);
+                            }}
+                            className={`p-1.5 border rounded-md text-xs font-bold ${win.isClosed ? "bg-slate-100 border-transparent text-slate-400" : "bg-white border-slate-200 text-slate-900"}`}
+                          />
+                          <span className="text-slate-400">-</span>
+                          <input
+                            type="time"
+                            value={win.end}
+                            disabled={win.isClosed}
+                            onChange={(e) => {
+                              const newWins = [...editProfileWindows];
+                              newWins[idx].end = e.target.value;
+                              setEditProfileWindows(newWins);
+                            }}
+                            className={`p-1.5 border rounded-md text-xs font-bold ${win.isClosed ? "bg-slate-100 border-transparent text-slate-400" : "bg-white border-slate-200 text-slate-900"}`}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 flex justify-between gap-3 bg-slate-50 rounded-b-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditProfileWindows(editProfileWindows.map(w => ({
+                    ...w,
+                    start: "08:00",
+                    end: "17:00"
+                  })));
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200 bg-slate-100 rounded-lg transition"
+              >
+                Réinitialiser horaires standards
+              </button>
+              
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-testid="shift-profile-edit-cancel"
+                  onClick={() => setEditingProfile(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  data-testid="shift-profile-edit-save"
+                  onClick={handleSaveShiftProfile}
+                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition"
+                >
+                  Enregistrer modifications
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

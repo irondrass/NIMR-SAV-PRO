@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import StandardReasonModal from "./StandardReasonModal";
 import QuoteImportModal from "./QuoteImportModal";
 import PrintDocuments from "./PrintDocuments";
@@ -116,6 +117,19 @@ export default function DossierDetail({
   const [finishValidation, setFinishValidation] = useState("");
   const [finishValidationError, setFinishValidationError] = useState<string | null>(null);
   const [finishSubmitting, setFinishSubmitting] = useState(false);
+
+  // Cancellation states (Part 7)
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelMotif, setCancelMotif] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Satisfaction entry states (Part 10)
+  const [satisfactionRating, setSatisfactionRating] = useState<1|2|3|4|5 | null>(
+    dossier.satisfaction?.rating ?? null
+  );
+  const [satisfactionComment, setSatisfactionComment] = useState(
+    dossier.satisfaction?.comment ?? ""
+  );
 
   // Modal states for Lot 1
   const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | "task-unblock" | "task-finish" | null>(null);
@@ -528,8 +542,75 @@ export default function DossierDetail({
     validation: finishValidation,
   });
 
+  const isAlreadyCancelled = dossier.statut === DossierStatus.ANNULE;
+
+  const isDossierCancelable = (): boolean => {
+    if (isAlreadyCancelled) return false;
+    if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) return false;
+    const allowedRoles = [UserRole.RECEPTIONNAIRE, UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV];
+    if (!allowedRoles.includes(userRole as any)) return false;
+    const hasStartedTask = dossier.ordresReparation.some(
+      line => line.status === "in_progress" || line.status === "done" || line.status === "blocked"
+    );
+    return !hasStartedTask;
+  };
+
+  const handleCancelDossier = () => {
+    const motif = cancelMotif.trim();
+    if (!motif || motif.length < 5) {
+      setCancelError("Le motif d'annulation est obligatoire (5 caractères minimum).");
+      return;
+    }
+    const logEntry = `${new Date().toISOString()} - [${userRole}] Dossier annulé. Motif: ${motif}`;
+    onUpdateDossier({
+      ...dossier,
+      statut: DossierStatus.ANNULE,
+      canceledReason: motif,
+      historiqueLogs: [logEntry, ...(dossier.historiqueLogs || [])],
+      dateDernierStatut: new Date().toISOString(),
+    });
+    setShowCancelModal(false);
+    setCancelMotif("");
+    setCancelError(null);
+  };
+
+  const handleSaveSatisfaction = () => {
+    if (!satisfactionRating) {
+      window['alert']("Veuillez sélectionner une note de satisfaction.");
+      return;
+    }
+    onUpdateDossier({
+      ...dossier,
+      satisfaction: {
+        rating: satisfactionRating,
+        comment: satisfactionComment.trim(),
+        createdAt: dossier.satisfaction?.createdAt ?? new Date().toISOString(),
+        createdBy: userRole,
+        status: satisfactionRating >= 4 ? "satisfait" : satisfactionRating <= 2 ? "insatisfait" : "neutre",
+        internalPilotOnly: true,
+      },
+    });
+  };
+
   return (
     <div data-testid="dossier-detail-view" className="space-y-6">
+      {/* Breadcrumb */}
+      <nav className="text-xs text-slate-500 flex items-center gap-1.5 font-semibold">
+        <button onClick={onBack} className="hover:text-blue-600 transition cursor-pointer">Dossiers</button>
+        <ChevronRight className="w-3 h-3" />
+        <span className="font-bold text-slate-800">{dossier.id}</span>
+      </nav>
+
+      {/* ANNULE banner */}
+      {isAlreadyCancelled && (
+        <div data-testid="dossier-annule-banner" className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs font-bold space-y-1">
+          <div className="flex items-center gap-2"><XCircle className="w-4 h-4" /> Dossier annulé logiquement — aucune modification n'est possible.</div>
+          {dossier.canceledReason && (
+            <div className="font-semibold text-red-700">Motif : {dossier.canceledReason}</div>
+          )}
+        </div>
+      )}
+
       {/* Top action row */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 font-display">
         <button 
@@ -541,21 +622,33 @@ export default function DossierDetail({
           Retour à la liste des dossiers
         </button>
 
-        {canManageDossier && (
-          <div className="flex flex-wrap gap-2">
-            <span className="text-xs font-bold text-neutral-400 self-center">Priorité dossier :</span>
-            <select
-              data-testid="force-priority-select"
-              className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
-              value={dossier.priorite}
-              onChange={(e) => updateDossierState({ priorite: e.target.value as DossierPriority })}
+        <div className="flex flex-wrap gap-2 items-center">
+          {canManageDossier && !isAlreadyCancelled && (
+            <>
+              <span className="text-xs font-bold text-neutral-400 self-center">Priorité dossier :</span>
+              <select
+                data-testid="force-priority-select"
+                className="p-1 px-2.5 bg-white  border border-slate-200  rounded font-bold text-xs text-slate-800 "
+                value={dossier.priorite}
+                onChange={(e) => updateDossierState({ priorite: e.target.value as DossierPriority })}
+              >
+                {Object.values(DossierPriority).map((pr) => (
+                  <option key={pr} value={pr}>{pr}</option>
+                ))}
+              </select>
+            </>
+          )}
+
+          {isDossierCancelable() && (
+            <button
+              data-testid="dossier-cancel-btn"
+              onClick={() => { setCancelMotif(""); setCancelError(null); setShowCancelModal(true); }}
+              className="px-3 py-1.5 bg-red-50 border border-red-200 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition cursor-pointer"
             >
-              {Object.values(DossierPriority).map((pr) => (
-                <option key={pr} value={pr}>{pr}</option>
-              ))}
-            </select>
-          </div>
-        )}
+              Annuler le dossier
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Hero card showing vehicle and status summary */}
@@ -1642,7 +1735,7 @@ export default function DossierDetail({
                   </button>
                 </div>
               </div>
-            ) : dossier.statut === DossierStatus.LIVRE ? (
+            ) : (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE) ? (
               <div className="space-y-4">
                 <div className="p-4 bg-emerald-50  border border-emerald-200  rounded-lg text-xs space-y-1 text-emerald-800 ">
                   <span className="font-bold block">✓ Véhicule remis en main propre au client. Clôture en transit.</span>
@@ -1659,7 +1752,7 @@ export default function DossierDetail({
                   )}
                 </div>
 
-                {canDeliverVehicle && (
+                {canDeliverVehicle && dossier.statut === DossierStatus.LIVRE && (
                   <button 
                     onClick={handleFinalOperationalClose}
                     data-testid="delivery-billing"
@@ -1668,6 +1761,52 @@ export default function DossierDetail({
                     Clôturer opérationnellement le dossier
                   </button>
                 )}
+
+                {/* Satisfaction entry form (pilot internal) */}
+                <div data-testid="satisfaction-entry-form" className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
+                  <h4 className="font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">Retour Satisfaction Client (Pilote Interne)</h4>
+                  <div className="flex gap-2">
+                    {([1,2,3,4,5] as const).map(star => (
+                      <button
+                        key={star}
+                        type="button"
+                        data-testid={`satisfaction-star-${star}`}
+                        onClick={() => setSatisfactionRating(star)}
+                        className={`w-8 h-8 rounded-full font-bold text-sm transition cursor-pointer ${
+                          satisfactionRating === star
+                            ? "bg-amber-400 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-amber-100"
+                        }`}
+                      >
+                        {star}
+                      </button>
+                    ))}
+                    {satisfactionRating && (
+                      <span className="self-center text-[10px] font-bold text-slate-500 ml-1">
+                        {satisfactionRating >= 4 ? "Satisfait" : satisfactionRating <= 2 ? "Insatisfait" : "Neutre"}
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    data-testid="satisfaction-comment"
+                    value={satisfactionComment}
+                    onChange={e => setSatisfactionComment(e.target.value)}
+                    rows={2}
+                    placeholder="Commentaire client (optionnel)..."
+                    className="w-full border border-slate-200 rounded-lg p-2 text-xs font-semibold resize-none focus:outline-none focus:ring-1 focus:ring-blue-300"
+                  />
+                  <button
+                    type="button"
+                    data-testid="satisfaction-save-btn"
+                    onClick={handleSaveSatisfaction}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+                  >
+                    Enregistrer satisfaction
+                  </button>
+                  {dossier.satisfaction && (
+                    <p className="text-[10px] text-emerald-700 font-bold">✓ Satisfaction enregistrée le {new Date(dossier.satisfaction.createdAt).toLocaleDateString("fr-FR")}</p>
+                  )}
+                </div>
               </div>
             ) : (
               <p className="text-xs text-zinc-400 italic">
@@ -1909,38 +2048,89 @@ export default function DossierDetail({
 
       </div>
 
+      {/* Cancellation modal */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="flex items-start gap-3">
+              <XCircle className="h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <h3 className="text-sm font-black text-slate-900">Annuler le dossier</h3>
+                <p className="mt-1 text-xs text-slate-600">Cette action est irréversible. Le dossier sera marqué comme annulé et ne pourra plus être modifié.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block">Motif d'annulation <span className="text-red-500">*</span></label>
+              <textarea
+                data-testid="cancel-motif-input"
+                value={cancelMotif}
+                onChange={e => { setCancelMotif(e.target.value); setCancelError(null); }}
+                rows={3}
+                placeholder="Expliquer le motif d'annulation..."
+                className="w-full border border-slate-200 rounded-lg p-2 text-xs font-semibold resize-none focus:outline-none focus:ring-1 focus:ring-red-300"
+              />
+              {cancelError && <p className="text-xs text-red-600 font-bold">{cancelError}</p>}
+            </div>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="cancel-modal-dismiss"
+                onClick={() => setShowCancelModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="cancel-modal-confirm"
+                onClick={handleCancelDossier}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition cursor-pointer"
+              >
+                Confirmer l'annulation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Standard print container */}
-      <div id="nimr-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!printType || printType === "task"}>
-        {printType && printType !== "task" && (
-          <PrintDocuments
-            type={printType}
-            dossier={dossier}
-            clientPhoneToShow={dossier.clientTelephone}
-          />
-        )}
-      </div>
+      {createPortal(
+        <div id="nimr-print-container" className="fixed -left-[9999px] top-0 w-[210mm] bg-white" aria-hidden={!printType || printType === "task"}>
+          {printType && printType !== "task" && (
+            <PrintDocuments
+              type={printType}
+              dossier={dossier}
+              clientPhoneToShow={dossier.clientTelephone}
+            />
+          )}
+        </div>,
+        document.body
+      )}
 
       {/* Technician task print root container */}
-      <div id="technician-task-print-root" className="print-only">
-        {printType === "task" && (
-          printTask ? (
-            <PrintDocuments
-              type="task"
-              dossier={dossier}
-              task={printTask}
-              clientPhoneToShow={dossier.clientTelephone}
-              technicianName={
-                printTask
-                  ? techniciensList.find(t => t.id === (printTask.plannedTechnicianId || dossier.technicienId))?.nom
-                  : undefined
-              }
-              linkedComplaint={printTask?.sourceComplaintId ? linkedComplaints.find(rec => rec.id === printTask.sourceComplaintId) : undefined}
-            />
-          ) : (
-            <div className="p-4 text-center font-bold text-rose-600">Aucune tâche sélectionnée pour impression.</div>
-          )
-        )}
-      </div>
+      {createPortal(
+        <div id="technician-task-print-root" className="print-only">
+          {printType === "task" && (
+            printTask ? (
+              <PrintDocuments
+                type="task"
+                dossier={dossier}
+                task={printTask}
+                clientPhoneToShow={dossier.clientTelephone}
+                technicianName={
+                  printTask
+                    ? techniciensList.find(t => t.id === (printTask.plannedTechnicianId || dossier.technicienId))?.nom
+                    : undefined
+                }
+                linkedComplaint={printTask?.sourceComplaintId ? linkedComplaints.find(rec => rec.id === printTask.sourceComplaintId) : undefined}
+              />
+            ) : (
+              <div className="p-4 text-center font-bold text-rose-600">Aucune tâche sélectionnée pour impression.</div>
+            )
+          )}
+        </div>,
+        document.body
+      )}
 
       {showQuoteImport && (
         <QuoteImportModal

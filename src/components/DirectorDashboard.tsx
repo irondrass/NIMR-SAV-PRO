@@ -8,10 +8,13 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  Download,
   Gauge,
   ListFilter,
   ShieldCheck,
   Timer,
+  TrendingDown,
+  TrendingUp,
   Truck,
   UserCheck,
   Wrench,
@@ -34,6 +37,7 @@ interface DirectorDashboardProps {
   reservations?: WorkshopReservation[];
   availabilityConfig?: WorkshopAvailabilityConfig;
   onSelectDossier: (id: string) => void;
+  onExportBackup?: () => void;
 }
 
 const periodLabels: Record<DashboardPeriod, string> = {
@@ -53,7 +57,7 @@ const toneClasses: Record<DashboardTone, { border: string; bg: string; text: str
   violet: { border: "border-violet-200", bg: "bg-violet-50", text: "text-violet-900", icon: "text-violet-600" },
 };
 
-export default function DirectorDashboard({ dossiers, techniciens, reservations, availabilityConfig, onSelectDossier }: DirectorDashboardProps) {
+export default function DirectorDashboard({ dossiers, techniciens, reservations, availabilityConfig, onSelectDossier, onExportBackup }: DirectorDashboardProps) {
   const [period, setPeriod] = useState<DashboardPeriod>("all");
   const [status, setStatus] = useState<DossierStatus | "all">("all");
   const [technicianId, setTechnicianId] = useState<string | "all">("all");
@@ -89,6 +93,28 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
 
   const chartColor = "#2563eb";
   const secondaryChartColor = "#10b981";
+
+  // Today vs Yesterday trends
+  const todayTrends = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const yesterdayStr = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+
+    const todayReceived = dossiers.filter(d => d.dateReception?.slice(0, 10) === todayStr).length;
+    const yesterdayReceived = dossiers.filter(d => d.dateReception?.slice(0, 10) === yesterdayStr).length;
+
+    const todayInWork = dossiers.filter(d => d.statut === DossierStatus.EN_TRAVAUX && d.dateDernierStatut?.slice(0, 10) === todayStr).length;
+    const yesterdayInWork = dossiers.filter(d => d.statut === DossierStatus.EN_TRAVAUX && d.dateDernierStatut?.slice(0, 10) === yesterdayStr).length;
+
+    const todayDelivered = dossiers.filter(d => (d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.CLOTURE) && d.dateDernierStatut?.slice(0, 10) === todayStr).length;
+    const yesterdayDelivered = dossiers.filter(d => (d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.CLOTURE) && d.dateDernierStatut?.slice(0, 10) === yesterdayStr).length;
+
+    return [
+      { label: "Réceptions", today: todayReceived, yesterday: yesterdayReceived, testId: "trend-receptions" },
+      { label: "En travaux", today: todayInWork, yesterday: yesterdayInWork, testId: "trend-in-work" },
+      { label: "Livraisons", today: todayDelivered, yesterday: yesterdayDelivered, testId: "trend-deliveries" },
+    ];
+  }, [dossiers]);
 
   return (
     <div data-testid="director-dashboard" className="space-y-6">
@@ -486,6 +512,62 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Today vs Yesterday trends (Part 11) */}
+      <section data-testid="dashboard-trends" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <TrendingUp className="h-4 w-4 text-blue-600" />
+          <h2 className="font-display text-xs font-black uppercase tracking-wide text-slate-950">Tendances Aujourd'hui vs Hier</h2>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {todayTrends.map(trend => {
+            const diff = trend.today - trend.yesterday;
+            const isUp = diff > 0;
+            const isDown = diff < 0;
+            return (
+              <div key={trend.testId} data-testid={trend.testId} className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1">
+                <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">{trend.label}</div>
+                <div className="flex items-end gap-2">
+                  <span className="font-display text-2xl font-black text-slate-950">{trend.today}</span>
+                  {diff !== 0 && (
+                    <span className={`text-xs font-bold flex items-center gap-0.5 mb-0.5 ${
+                      isUp ? "text-emerald-600" : "text-red-600"
+                    }`}>
+                      {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      {isUp ? "+" : ""}{diff}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-500 font-semibold">Hier : {trend.yesterday}</div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Pilot backup banner (Part 13) */}
+      <section data-testid="dashboard-backup-banner" className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs font-black text-amber-900">
+            <AlertTriangle className="w-4 h-4" />
+            Rappel pilote terrain : exportez une sauvegarde JSON quotidienne
+          </div>
+          <p className="text-[11px] font-semibold text-amber-800">
+            Toutes les données sont stockées en local. Un export quotidien est recommandé pour la durabilité.
+          </p>
+        </div>
+        {onExportBackup && (
+          <button
+            type="button"
+            data-testid="dashboard-export-backup-btn"
+            onClick={onExportBackup}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap"
+          >
+            <Download className="w-4 h-4" />
+            Exporter sauvegarde JSON
+          </button>
+        )}
       </section>
 
     </div>
