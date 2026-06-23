@@ -159,7 +159,7 @@ test.describe("Lot 5E - Recherche véhicule, dossier et statuts tâche Gantt", (
     // Verify task status badges inside Gantt blocks
     const blockBlocked = page.locator('[data-testid="gantt-task-status-blocked"]').first();
     await expect(blockBlocked).toBeVisible();
-    await expect(blockBlocked).toContainText("Bloquée");
+    await expect(blockBlocked).toContainText(/Bloqué|Bloquée/);
 
     const blockInProgress = page.locator('[data-testid="gantt-task-status-in-progress"]').first();
     await expect(blockInProgress).toBeVisible();

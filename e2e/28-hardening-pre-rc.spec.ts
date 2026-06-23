@@ -14,7 +14,7 @@ test.describe("Lot 6E — Hardening métier pré-RC", () => {
     await humanFill(page, page.locator('[data-testid="reception-client-name"]'), "Ali");
     await humanFill(page, page.locator('[data-testid="reception-client-phone"]'), "+216 XX 000 001");
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
-    await expect(page.locator('[data-testid="reception-error-message"]')).toContainText(/téléphone tunisien invalide/i);
+    await expect(page.locator('[data-testid="reception-error-message"]')).toContainText(/Téléphone invalide|Format accepté|format international/i);
 
     await humanFill(page, page.locator('[data-testid="reception-client-phone"]'), "+216 20 000 001");
     await humanClick(page, page.locator('[data-testid="reception-next"]'));

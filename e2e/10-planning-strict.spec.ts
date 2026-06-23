@@ -575,10 +575,10 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
     await expect(page.locator('[data-testid="shift-profile-shift_standard"]')).toContainText("09:00-12:00 / 13:00-18:00");
     await expect(page.locator('[data-testid="gantt-hour-09"]')).toBeVisible();
     await expect(page.locator('[data-testid="gantt-hour-18"]')).toBeVisible();
-    await expect(page.locator('[data-testid="planning-manual-hour"] option[value="08"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="planning-manual-hour"] option[value="08"]')).toHaveCount(1);
 
     await selectManualBase(page);
-    await selectManualSlot(page, techFree.id, "bay_general_01", "18", "00");
+    await selectManualSlot(page, techFree.id, "bay_general_01", "08", "00");
     await expect(page.locator('[data-testid="planning-collision-hours"]')).toBeVisible();
     await expect(page.locator('[data-testid="planning-manual-submit"]')).toBeDisabled();
 

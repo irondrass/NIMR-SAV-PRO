@@ -54,7 +54,7 @@ test.describe("Lot 4A - Kanban Board visual", () => {
     // Should open detail view of the dossier
     await expect(page.locator('[data-testid="dossier-detail-view"]')).toBeVisible();
     await expect(page.locator('[data-testid="dossier-back-btn"]')).toBeVisible();
-    await expect(page.locator("text=NIMR-K-002")).toBeVisible();
-    await expect(page.locator("text=Client K2")).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-detail-view"]').getByText("NIMR-K-002").first()).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-detail-view"]').getByText("Client K2").first()).toBeVisible();
   });
 });

@@ -312,7 +312,7 @@ test.describe("Rôle : Directeur SAV", () => {
     }
 
     await humanClick(page, dashboard.locator('[data-testid="dashboard-dossier-link-NIMR-DIR-KPI-BLOCK"]').first());
-    await expect(page.locator("text=NIMR-DIR-KPI-BLOCK")).toBeVisible();
+    await expect(page.locator('[data-testid="dossier-detail-view"]').getByText("NIMR-DIR-KPI-BLOCK").first()).toBeVisible();
     await expect(page.locator('[data-testid="dossier-detail-view"]')).toBeVisible();
     await expect(page.locator('[data-testid="dossier-back-btn"]')).toBeVisible();
   });

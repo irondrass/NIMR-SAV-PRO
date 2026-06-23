@@ -94,6 +94,9 @@ const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
   { id: "bay_general_01", name: "Pont polyvalent" },
 ];
 
+const GANTT_LANE_HEIGHT = 56;
+const GANTT_BLOCK_HEIGHT = 48;
+
 const SHIFT_EDIT_DAYS = [
   { value: 1, label: "Lundi" },
   { value: 2, label: "Mardi" },
@@ -143,6 +146,58 @@ function getScheduleWindowsForDay(profile: WorkshopShiftProfile, dayOfWeek: numb
 
 function getCapacityHoursFromWindows(windows: Array<{ start: string; end: string }>): number {
   return windows.reduce((sum, window) => sum + (timeToMinutes(window.end) - timeToMinutes(window.start)) / 60, 0);
+}
+
+type GanttLaneItem =
+  | {
+      type: "task";
+      id: string;
+      start: Date;
+      end: Date;
+      leftPct: number;
+      widthPct: number;
+      data: {
+        dossier: DossierSAV;
+        line: RepairOrderLine;
+        segment: { start: string; end: string };
+        segmentIndex: number;
+      };
+    }
+  | {
+      type: "reservation";
+      id: string;
+      start: Date;
+      end: Date;
+      leftPct: number;
+      widthPct: number;
+      data: {
+        dossier: DossierSAV;
+        reservation: WorkshopReservation;
+        segment: { start: string; end: string };
+        segmentIndex: number;
+      };
+    };
+
+function assignGanttLanes(items: GanttLaneItem[]): GanttLaneItem[][] {
+  const lanes: GanttLaneItem[][] = [];
+  const sortedItems = [...items].sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  for (const item of sortedItems) {
+    const availableLane = lanes.find(lane =>
+      lane.every(placedItem =>
+        item.start.getTime() >= placedItem.end.getTime() ||
+        item.end.getTime() <= placedItem.start.getTime()
+      )
+    );
+
+    if (availableLane) {
+      availableLane.push(item);
+    } else {
+      lanes.push([item]);
+    }
+  }
+
+  return lanes;
 }
 
 export default function WorkshopPlanning({
@@ -477,7 +532,7 @@ export default function WorkshopPlanning({
     if (!manualDossierId || !manualTaskId || !manualTechId || !manualBayId) return [];
     
     const { start, end } = getManualInterval();
-    return validatePlanningAssignment({
+    const codes = validatePlanningAssignment({
       dossiers,
       dossierId: manualDossierId,
       lineId: manualTaskId,
@@ -490,6 +545,38 @@ export default function WorkshopPlanning({
       reservations,
       availabilityConfig,
     }, getSystemTime()).codes;
+    const mappedCodes: string[] = [];
+    const isSunday = start.getDay() === 0;
+    const isSaturday = start.getDay() === 6;
+    const hourViolationCodes = new Set([
+      "outside-effective-working-hours",
+      "workshop-closed",
+      "planning-collision-hours",
+      "planning-collision-sunday",
+      "planning-collision-saturday-afternoon",
+      "workshop-holiday",
+      "planning-segments-invalid",
+    ]);
+
+    const hasHourViolation = codes.some(code => hourViolationCodes.has(code));
+
+    codes.forEach(code => {
+      if (!hourViolationCodes.has(code)) {
+        mappedCodes.push(code);
+      }
+    });
+
+    if (hasHourViolation) {
+      if (isSunday) {
+        mappedCodes.push("planning-collision-sunday");
+      } else if (isSaturday) {
+        mappedCodes.push("planning-collision-saturday-afternoon");
+      } else {
+        mappedCodes.push("planning-collision-hours");
+      }
+    }
+
+    return Array.from(new Set(mappedCodes));
   };
 
   const manualWarnings = checkManualCollisions();
@@ -619,8 +706,8 @@ export default function WorkshopPlanning({
     return { leftPct, widthPct };
   };
   const manualHourOptions = Array.from(
-    { length: Math.max(1, Math.floor(ganttEndMinutes / 60) - Math.floor(ganttStartMinutes / 60) + 1) },
-    (_, index) => String(Math.floor(ganttStartMinutes / 60) + index).padStart(2, "0")
+    { length: 24 },
+    (_, index) => String(index).padStart(2, "0")
   );
 
   const todayStrForLine = getLocalDateStr(now);
@@ -1228,19 +1315,19 @@ export default function WorkshopPlanning({
                 {manualWarnings.includes("planning-collision-hours") && (
                   <p data-testid="planning-collision-hours" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    Créneau en dehors des horaires d'ouverture configurés.
+                    Créneau hors horaires configurés.
                   </p>
                 )}
                 {manualWarnings.includes("planning-collision-sunday") && (
                   <p data-testid="planning-collision-sunday" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    Dimanche fermé : aucun créneau ne peut être enregistré.
+                    Atelier fermé sur ce créneau.
                   </p>
                 )}
                 {manualWarnings.includes("planning-collision-saturday-afternoon") && (
                   <p data-testid="planning-collision-saturday-afternoon" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    Samedi après-midi fermé : choisir un créneau samedi matin ou le prochain jour ouvrable.
+                    Créneau hors horaires configurés.
                   </p>
                 )}
                 {manualWarnings.includes("planning-collision-lunch") && (
@@ -1594,6 +1681,55 @@ export default function WorkshopPlanning({
               {filteredTechs.map(tech => {
                 // Find all tasks planned today for this tech
                 const techPlannedLines = activePlannedLines.filter(item => item.line.plannedTechnicianId === tech.id);
+
+                // Collect and sort Gantt items for lane assignment
+                const ganttItems: GanttLaneItem[] = [];
+
+                techPlannedLines.forEach(({ dossier, line }) => {
+                  const segments = getRepairOrderPlanningSegmentsForDate(line, selectedDateStr);
+                  segments.forEach((seg, sIdx) => {
+                    const s = new Date(seg.start);
+                    const e = new Date(seg.end);
+                    const { leftPct, widthPct } = getGanttBlockPosition(s, e);
+                    ganttItems.push({
+                      type: 'task',
+                      id: `${line.id}-seg-${sIdx}`,
+                      start: s,
+                      end: e,
+                      leftPct,
+                      widthPct,
+                      data: { dossier, line, segment: seg, segmentIndex: sIdx }
+                    });
+                  });
+                });
+
+                activeReservationsStr.filter(res => res.technicianId === tech.id).forEach(res => {
+                  const segments = (res.segments && res.segments.length > 0
+                    ? res.segments
+                    : [{ start: res.startTime!, end: res.endTime! }]
+                  ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
+
+                  const dossier = dossiers.find(d => d.id === res.dossierId);
+                  if (dossier) {
+                    segments.forEach((seg, sIdx) => {
+                      const s = new Date(seg.start);
+                      const e = new Date(seg.end);
+                      const { leftPct, widthPct } = getGanttBlockPosition(s, e);
+                      ganttItems.push({
+                        type: 'reservation',
+                        id: `${res.reservationId}-seg-${sIdx}`,
+                        start: s,
+                        end: e,
+                        leftPct,
+                        widthPct,
+                        data: { dossier, reservation: res, segment: seg, segmentIndex: sIdx }
+                      });
+                    });
+                  }
+                });
+
+                const lanes = assignGanttLanes(ganttItems);
+                const totalLanes = Math.max(1, lanes.length);
                 
                 // Calculate total active/planned hours today
                 const dailyLoad = calculateTechnicianDailyLoad(tech.id, selectedDateStr, dossiers, reservations);
@@ -1704,7 +1840,8 @@ export default function WorkshopPlanning({
 
                     {/* Right: Gantt timeline bar row */}
                     <div
-                      className="col-span-9 relative h-14 bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner"
+                      className="col-span-9 relative bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner"
+                      style={{ height: `${totalLanes * GANTT_LANE_HEIGHT}px` }}
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={(event) => handleDropTask(event, { technicianId: tech.id })}
                     >
@@ -1738,140 +1875,134 @@ export default function WorkshopPlanning({
                         </div>
                       )}
 
-                      {/* Display task blocks on this row */}
-                      {techPlannedLines.map(({ dossier, line }) => {
-                        const segments = getRepairOrderPlanningSegmentsForDate(line, selectedDateStr);
+                      {/* Display lanes with tasks/reservations */}
+                      {lanes.map((lane, laneIdx) => {
+                        return lane.map(item => {
+                          const leftPct = item.leftPct;
+                          const widthPct = item.widthPct;
+                          const topVal = laneIdx * GANTT_LANE_HEIGHT + Math.max(0, (GANTT_LANE_HEIGHT - GANTT_BLOCK_HEIGHT) / 2);
 
-                        return segments.map((seg, sIdx) => {
-                          const s = new Date(seg.start);
-                          const e = new Date(seg.end);
-                          const { leftPct, widthPct } = getGanttBlockPosition(s, e);
+                          if (item.type === "task") {
+                            const { dossier, line, segmentIndex } = item.data;
+                            const s = item.start;
+                            const e = item.end;
+                            const isPast = e.getTime() < now.getTime();
+                            const visualState = getGanttTaskVisualState(line, now, dossier);
+                            const statusVisual = GANTT_STATE_VISUALS[visualState];
 
-                          const isPast = e.getTime() < now.getTime();
-                          const visualState = getGanttTaskVisualState(line, now, dossier);
-                          const statusVisual = GANTT_STATE_VISUALS[visualState];
-
-                          return (
-                            <div
-                              key={`${line.id}-seg-${sIdx}`}
-                              data-testid={`gantt-block-${line.id}`}
-                              data-segment-index={sIdx}
-                              data-start={s.toISOString()}
-                              data-end={e.toISOString()}
-                              onClick={() => onSelectDossier(dossier.id)}
-                              draggable
-                              onDragStart={(event) => {
-                                event.dataTransfer.effectAllowed = "move";
-                                setDraggingTask({ dossierId: dossier.id, lineId: line.id });
-                              }}
-                              className={`absolute top-1 bottom-1 ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
-                              style={{
-                                left: `${leftPct}%`,
-                                width: `${widthPct}%`
-                              }}
-                              title={`${dossier.id} - ${line.designation} (${dossier.vehiculeMarque} ${dossier.vehiculeModele}) ${dossier.vehiculeImmatriculation}`}
-                            >
-                              <div className="flex items-center justify-between gap-1 overflow-hidden">
-                                <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
-                                <span
-                                  data-testid={statusVisual.testId}
-                                  className={`px-1 py-0.2 text-[7px] rounded border font-black whitespace-nowrap ${statusVisual.badgeClassName}`}
-                                >
-                                  {statusVisual.label}
-                                </span>
-                              </div>
-                              <span className="truncate block text-[7px] opacity-90 leading-none">
-                                {dossier.vehiculeImmatriculation}
-                                {(line.complaintBadge || line.sourceComplaintId) && (
-                                  <span data-testid={`gantt-complaint-badge-${line.id}`} className="ml-1 rounded bg-red-600 px-1 py-0.2 text-white">REC</span>
-                                )}
-                              </span>
-                              <span className="truncate block text-[7px] opacity-80 leading-none">
-                                {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                              </span>
-                              <div className="mt-0.5 flex gap-1">
-                                <button
-                                  type="button"
-                                  data-testid={`gantt-reschedule-${line.id}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    openRescheduleModal(dossier, line);
-                                  }}
-                                  className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
-                                >
-                                  Modifier créneau
-                                </button>
-                                <button
-                                  type="button"
-                                  data-testid={`gantt-task-sheet-${line.id}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handlePrintTaskSheet(dossier, line);
-                                  }}
-                                  className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
-                                  title="Fiche tâche technicien"
-                                >
-                                  <FileText className="inline h-2.5 w-2.5" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        });
-                      })}
-
-                      {/* Display reservation ghost blocks on this row */}
-                      {activeReservationsStr.filter(res => res.technicianId === tech.id).map(res => {
-                        const segments = (res.segments && res.segments.length > 0
-                          ? res.segments
-                          : [{ start: res.startTime!, end: res.endTime! }]
-                        ).filter(seg => seg.start.split("T")[0] === selectedDateStr);
-
-                        const dossier = dossiers.find(d => d.id === res.dossierId);
-                        if (!dossier) return null;
-
-                        return segments.map((seg, sIdx) => {
-                          const s = new Date(seg.start);
-                          const e = new Date(seg.end);
-                          const { leftPct, widthPct } = getGanttBlockPosition(s, e);
-
-                          const isProposed = res.status === "CRENEAU_PROPOSE";
-                          const blockBg = isProposed
-                            ? "bg-blue-50/80 border-dashed border-blue-400 text-blue-800"
-                            : "bg-indigo-100/95 border-indigo-500 text-indigo-900";
-                          
-                          const badgeText = isProposed ? "Réservation proposée" : "Réservation confirmée";
-                          const testId = isProposed ? "gantt-reservation-proposed" : "gantt-reservation-confirmed";
-
-                          return (
-                            <div
-                              key={`${res.reservationId}-seg-${sIdx}`}
-                              data-testid={testId}
-                              data-segment-index={sIdx}
-                              data-start={s.toISOString()}
-                              data-end={e.toISOString()}
-                              onClick={() => onSelectDossier(dossier.id)}
-                              className={`absolute top-1 bottom-1 ${blockBg} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20`}
-                              style={{
+                            return (
+                              <div
+                                key={item.id}
+                                data-testid={`gantt-block-${line.id}`}
+                                data-segment-index={segmentIndex}
+                                data-start={s.toISOString()}
+                                data-end={e.toISOString()}
+                                onClick={() => onSelectDossier(dossier.id)}
+                                draggable
+                                onDragStart={(event) => {
+                                  event.dataTransfer.effectAllowed = "move";
+                                  setDraggingTask({ dossierId: dossier.id, lineId: line.id });
+                                }}
+                                className={`absolute ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
+                                style={{
                                   left: `${leftPct}%`,
-                                  width: `${widthPct}%`
-                              }}
-                              title={`${dossier.id} - ${badgeText} (${dossier.vehiculeMarque} ${dossier.vehiculeModele}) ${dossier.vehiculeImmatriculation}`}
-                            >
-                              <div className="flex items-center justify-between gap-1 overflow-hidden">
-                                <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
-                                <span className="px-1 py-0.2 text-[7px] bg-black/10 rounded font-black whitespace-nowrap">
-                                  {badgeText}
+                                  width: `${widthPct}%`,
+                                  top: `${topVal}px`,
+                                  height: `${GANTT_BLOCK_HEIGHT}px`
+                                }}
+                                title={`${dossier.id} - ${line.designation} (${dossier.vehiculeMarque} ${dossier.vehiculeModele}) ${dossier.vehiculeImmatriculation}`}
+                              >
+                                <div className="flex items-center justify-between gap-1 overflow-hidden">
+                                  <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
+                                  <span
+                                    data-testid={statusVisual.testId}
+                                    className={`px-1 py-0.2 text-[7px] rounded border font-black whitespace-nowrap ${statusVisual.badgeClassName}`}
+                                  >
+                                    {statusVisual.label}
+                                  </span>
+                                </div>
+                                <span className="truncate block text-[7px] opacity-90 leading-none">
+                                  {dossier.vehiculeImmatriculation}
+                                  {(line.complaintBadge || line.sourceComplaintId) && (
+                                    <span data-testid={`gantt-complaint-badge-${line.id}`} className="ml-1 rounded bg-red-600 px-1 py-0.2 text-white">REC</span>
+                                  )}
+                                </span>
+                                <span className="truncate block text-[7px] opacity-80 leading-none">
+                                  {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                                <div className="mt-0.5 flex gap-1 relative z-30">
+                                  <button
+                                    type="button"
+                                    data-testid={`gantt-reschedule-${line.id}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openRescheduleModal(dossier, line);
+                                    }}
+                                    className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700 relative z-30 hover:bg-white"
+                                  >
+                                    Modifier créneau
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-testid={`gantt-task-sheet-${line.id}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handlePrintTaskSheet(dossier, line);
+                                    }}
+                                    className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700 relative z-30 hover:bg-white"
+                                    title="Fiche tâche technicien"
+                                  >
+                                    <FileText className="inline h-2.5 w-2.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            const { dossier, reservation, segmentIndex } = item.data;
+                            const s = item.start;
+                            const e = item.end;
+                            const isProposed = reservation.status === "CRENEAU_PROPOSE";
+                            const blockBg = isProposed
+                              ? "bg-blue-50/80 border-dashed border-blue-400 text-blue-800"
+                              : "bg-indigo-100/95 border-indigo-500 text-indigo-900";
+
+                            const badgeText = isProposed ? "Réservation proposée" : "Réservation confirmée";
+                            const testId = isProposed ? "gantt-reservation-proposed" : "gantt-reservation-confirmed";
+
+                            return (
+                              <div
+                                key={item.id}
+                                data-testid={testId}
+                                data-segment-index={segmentIndex}
+                                data-start={s.toISOString()}
+                                data-end={e.toISOString()}
+                                onClick={() => onSelectDossier(dossier.id)}
+                                className={`absolute ${blockBg} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20`}
+                                style={{
+                                  left: `${leftPct}%`,
+                                  width: `${widthPct}%`,
+                                  top: `${topVal}px`,
+                                  height: `${GANTT_BLOCK_HEIGHT}px`
+                                }}
+                                title={`Réservation : ${dossier.id} (${dossier.vehiculeMarque} ${dossier.vehiculeModele})`}
+                              >
+                                <div className="flex items-center justify-between gap-1 overflow-hidden">
+                                  <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
+                                  <span className="px-1 py-0.2 text-[7px] rounded border border-current font-black whitespace-nowrap">
+                                    RES
+                                  </span>
+                                </div>
+                                <span className="truncate block text-[7px] opacity-90 leading-none font-bold">
+                                  {dossier.vehiculeImmatriculation}
+                                </span>
+                                <span className="truncate block text-[7px] opacity-80 leading-none">
+                                  {badgeText} ({s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })})
                                 </span>
                               </div>
-                              <span className="truncate block text-[7px] opacity-90 leading-none">{dossier.vehiculeImmatriculation}</span>
-                              <span className="truncate block text-[7px] opacity-80 leading-none font-mono">
-                                {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                              </span>
-                            </div>
-                          );
+                            );
+                          }
                         });
                       })}
-
                     </div>
                   </div>
                 );
