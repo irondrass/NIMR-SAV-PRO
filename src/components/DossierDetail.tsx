@@ -9,10 +9,10 @@ import StandardReasonModal from "./StandardReasonModal";
 import QuoteImportModal from "./QuoteImportModal";
 import PrintDocuments from "./PrintDocuments";
 import { applyQuoteImportPreview } from "../quote-import";
-import { 
-  DossierSAV, 
-  DossierStatus, 
-  DossierPriority, 
+import {
+  DossierSAV,
+  DossierStatus,
+  DossierPriority,
   InterventionType,
   AtelierZone,
   RepairOrderLine,
@@ -47,18 +47,18 @@ import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { getTaskStatusVisual } from "../task-status-visual";
 import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
-import { 
-  ArrowLeft, 
-  FileText, 
-  User, 
-  Car, 
-  Wrench, 
-  Camera, 
-  Clock, 
-  ShieldAlert, 
-  CheckCircle, 
-  ChevronRight, 
-  Plus, 
+import {
+  ArrowLeft,
+  FileText,
+  User,
+  Car,
+  Wrench,
+  Camera,
+  Clock,
+  ShieldAlert,
+  CheckCircle,
+  ChevronRight,
+  Plus,
   AlertTriangle,
   History,
   Lock,
@@ -86,19 +86,19 @@ function formatRepairOrderDuration(hours: number | undefined): string {
   return hours && hours > 0 ? `${hours}H` : "À estimer";
 }
 
-export default function DossierDetail({ 
-  dossier, 
+export default function DossierDetail({
+  dossier,
   dossiers,
   reclamations,
-  userRole, 
-  onBack, 
+  userRole,
+  onBack,
   onUpdateDossier,
   techniciensList
 }: DossierDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("resume");
   const [printType, setPrintType] = useState<"reception" | "or" | "qc" | "delivery" | "task" | null>(null);
   const [printTask, setPrintTask] = useState<RepairOrderLine | null>(null);
-  
+
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
   const [showQuoteImport, setShowQuoteImport] = useState(false);
@@ -209,7 +209,7 @@ export default function DossierDetail({
       isEstimatedDurationValidated: false
     };
     const updatedRO = [...dossier.ordresReparation, newLine];
-    
+
     // Auto recalculate progress percentage based on task counts
     const completedCount = updatedRO.filter(isRepairOrderDone).length;
     const progress = Math.round((completedCount / updatedRO.length) * 100);
@@ -371,7 +371,7 @@ export default function DossierDetail({
     updateDossierState({ checklistQC: updatedQC });
   };
 
-  const isChecklistComplete = 
+  const isChecklistComplete =
     !!dossier.checklistQC.essaiEffectue &&
     !!dossier.checklistQC.defautRepare &&
     !!dossier.checklistQC.aucunVoyantAllume &&
@@ -433,13 +433,13 @@ export default function DossierDetail({
     const fullReason = details ? `${reason} : ${details}` : reason;
     const logMessage = `[${userRole}] - Refus QC - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
     const nextDossier = submitQualityControl(dossier, userRole, "refuse", fullReason);
-    
+
     // Add history log
     const updatedLogs = [
       `${new Date().toISOString()} - ${logMessage}`,
       ...(nextDossier.historiqueLogs || [])
     ];
-    
+
     onUpdateDossier({
       ...nextDossier,
       historiqueLogs: updatedLogs
@@ -453,7 +453,7 @@ export default function DossierDetail({
       const line = dossier.ordresReparation.find(l => l.id === modalTargetLineId);
       const taskName = line ? line.designation : modalTargetLineId;
       const logMessage = `[${userRole}] - Réouverture Tâche "${taskName}" - Motif: ${reason}${details ? ` (Observations: ${details})` : ""}`;
-      
+
       const result = reopenRepairOrder(dossiers, dossier.id, modalTargetLineId, userRole, fullReason);
       if (result.ok === false) {
         setTaskError(result.error);
@@ -655,7 +655,7 @@ export default function DossierDetail({
 
       {/* Top action row */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 font-display">
-        <button 
+        <button
           data-testid="dossier-back-btn"
           onClick={onBack}
           className="inline-flex items-center gap-2 text-xs font-bold text-slate-600  hover:text-blue-600  transition"
@@ -722,7 +722,7 @@ export default function DossierDetail({
           <div className="flex flex-col md:items-end justify-center space-y-2">
             <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Statut Actuel Opérationnel</span>
             <StatusBadge status={dossier.statut} />
-            
+
             {/* Progress indicator */}
             <div className="mt-1 flex items-center gap-2">
               <div className="w-24 bg-white/10 rounded-full h-1.5 overflow-hidden">
@@ -754,8 +754,8 @@ export default function DossierDetail({
               onClick={() => setActiveTab(tab.key)}
               data-testid={`tab-${tab.key}`}
               className={`p-2.5 px-4 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition duration-150 ${
-                isSel 
-                  ? "bg-slate-900 text-white " 
+                isSel
+                  ? "bg-slate-900 text-white "
                   : "text-slate-500  hover:text-slate-950  hover:bg-slate-100 "
               }`}
             >
@@ -768,16 +768,16 @@ export default function DossierDetail({
 
       {/* Tab Contents */}
       <div className="bg-white  border border-slate-200  rounded-xl p-5 shadow-sm">
-        
+
         {/* Tab 1: Résumé */}
         {activeTab === "resume" && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
+
               {/* Left summary values */}
               <div className="space-y-4">
                 <h3 className="font-bold text-sm text-slate-800  border-b pb-1.5">Mises en demeure & Suivi</h3>
-                
+
                 <div className="p-4 bg-amber-50  border border-amber-100  rounded-xl space-y-2.5">
                   <div className="flex gap-2 text-xs font-bold text-amber-800 ">
                     <CheckCircle className="w-4 h-4 mt-0.5 text-amber-700  flex-shrink-0" />
@@ -916,7 +916,7 @@ export default function DossierDetail({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Fiche Coordonnées Client</h3>
-              
+
               <div className="grid grid-cols-2 gap-y-3.5 gap-x-4 text-xs font-semibold">
                 <div>
                   <span className="text-zinc-400 font-normal block">Client Titulaire :</span>
@@ -954,7 +954,7 @@ export default function DossierDetail({
             {/* Vehicle spec block */}
             <div className="space-y-4">
               <h3 className="font-bold text-sm text-slate-800  border-b pb-1">Identifiants Véhicule</h3>
-              
+
               <div className="grid grid-cols-2 gap-y-3.5 gap-x-4 text-xs font-medium">
                 <div>
                   <span className="text-zinc-400 font-normal block">Marque / Gamme :</span>
@@ -995,8 +995,8 @@ export default function DossierDetail({
                 <div>
                   <span className="text-zinc-400 font-normal block">Garantie :</span>
                   <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase inline-block ${
-                    dossier.statutGarantie === "Garantie active" 
-                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                    dossier.statutGarantie === "Garantie active"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                       : dossier.statutGarantie === "Garantie expirée"
                       ? "bg-rose-50 text-rose-700 border border-rose-200"
                       : "bg-slate-100 text-slate-600 border border-slate-200"
@@ -1014,7 +1014,7 @@ export default function DossierDetail({
               <div className="p-3.5 bg-neutral-50  rounded-xl border border-neutral-100  space-y-2.5 text-xs">
                 <span className="font-bold text-zinc-600  block uppercase">Niveau d’Éthanol / Carburant</span>
                 <FuelIndicator level={dossier.niveauCarburant} />
-                
+
                 <div className="border-t border-neutral-200  pt-2 grid grid-cols-2 gap-1.5 text-[11px] font-semibold text-zinc-500">
                   <div className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full inline-block ${dossier.etatCarrosserie.rayures ? "bg-amber-500" : "bg-green-500"}`}></span>
@@ -1100,7 +1100,7 @@ export default function DossierDetail({
                   : undefined;
 
                 return (
-                  <div 
+                  <div
                     key={line.id}
                     data-testid={`task-card-${line.id}`}
                     className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-neutral-50  border border-neutral-200  rounded-lg text-xs gap-4"
@@ -1184,7 +1184,7 @@ export default function DossierDetail({
                     </div>
 
                     <div className="flex flex-col items-start sm:items-end gap-2">
-                      <span 
+                      <span
                         data-testid={`task-status-${line.id}`}
                         className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${statusVisual.badgeClassName}`}
                       >
@@ -1304,25 +1304,25 @@ export default function DossierDetail({
             {[UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole) && (
               <div className="p-4 bg-slate-50  border border-dashed border-slate-200  rounded-lg space-y-3 mt-4">
                 <span className="text-xs font-bold text-slate-700  uppercase block font-display">Ajouter une ligne de travaux (Main d'œuvre / Diagnostic)</span>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     data-testid="new-task-desc"
-                    className="md:col-span-2 p-2 bg-white  border border-slate-200  rounded font-semibold  placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                    className="md:col-span-2 p-2 bg-white  border border-slate-200  rounded font-semibold  placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     placeholder="EX: Remplacement plaquettes de frein avant NIMR"
                     value={newROLineText}
                     onChange={(e) => setNewROLineText(e.target.value)}
                   />
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     data-testid="new-task-time"
-                    className="p-2 bg-white  border border-slate-200  rounded font-bold  focus:outline-none" 
+                    className="p-2 bg-white  border border-slate-200  rounded font-bold  focus:outline-none"
                     value="À estimer"
                     readOnly
                     aria-label="Durée initiale à estimer"
                   />
-                  <button 
+                  <button
                     onClick={handleAddROLine}
                     data-testid="new-task-submit"
                     disabled={!newROLineText.trim()}
@@ -1438,7 +1438,7 @@ export default function DossierDetail({
         {/* Tab 5: Compléments & Accords */}
         {activeTab === "complements" && (
           <div className="space-y-6">
-            
+
             {/* Complements of work */}
             <div className="space-y-4">
               <div className="border-b pb-1">
@@ -1479,14 +1479,14 @@ export default function DossierDetail({
                         {/* Interactive Acceptance Toggle */}
                         {canHandleApprovals && comp.statut === "attente" && (
                           <div className="flex justify-end gap-2 pt-1 border-t border-purple-50 ">
-                            <button 
+                            <button
                               onClick={() => handleStatusComplement(comp.id, "accepte")}
                               className="px-3 py-1 bg-green-600 text-white font-bold rounded hover:bg-green-700 flex items-center gap-1 transition"
                             >
                               <ThumbsUp className="w-3.5 h-3.5" />
                               Accepter le complément
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleStatusComplement(comp.id, "refuse")}
                               className="px-3 py-1 bg-red-600 text-white font-bold rounded hover:bg-red-700 flex items-center gap-1 transition"
                             >
@@ -1530,7 +1530,7 @@ export default function DossierDetail({
                           </div>
                           <p className="text-slate-500 text-[11px] font-medium leading-tight">{acc.commentaire}</p>
                           <div className="text-[10px] text-neutral-400 font-semibold">
-                            Date d'envoi: {new Date(acc.dateEnvoi).toLocaleDateString()} 
+                            Date d'envoi: {new Date(acc.dateEnvoi).toLocaleDateString()}
                             {acc.dateRelance && ` | Relancé le: ${new Date(acc.dateRelance).toLocaleDateString()}`}
                           </div>
                         </div>
@@ -1542,13 +1542,13 @@ export default function DossierDetail({
 
                           {canHandleApprovals && acc.statut === "en_attente" && (
                             <div className="flex gap-1">
-                              <button 
+                              <button
                                 onClick={() => handleUpdateAccordStatut(acc.id, "approuve")}
                                 className="px-2 py-0.5 bg-green-600 text-white font-bold rounded text-[10px]"
                               >
                                 Approuver
                               </button>
-                              <button 
+                              <button
                                 onClick={() => handleUpdateAccordStatut(acc.id, "refuse")}
                                 className="px-2 py-0.5 bg-red-600 text-white font-bold rounded text-[10px]"
                               >
@@ -1626,7 +1626,7 @@ export default function DossierDetail({
               </div>
             ) : (
               <div className="space-y-4">
-                
+
                 {/* Checklist rendering with interactive buttons */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
                   {[
@@ -1639,12 +1639,12 @@ export default function DossierDetail({
                     { key: "documentsPrets", label: "Tous les documents / fiches de travaux d'atelier signés" },
                     { key: "photosApresOk", label: "Photos du véhicule après travaux enregistrées sur l'app" }
                   ].map((item) => (
-                    <label 
-                      key={item.key} 
+                    <label
+                      key={item.key}
                       className="p-3 bg-neutral-50  border border-neutral-200 rounded-lg flex items-center justify-between cursor-pointer select-none"
                     >
                       <span className="text-slate-700  font-semibold">{item.label}</span>
-                      <input 
+                      <input
                         type="checkbox"
                         checked={dossier.checklistQC[item.key as keyof typeof dossier.checklistQC] as boolean}
                         onChange={(e) => handleQCFieldChange(item.key as any, e.target.checked)}
@@ -1660,9 +1660,9 @@ export default function DossierDetail({
                 {canValidateQuality && (
                   <div className="p-4 bg-slate-50  border border-slate-200  rounded-xl space-y-4">
                     <span className="text-xs font-bold text-slate-800  uppercase block">Décision Finale de Validation de Qualité :</span>
-                    
+
                     <div className="flex gap-2">
-                      <button 
+                      <button
                         onClick={handleQCValidationRequest}
                         data-testid="qc-accept"
                         className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs transition shadow-sm flex items-center gap-1.5"
@@ -1671,7 +1671,7 @@ export default function DossierDetail({
                         Valider & Marquer Prêt à Livrer
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => {
                           setModalActive("qc-refuse");
                         }}
@@ -1707,7 +1707,7 @@ export default function DossierDetail({
             {/* Check requirements */}
             <div className="p-4 bg-slate-50  rounded-xl border border-slate-200  text-xs space-y-3.5">
               <span className="font-bold text-neutral-800  block uppercase">Pré-requis opérationnels :</span>
-              
+
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white font-bold ${
@@ -1751,11 +1751,11 @@ export default function DossierDetail({
               <div className="space-y-4">
                 <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
                   <span className="font-bold text-blue-800  block uppercase font-display">Acceptation / signature simple client lors de la remise des clés :</span>
-                  
+
                   {/* Visual Signature Mock */}
-                  <div 
+                  <div
                     data-testid="delivery-signature"
-                    className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer" 
+                    className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer"
                     onClick={() => setSignatureCaptured(true)}
                   >
                     {signatureCaptured ? "[ Acceptation simple client capturée ]" : "[ Cliquer ici pour simuler l'acceptation/signature simple du client ]"}
@@ -1765,7 +1765,7 @@ export default function DossierDetail({
                 </div>
 
                 <div className="flex gap-2">
-                  <button 
+                  <button
                     onClick={handleDeliveryConfirm}
                     data-testid="delivery-submit"
                     disabled={!deliveryGate.allowed}
@@ -1794,7 +1794,7 @@ export default function DossierDetail({
                 </div>
 
                 {canDeliverVehicle && dossier.statut === DossierStatus.LIVRE && (
-                  <button 
+                  <button
                     onClick={handleFinalOperationalClose}
                     data-testid="delivery-billing"
                     className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition cursor-pointer"
