@@ -39,6 +39,10 @@ import {
 } from "lucide-react";
 import { LicencePlate, StatusBadge, PriorityBadge } from "./UIParts";
 
+function formatTechnicianDuration(hours: number | undefined): string {
+  return hours && hours > 0 ? `${hours}H` : "À estimer";
+}
+
 interface TechnicianViewProps {
   dossiers: DossierSAV[];
   techniciens: TechnicienResource[];
@@ -468,7 +472,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                               <div className="flex items-start justify-between gap-2">
                                 <div>
                                   <span className="font-extrabold text-slate-800 text-sm block">{line.designation}</span>
-                                  <span className="text-[10px] text-zinc-400 font-mono">{line.tempsPasse}H / {line.tempsEstime}H</span>
+                                  <span className="text-[10px] text-zinc-400 font-mono">{line.tempsPasse}H / {formatTechnicianDuration(line.tempsEstime)}</span>
                                 </div>
                                 <span 
                                   data-testid={`task-status-${line.id}`}

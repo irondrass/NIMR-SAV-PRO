@@ -82,6 +82,10 @@ interface DossierDetailProps {
   techniciensList: { id: string; nom: string }[];
 }
 
+function formatRepairOrderDuration(hours: number | undefined): string {
+  return hours && hours > 0 ? `${hours}H` : "À estimer";
+}
+
 export default function DossierDetail({ 
   dossier, 
   dossiers,
@@ -97,8 +101,11 @@ export default function DossierDetail({
   
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
-  const [newROLineTime, setNewROLineTime] = useState<number>(1.0);
   const [showQuoteImport, setShowQuoteImport] = useState(false);
+  const [durationValidationLineId, setDurationValidationLineId] = useState<string | null>(null);
+  const [durationValidationHours, setDurationValidationHours] = useState("");
+  const [durationValidationReason, setDurationValidationReason] = useState("");
+  const [durationValidationError, setDurationValidationError] = useState<string | null>(null);
 
   // For adding custom logs
   const [newLogText, setNewLogText] = useState("");
@@ -195,11 +202,11 @@ export default function DossierDetail({
     const newLine: RepairOrderLine = {
       id: createRuntimeId("ro"),
       designation: newROLineText.trim(),
-      tempsEstime: Number(newROLineTime),
+      tempsEstime: 0,
       tempsPasse: 0,
       status: "pending",
       estimateSource: "manual",
-      isEstimatedDurationValidated: true
+      isEstimatedDurationValidated: false
     };
     const updatedRO = [...dossier.ordresReparation, newLine];
     
@@ -212,16 +219,48 @@ export default function DossierDetail({
       avancementGlobal: progress
     });
     setNewROLineText("");
-    setNewROLineTime(1.0);
   };
 
-  const handleValidateDuration = (lineId: string) => {
+  const handleOpenDurationValidation = (line: RepairOrderLine) => {
+    setDurationValidationLineId(line.id);
+    setDurationValidationHours(line.tempsEstime > 0 ? String(line.tempsEstime) : "");
+    setDurationValidationReason("");
+    setDurationValidationError(null);
+  };
+
+  const handleCloseDurationValidation = () => {
+    setDurationValidationLineId(null);
+    setDurationValidationHours("");
+    setDurationValidationReason("");
+    setDurationValidationError(null);
+  };
+
+  const handleConfirmDurationValidation = () => {
+    if (!durationValidationLineId) return;
+    const parsedHours = Number(durationValidationHours);
+    const reason = durationValidationReason.trim();
+    if (!Number.isFinite(parsedHours) || parsedHours <= 0 || parsedHours > 12) {
+      setDurationValidationError("Durée obligatoire entre 0,1h et 12h.");
+      return;
+    }
+    if (reason.length < 8) {
+      setDurationValidationError("Motif obligatoire pour valider ou modifier la durée.");
+      return;
+    }
     const updatedLines = dossier.ordresReparation.map(l =>
-      l.id === lineId ? { ...l, isEstimatedDurationValidated: true } : l
+      l.id === durationValidationLineId ? {
+        ...l,
+        tempsEstime: Math.round(parsedHours * 10) / 10,
+        isEstimatedDurationValidated: true,
+        durationValidationReason: reason,
+        durationValidatedAt: new Date().toISOString(),
+        durationValidatedBy: userRole,
+      } : l
     );
     updateDossierState({
       ordresReparation: updatedLines
     });
+    handleCloseDurationValidation();
   };
 
   const handleQuoteImportConfirm = (
@@ -532,6 +571,9 @@ export default function DossierDetail({
   const canHandleApprovals = perm.canCreateDossier(userRole);
   const canValidateQuality = perm.canValidateQC(userRole);
   const canDeliverVehicle = perm.canDeliver(userRole);
+  const durationValidationLine = durationValidationLineId
+    ? dossier.ordresReparation.find(line => line.id === durationValidationLineId)
+    : undefined;
   const deliveryGate = canDeliverDossier(dossier);
   const linkedComplaints = reclamations
     .map(normalizeComplaint)
@@ -1016,7 +1058,7 @@ export default function DossierDetail({
                   </button>
                 )}
                 <span className="bg-blue-50  text-blue-700  text-xs font-bold px-3 py-1 rounded font-mono">
-                  Total estimé : {dossier.ordresReparation.reduce((acc, current) => acc + current.tempsEstime, 0)} Heures
+                  Total estimé validé/proposé : {dossier.ordresReparation.reduce((acc, current) => acc + (current.tempsEstime > 0 ? current.tempsEstime : 0), 0)} Heures
                 </span>
               </div>
             </div>
@@ -1066,7 +1108,7 @@ export default function DossierDetail({
                     <div className="space-y-1">
                       <span className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
                       <div className="flex flex-wrap items-center gap-4 text-slate-400 text-[11px] font-semibold">
-                        <span>Estimation: <span className="text-stone-700  font-bold font-mono">{line.tempsEstime}H</span></span>
+                        <span>Estimation: <span className="text-stone-700  font-bold font-mono">{formatRepairOrderDuration(line.tempsEstime)}</span></span>
                         <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
                         {line.estimateSource && (
                           <span
@@ -1094,7 +1136,7 @@ export default function DossierDetail({
                                 : "bg-amber-50 text-amber-700 border border-amber-200"
                             }`}
                           >
-                            {line.isEstimatedDurationValidated ? "Durée validée" : "Durée preset à valider"}
+                            {line.isEstimatedDurationValidated ? "Durée validée" : line.tempsEstime > 0 ? "Durée à valider" : "À estimer"}
                           </span>
                         )}
                         {(line.complaintBadge || line.sourceComplaintId) && (
@@ -1185,9 +1227,9 @@ export default function DossierDetail({
                           </div>
                         ) : (
                           <div className="flex flex-wrap justify-end gap-1">
-                            {canManageDossier && (line.estimateSource === "preset" || line.estimateSource === "demo") && !line.isEstimatedDurationValidated && (
+                            {canManageDossier && !line.isEstimatedDurationValidated && (
                               <button
-                                onClick={() => handleValidateDuration(line.id)}
+                                onClick={() => handleOpenDurationValidation(line)}
                                 data-testid={`task-validate-duration-${line.id}`}
                                 className="p-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
                                 title="Valider la durée estimée"
@@ -1273,18 +1315,17 @@ export default function DossierDetail({
                     onChange={(e) => setNewROLineText(e.target.value)}
                   />
                   <input 
-                    type="number" 
-                    step="0.1"
+                    type="text" 
                     data-testid="new-task-time"
                     className="p-2 bg-white  border border-slate-200  rounded font-bold  focus:outline-none" 
-                    placeholder="Temps estimé (H)"
-                    value={newROLineTime}
-                    onChange={(e) => setNewROLineTime(Number(e.target.value))}
+                    value="À estimer"
+                    readOnly
+                    aria-label="Durée initiale à estimer"
                   />
                   <button 
                     onClick={handleAddROLine}
                     data-testid="new-task-submit"
-                    disabled={!newROLineText.trim() || !newROLineTime || newROLineTime <= 0}
+                    disabled={!newROLineText.trim()}
                     className="py-2 bg-slate-900 hover:bg-slate-950 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold rounded cursor-pointer transition flex items-center justify-center gap-1"
                   >
                     <Plus className="w-4 h-4" />
@@ -2130,6 +2171,63 @@ export default function DossierDetail({
           )}
         </div>,
         document.body
+      )}
+
+      {durationValidationLineId && durationValidationLine && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xl">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-900">Valider la durée atelier</h3>
+              <p className="mt-1 font-semibold text-slate-500">{durationValidationLine.designation}</p>
+            </div>
+            {durationValidationError && (
+              <div data-testid="duration-validation-error" className="rounded-lg border border-rose-200 bg-rose-50 p-3 font-bold text-rose-700">
+                {durationValidationError}
+              </div>
+            )}
+            <label className="block space-y-1">
+              <span className="font-black uppercase text-slate-600">Durée validée (heures)</span>
+              <input
+                data-testid="duration-validation-hours"
+                type="number"
+                step="0.1"
+                min="0.1"
+                max="12"
+                value={durationValidationHours}
+                onChange={(event) => setDurationValidationHours(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="font-black uppercase text-slate-600">Motif validation / modification</span>
+              <textarea
+                data-testid="duration-validation-reason"
+                value={durationValidationReason}
+                onChange={(event) => setDurationValidationReason(event.target.value)}
+                className="min-h-24 w-full rounded-lg border border-slate-200 bg-white p-2 font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                placeholder="Ex: Durée validée selon preset SAV interne."
+              />
+            </label>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                data-testid="duration-validation-cancel"
+                onClick={handleCloseDurationValidation}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-black text-slate-700 hover:bg-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="duration-validation-confirm"
+                onClick={handleConfirmDurationValidation}
+                className="rounded-lg bg-emerald-600 px-4 py-2 font-black text-white hover:bg-emerald-700"
+              >
+                Valider durée
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showQuoteImport && (

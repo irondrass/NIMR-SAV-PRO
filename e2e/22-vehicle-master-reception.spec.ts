@@ -406,7 +406,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
 
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
     await expect(page.locator('[data-testid="reception-vehicle-brand"]')).toHaveValue("Dongfeng");
-    await expect(page.locator('[data-testid="reception-vehicle-model"]')).toHaveValue("BOX EV 430");
+    await expect(page.locator('[data-testid="reception-vehicle-model"]')).toHaveValue("DONGFENG BOX EV 430");
     await expect(page.locator('[data-testid="reception-plate"]')).toHaveValue("2318TU259");
     await expect(page.locator('[data-testid="reception-vin"]')).toHaveValue("LDP43A961SS112183");
     await expect(page.locator('[data-testid="reception-circulation-date"]')).toHaveValue("2026-02-25");

@@ -247,7 +247,7 @@ export function createReceptionDossier(
     deposantNom: deposantNom || clientNom || "Déposant",
     deposantTelephone: deposantTelephone || clientTelephone || "+216 20 000 000",
     vehiculeMarque: vehiculeMarque || "Dongfeng",
-    vehiculeModele: vehiculeModele || "Modèle standard",
+    vehiculeModele: vehiculeModele || "Modèle à renseigner",
     vehiculeImmatriculation: vehiculeImmatriculation || "000 TU 0000",
     vehiculeVIN: vehiculeVIN || "",
     vehiculeKilometrage: Math.min(999999, Math.max(0, Math.trunc(safeKilometrage))),
@@ -280,7 +280,7 @@ export function createReceptionDossier(
       {
         id: createRuntimeId("ro_auto"),
         designation: `Opération initiale: ${input.typeDossier}`,
-        tempsEstime: 2.5,
+        tempsEstime: 0,
         tempsPasse: 0,
         status: "pending",
         estimateSource: "preset" as const,
@@ -289,7 +289,7 @@ export function createReceptionDossier(
       {
         id: createRuntimeId("ro_auto"),
         designation: "Contrôle global NIMR Premium (28 points de contrôle)",
-        tempsEstime: 1.0,
+        tempsEstime: 0,
         tempsPasse: 0,
         status: "pending",
         estimateSource: "preset" as const,
@@ -771,7 +771,10 @@ function isSlotOverlappingActiveReservations(
 export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Date = new Date()): WorkshopSlotSuggestion {
   if (input.availabilityConfig) {
     const desiredDate = input.desiredDate instanceof Date ? input.desiredDate : new Date(input.desiredDate);
-    const durationHours = Math.max(0.5, Number.isFinite(input.estimatedHours) ? input.estimatedHours : 1);
+    const durationHours = Number.isFinite(input.estimatedHours) ? input.estimatedHours : 0;
+    if (durationHours <= 0) {
+      throw new Error("Durée à estimer avant proposition planning.");
+    }
     const durationMinutes = Math.ceil(durationHours * 60);
 
     const desiredDateStr = getLocalDateKey(desiredDate);
@@ -906,7 +909,10 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
     };
   }
 
-  const durationHours = Math.max(0.5, Number.isFinite(input.estimatedHours) ? input.estimatedHours : 1);
+  const durationHours = Number.isFinite(input.estimatedHours) ? input.estimatedHours : 0;
+  if (durationHours <= 0) {
+    throw new Error("Durée à estimer avant proposition planning.");
+  }
   const durationMinutes = Math.ceil(durationHours * 60);
   const desiredDate = input.desiredDate instanceof Date ? input.desiredDate : new Date(input.desiredDate);
 
@@ -1191,14 +1197,10 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
       if (!hours || hours <= 0) {
         pushIssue("planning-duration-missing");
       } else {
-        const src = line.estimateSource;
         const validated = line.isEstimatedDurationValidated;
-        // preset/demo require explicit validation before scheduling
-        if ((src === "preset" || src === "demo") && !validated) {
+        if (!validated) {
           pushIssue("planning-duration-not-validated");
         }
-        // manual with duration > 0 is considered validated implicitly
-        // quote-import is always validated (set during import confirmation)
       }
     }
   }
@@ -2014,7 +2016,7 @@ function buildPlanningValidationResult(
     "planning-task-not-found": "Tâche inexistante.",
     "planning-dossier-not-found": "Dossier inexistant.",
     "planning-duration-missing": "Durée estimée absente ou nulle. Ouvrez le dossier pour saisir ou importer la durée.",
-    "planning-duration-not-validated": "Durée preset à valider. Ouvrez le dossier et validez la durée avant de planifier.",
+    "planning-duration-not-validated": "Durée à valider par Chef Atelier avant de planifier.",
     "workshop-holiday": "L'atelier est fermé pour jour férié.",
     "workshop-closed": "L'atelier est fermé à cette date.",
     "outside-effective-working-hours": "En dehors des horaires d'ouverture.",

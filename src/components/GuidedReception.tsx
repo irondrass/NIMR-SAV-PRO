@@ -49,9 +49,11 @@ import {
   inferVehicleBrandAndModel,
   normalizeSearchText,
   parseVehicleMasterCsv,
+  parseVehicleMasterXlsxBuffer,
   searchVehicleMaster,
   getVehicleWarrantyStatus,
-  getVehicleReceptionHints
+  getVehicleReceptionHints,
+  VEHICLE_MODEL_TO_FILL_PLACEHOLDER
 } from "../vehicle-master";
 import {
   validateCustomerName,
@@ -202,17 +204,32 @@ export default function GuidedReception({
   const handleImportCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files[0]) {
+      const file = files[0];
+      const ext = file.name.split(".").pop()?.toLowerCase();
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const buffer = event.target?.result as ArrayBuffer;
         const text = decodeVehicleMasterCsvBuffer(buffer);
-        const result = parseVehicleMasterCsv(text);
+        let result: VehicleMasterImportResult;
+        try {
+          result = ext === "xlsx" ? await parseVehicleMasterXlsxBuffer(buffer) : parseVehicleMasterCsv(text);
+        } catch (error) {
+          result = {
+            records: [],
+            importedCount: 0,
+            ignoredCount: 0,
+            duplicateVinCount: 0,
+            duplicatePlateCount: 0,
+            errors: [error instanceof Error ? error.message : "Import véhicule impossible."],
+            warnings: []
+          };
+        }
         setImportResult(result);
         if (result.records.length > 0) {
           onUpdateVehicleMaster(result.records);
         }
       };
-      reader.readAsArrayBuffer(files[0]);
+      reader.readAsArrayBuffer(file);
     }
     e.target.value = "";
   };
@@ -225,12 +242,13 @@ export default function GuidedReception({
 
     const hints = getVehicleReceptionHints(vehicle, new Date());
     const inferred = inferVehicleBrandAndModel(vehicle.model, vehicle.brand);
+    const importedModel = vehicle.model?.trim() || VEHICLE_MODEL_TO_FILL_PLACEHOLDER;
     const validVin = vehicle.vin && validateVin(vehicle.vin) ? vehicle.vin : "";
 
     if (vehicle.customerName) updateClientNom(vehicle.customerName);
     if (vehicle.customerPhone) updateClientTelephone(vehicle.customerPhone);
     if (inferred.brand) setVehiculeMarque(inferred.brand);
-    if (inferred.model) setVehiculeModele(inferred.model);
+    setVehiculeModele(importedModel);
     if (vehicle.version) setVehiculeVersion(vehicle.version);
     if (validVin) setVehiculeVIN(validVin);
     if (vehicle.plateNumber) setVehiculeImmatriculation(vehicle.plateNumber);
@@ -246,7 +264,7 @@ export default function GuidedReception({
       !vehicle.customerPhone ? "téléphone" : null,
       !validVin ? "VIN" : null,
       !vehicle.plateNumber ? "immatriculation" : null,
-      !inferred.model ? "modèle" : null
+      !vehicle.model?.trim() ? "modèle" : null
     ].filter(Boolean);
     setReceptionWarning(missingFields.length > 0 ? `Données véhicule partielles : ${missingFields.join(", ")} absent(s) ou invalide(s).` : null);
 
@@ -681,11 +699,11 @@ export default function GuidedReception({
 
                 {canManageVehicleMaster(currentUserRole) && (
                   <div className="flex flex-col gap-2">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Importer un fichier véhicules (CSV) :</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Importer un fichier véhicules (CSV / Excel) :</label>
                     <div className="flex items-center gap-2">
                       <input
                         type="file"
-                        accept=".csv"
+                        accept=".csv,.xlsx"
                         data-testid="vehicle-master-import-input"
                         onChange={handleImportCsvFile}
                         className="text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"

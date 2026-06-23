@@ -51,6 +51,7 @@ import {
   parseVehicleMasterCsv,
   searchVehicleMaster,
   getVehicleWarrantyStatus,
+  VEHICLE_MODEL_TO_FILL_PLACEHOLDER,
 } from "../src/vehicle-master";
 import {
   getVehicleAggregatedStatus,
@@ -811,7 +812,7 @@ registerCheck("Lot 5F-3", "mapLaborLinesToRepairOrderLines — estimateSource = 
   const roLines = mapLaborLinesToRepairOrderLines(preview);
   assert.ok(roLines.length > 0, "Expected at least 1 RepairOrderLine");
   assert.equal(roLines[0].estimateSource, "quote-import");
-  assert.equal(roLines[0].isEstimatedDurationValidated, true);
+  assert.equal(roLines[0].isEstimatedDurationValidated, false);
 });
 
 registerCheck("Lot 5F-3", "planning bloqué si durée manquante (tempsEstime=0)", () => {
@@ -2435,7 +2436,7 @@ registerCheck("Lot 6G Invariants", "CSV réel-like ne perd pas VIN, client ni t�
   assert.equal(vehicle.customerPhone, "+21622222222");
   assert.equal(vehicle.plateNumber, "2318TU259");
   assert.equal(vehicle.brand, "Dongfeng");
-  assert.equal(vehicle.model, "BOX EV 430");
+  assert.equal(vehicle.model, "DONGFENG BOX EV 430");
   assert.equal(vehicle.circulationDate, "2026-02-25");
   assert.equal(vehicle.deliveryDate, "2026-03-04");
   assert.deepEqual(getVehicleMasterStats(parsed.records), {
@@ -2471,7 +2472,25 @@ registerCheck("Lot 6G Invariants", "GuidedReception importe en ArrayBuffer et pr
   assert.ok(funcBody.includes("if (vehicle.customerPhone) updateClientTelephone(vehicle.customerPhone)"), "Téléphone doit être pré-rempli si disponible");
   assert.ok(funcBody.includes("if (validVin) setVehiculeVIN(validVin)"), "VIN valide doit être pré-rempli");
   assert.ok(funcBody.includes("if (vehicle.plateNumber) setVehiculeImmatriculation(vehicle.plateNumber)"), "Immatriculation doit être pré-remplie");
-  assert.ok(funcBody.includes("if (inferred.model) setVehiculeModele(inferred.model)"), "Modèle doit être pré-rempli");
+  assert.ok(funcBody.includes("setVehiculeModele(importedModel)"), "Modèle doit venir de la Description importée ou du placeholder");
+  assert.equal(funcBody.includes("setVehiculeModele(inferred.model)"), false, "La marque inférée ne doit pas remplacer la Description modèle");
+});
+
+registerCheck("Lot 6G Invariants", "modèle réception = Description importée avec placeholder si vide", () => {
+  const parsed = parseVehicleMasterCsv(
+    `VIN,Immatriculation,Marque,Description\n` +
+    `VIN-DESC-001,111 TU 222,Dongfeng,Dongfeng Shine Max\n` +
+    `VIN-DESC-002,222 TU 333,Dongfeng,`
+  );
+  assert.equal(parsed.records[0].model, "Dongfeng Shine Max");
+  assert.equal(parsed.records[0].brand, "Dongfeng");
+  assert.equal(parsed.records[1].model, undefined);
+  assert.equal(VEHICLE_MODEL_TO_FILL_PLACEHOLDER, "Modèle à renseigner");
+
+  const viewContent = fs.readFileSync("src/components/GuidedReception.tsx", "utf8");
+  assert.ok(viewContent.includes("parseVehicleMasterXlsxBuffer"), "Réception doit accepter un import véhicule Excel minimal");
+  assert.ok(viewContent.includes('accept=".csv,.xlsx"'), "L'import véhicule doit accepter CSV et Excel");
+  assert.ok(viewContent.includes("VEHICLE_MODEL_TO_FILL_PLACEHOLDER"), "Le placeholder modèle doit être utilisé côté réception");
 });
 
 registerCheck("Lot 6G Invariants", "diagnostic base véhicules affiche les compteurs et messages utiles", () => {
@@ -2491,6 +2510,65 @@ registerCheck("Lot 6G Invariants", "aucun tag créé et aucune donnée réelle L
   assert.equal(hasForbiddenTag, false);
   assert.equal(fs.existsSync("Liste Vehicule.csv"), false);
   assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
+});
+
+registerCheck("Lot 6J Complément", "MO sans durée inventée et planning bloqué tant que non validée", () => {
+  const dossier = createReceptionDossier({
+    clientNom: "Client QA",
+    clientTelephone: "+216 20 000 000",
+    deposantNom: "Client QA",
+    deposantTelephone: "+216 20 000 000",
+    vehiculeMarque: "Dongfeng",
+    vehiculeModele: "",
+    vehiculeImmatriculation: "123 TU 456",
+    vehiculeVIN: "",
+    vehiculeKilometrage: 100,
+    vehiculeCouleur: "Gris",
+    typeDossier: InterventionType.ENTRETIEN_RAPIDE,
+    priorite: DossierPriority.NORMALE,
+    plainteClient: "Contrôle atelier fictif",
+    observationsReception: "",
+    photosAvant: [],
+    niveauCarburant: 50,
+    etatCarrosserie: { rayures: false, bosses: false, fissureParbrise: false, jantesAbimees: false, autresNotes: "" },
+    objetsLaisses: [],
+  }, [], new Date("2026-06-15T08:00:00Z"));
+  assert.equal(dossier.vehiculeModele, "Modèle à renseigner");
+  assert.ok(dossier.ordresReparation.every(line => line.tempsEstime === 0), "Création dossier ne doit pas inventer de durée");
+  assert.ok(dossier.ordresReparation.every(line => line.isEstimatedDurationValidated === false), "Durée initiale non validée");
+
+  const quoteLines = mapLaborLinesToRepairOrderLines(buildQuoteImportPreview(parseQuoteText("Contrôle géométrie 1H")));
+  assert.equal(quoteLines[0].tempsEstime, 1);
+  assert.equal(quoteLines[0].isEstimatedDurationValidated, false, "Import MO reste à valider par Chef Atelier");
+
+  const quoteDossier = getMockDossier({
+    id: "NIMR-QA-MO-NOVALID",
+    ordresReparation: [quoteLines[0]],
+  });
+  const blocked = validatePlanningAssignment({
+    dossiers: [quoteDossier],
+    dossierId: quoteDossier.id,
+    lineId: quoteLines[0].id,
+    technicianId: mockTechs[0].id,
+    bayId: mockBays[0].id,
+    start: new Date("2026-06-15T10:00:00"),
+    end: new Date("2026-06-15T11:00:00"),
+    technicians: mockTechs,
+    workshopBays: mockBays,
+  }, new Date("2026-06-15T08:00:00"));
+  assert.equal(blocked.allowed, false);
+  assert.ok(blocked.codes.includes("planning-duration-not-validated"));
+
+  const savCoreContent = fs.readFileSync("src/sav-core.ts", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const complaintsContent = fs.readFileSync("src/complaints-workflow.ts", "utf8");
+  assert.equal(savCoreContent.includes("Math.max(0.5"), false, "suggestWorkshopSlot ne doit plus forcer 0.5h");
+  assert.equal(planningContent.includes("line.tempsEstime || 1"), false, "Planning ne doit pas injecter 1h");
+  assert.ok(planningContent.includes("isDurationReadyForPlanning"), "Planning doit vérifier la durée validée");
+  assert.ok(detailContent.includes("durationValidationReason"), "Validation durée doit conserver le motif");
+  assert.ok(detailContent.includes("duration-validation-reason"), "La modale doit exiger un motif");
+  assert.ok(complaintsContent.includes("tempsEstime: 0"), "Réclamation corrective ne doit pas inventer 1h");
 });
 
 registerCheck("Lot 6H Invariants", "Gantt et vues tâches utilisent un statut visuel unique", () => {

@@ -10,6 +10,8 @@ import {
   VehicleMasterImportResult
 } from "./types";
 
+export const VEHICLE_MODEL_TO_FILL_PLACEHOLDER = "Modèle à renseigner";
+
 const MAPPED_KEYS = {
   vin: [
     "vin",
@@ -202,6 +204,125 @@ export function parseCsvRaw(text: string): string[][] {
   return result;
 }
 
+function readUInt16LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readUInt32LE(bytes: Uint8Array, offset: number): number {
+  return (
+    bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] << 24)
+  ) >>> 0;
+}
+
+function findEndOfCentralDirectory(bytes: Uint8Array): number {
+  for (let offset = bytes.length - 22; offset >= 0; offset--) {
+    if (readUInt32LE(bytes, offset) === 0x06054b50) {
+      return offset;
+    }
+  }
+  return -1;
+}
+
+async function inflateZipPayload(payload: Uint8Array, compressionMethod: number): Promise<Uint8Array> {
+  if (compressionMethod === 0) return payload;
+  if (compressionMethod !== 8) {
+    throw new Error("Compression XLSX non supportée.");
+  }
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error("Import Excel indisponible dans ce navigateur. Exportez le fichier en CSV.");
+  }
+  const stream = new Response(payload).body;
+  if (!stream) throw new Error("Lecture Excel impossible.");
+  const inflated = stream.pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(inflated).arrayBuffer());
+}
+
+async function unzipXlsxEntries(buffer: ArrayBuffer | Uint8Array): Promise<Map<string, Uint8Array>> {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const eocdOffset = findEndOfCentralDirectory(bytes);
+  if (eocdOffset < 0) {
+    throw new Error("Fichier Excel invalide.");
+  }
+
+  const entries = new Map<string, Uint8Array>();
+  const entryCount = readUInt16LE(bytes, eocdOffset + 10);
+  let cursor = readUInt32LE(bytes, eocdOffset + 16);
+  const decoder = new TextDecoder("utf-8");
+
+  for (let i = 0; i < entryCount; i++) {
+    if (readUInt32LE(bytes, cursor) !== 0x02014b50) break;
+    const compressionMethod = readUInt16LE(bytes, cursor + 10);
+    const compressedSize = readUInt32LE(bytes, cursor + 20);
+    const fileNameLength = readUInt16LE(bytes, cursor + 28);
+    const extraLength = readUInt16LE(bytes, cursor + 30);
+    const commentLength = readUInt16LE(bytes, cursor + 32);
+    const localHeaderOffset = readUInt32LE(bytes, cursor + 42);
+    const fileName = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + fileNameLength));
+
+    if (readUInt32LE(bytes, localHeaderOffset) === 0x04034b50) {
+      const localFileNameLength = readUInt16LE(bytes, localHeaderOffset + 26);
+      const localExtraLength = readUInt16LE(bytes, localHeaderOffset + 28);
+      const payloadStart = localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+      const payload = bytes.slice(payloadStart, payloadStart + compressedSize);
+      entries.set(fileName, await inflateZipPayload(payload, compressionMethod));
+    }
+
+    cursor += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+function parseXmlDocument(text: string): Document {
+  if (typeof DOMParser === "undefined") {
+    throw new Error("Import Excel indisponible dans cet environnement. Exportez le fichier en CSV.");
+  }
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length > 0) {
+    throw new Error("Feuille Excel XML invalide.");
+  }
+  return doc;
+}
+
+function getSharedStrings(xmlText?: string): string[] {
+  if (!xmlText) return [];
+  const doc = parseXmlDocument(xmlText);
+  return Array.from(doc.getElementsByTagName("si")).map(si =>
+    Array.from(si.getElementsByTagName("t")).map(node => node.textContent || "").join("")
+  );
+}
+
+function columnRefToIndex(ref: string | null): number {
+  const letters = (ref || "").match(/^[A-Z]+/i)?.[0]?.toUpperCase() || "A";
+  return letters.split("").reduce((acc, char) => acc * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+function parseXlsxSheetRows(sheetXml: string, sharedStrings: string[]): string[][] {
+  const doc = parseXmlDocument(sheetXml);
+  const rows: string[][] = [];
+  for (const row of Array.from(doc.getElementsByTagName("row"))) {
+    const values: string[] = [];
+    for (const cell of Array.from(row.getElementsByTagName("c"))) {
+      const idx = columnRefToIndex(cell.getAttribute("r"));
+      const type = cell.getAttribute("t");
+      const raw = cell.getElementsByTagName("v")[0]?.textContent || "";
+      const inline = Array.from(cell.getElementsByTagName("t")).map(node => node.textContent || "").join("");
+      values[idx] = type === "s"
+        ? sharedStrings[Number(raw)] || ""
+        : type === "inlineStr"
+          ? inline
+          : raw;
+    }
+    if (values.some(value => String(value || "").trim())) {
+      rows.push(values.map(value => String(value || "").trim()));
+    }
+  }
+  return rows;
+}
+
 export function normalizeDate(dStr: string | undefined): string | undefined {
   if (!dStr) return undefined;
   const trimmed = dStr.trim();
@@ -293,9 +414,9 @@ export function normalizeVehicleMasterRecord(row: any): VehicleMasterRecord {
   const plateNumber = row.plateNumber ? String(row.plateNumber).toUpperCase().replace(/\s+/g, " ").trim() : undefined;
   const customerPhone = normalizePhone(row.customerPhone);
   const customerName = normalizeTextValue(row.customerName);
-  const inferred = inferVehicleBrandAndModel(row.model, row.brand);
+  const model = normalizeTextValue(row.model);
+  const inferred = inferVehicleBrandAndModel(model, row.brand);
   const brand = inferred.brand;
-  const model = inferred.model;
   const version = normalizeTextValue(row.version);
   const itemNo = normalizeTextValue(row.itemNo);
   const energy = normalizeTextValue(row.energy);
@@ -464,6 +585,68 @@ export function parseVehicleMasterCsv(text: string): VehicleMasterImportResult {
   const records = parseVehicleMasterRows(rows);
   const validationResult = validateVehicleMasterImport(records);
 
+  return {
+    records: validationResult.records,
+    importedCount: validationResult.importedCount,
+    ignoredCount: validationResult.ignoredCount,
+    duplicateVinCount: validationResult.duplicateVinCount,
+    duplicatePlateCount: validationResult.duplicatePlateCount,
+    errors: [...errors, ...validationResult.errors],
+    warnings: [...warnings, ...validationResult.warnings]
+  };
+}
+
+export async function parseVehicleMasterXlsxBuffer(buffer: ArrayBuffer | Uint8Array): Promise<VehicleMasterImportResult> {
+  const warnings: string[] = [];
+  const entries = await unzipXlsxEntries(buffer);
+  const decoder = new TextDecoder("utf-8");
+  const firstSheetKey = Array.from(entries.keys())
+    .filter(key => /^xl\/worksheets\/sheet\d+\.xml$/i.test(key))
+    .sort((a, b) => a.localeCompare(b))[0];
+
+  if (!firstSheetKey) {
+    return {
+      records: [],
+      importedCount: 0,
+      ignoredCount: 0,
+      duplicateVinCount: 0,
+      duplicatePlateCount: 0,
+      errors: ["Aucune feuille Excel exploitable."],
+      warnings
+    };
+  }
+
+  const sharedStrings = getSharedStrings(entries.get("xl/sharedStrings.xml") ? decoder.decode(entries.get("xl/sharedStrings.xml")) : undefined);
+  const rows = parseXlsxSheetRows(decoder.decode(entries.get(firstSheetKey)), sharedStrings);
+  if (rows.length === 0) {
+    return {
+      records: [],
+      importedCount: 0,
+      ignoredCount: 0,
+      duplicateVinCount: 0,
+      duplicatePlateCount: 0,
+      errors: ["Le fichier Excel est vide."],
+      warnings
+    };
+  }
+
+  const headers = rows[0];
+  const headerFields = headers.map(findMappedField);
+  const matchedFields = headerFields.filter(f => f !== null) as string[];
+  headers.forEach((h, idx) => {
+    if (!headerFields[idx]) {
+      warnings.push(`Colonne inconnue ignorée : "${h}"`);
+    }
+  });
+
+  const errors: string[] = [];
+  const hasVinOrPlate = matchedFields.includes("vin") || matchedFields.includes("plateNumber");
+  if (!hasVinOrPlate) {
+    errors.push("Colonnes obligatoires manquantes : au moins 'VIN' ou 'Immatriculation' doit être présent.");
+  }
+
+  const records = parseVehicleMasterRows(rows);
+  const validationResult = validateVehicleMasterImport(records);
   return {
     records: validationResult.records,
     importedCount: validationResult.importedCount,

@@ -1139,11 +1139,11 @@ export function mapLaborLinesToRepairOrderLines(
       return {
         id: generateId("ro_quote"),
         designation: description,
-        tempsEstime: hours > 0 ? hours : 1,
+        tempsEstime: hours,
         tempsPasse: 0,
         status: "pending",
         estimateSource: "quote-import",
-        isEstimatedDurationValidated: true, // validé après confirmation utilisateur
+        isEstimatedDurationValidated: false,
         quoteImportId: importId,
         quoteLineRef: line.id,
       };

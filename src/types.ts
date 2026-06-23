@@ -185,6 +185,9 @@ export interface RepairOrderLine {
   // Lot 5F-3: estimate source and duration validation
   estimateSource?: "manual" | "preset" | "quote-import" | "demo";
   isEstimatedDurationValidated?: boolean;
+  durationValidationReason?: string;
+  durationValidatedAt?: string;
+  durationValidatedBy?: string;
   quoteImportId?: string;
   quoteLineRef?: string;
   operationCode?: string;

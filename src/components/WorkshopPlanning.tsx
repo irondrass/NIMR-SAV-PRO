@@ -200,6 +200,14 @@ function assignGanttLanes(items: GanttLaneItem[]): GanttLaneItem[][] {
   return lanes;
 }
 
+function isDurationReadyForPlanning(line?: RepairOrderLine | null): boolean {
+  return Boolean(line && line.tempsEstime > 0 && line.isEstimatedDurationValidated);
+}
+
+function formatWorkshopDuration(hours: number | undefined): string {
+  return hours && hours > 0 ? `${hours}H` : "À estimer";
+}
+
 export default function WorkshopPlanning({
   techniciens,
   dossiers,
@@ -349,6 +357,7 @@ export default function WorkshopPlanning({
   const selectedTargetForSuggest = findTaskPlanningTarget(taskPlanningTargets, selectedTargetIdForSuggest);
 
   const activeManualDossier = dossiers.find(d => d.id === manualDossierId);
+  const activeManualLine = activeManualDossier?.ordresReparation.find(l => l.id === manualTaskId);
   const pendingManualTasks = activeManualDossier 
     ? activeManualDossier.ordresReparation.filter(line => normalizeRepairOrderStatus(line.status) !== "done")
     : [];
@@ -410,6 +419,7 @@ export default function WorkshopPlanning({
 
   const buildSuggestionCandidates = (): WorkshopSlotSuggestion[] => {
     if (!selectedTargetForSuggest) return [];
+    if (!isDurationReadyForPlanning(selectedTargetForSuggest.line)) return [];
     const candidates: WorkshopSlotSuggestion[] = [];
     const seen = new Set<string>();
     const offsets = [0, 30, 60];
@@ -422,7 +432,7 @@ export default function WorkshopPlanning({
         dossiers,
         technicians: techniciens,
         workshopBays: DEFAULT_WORKSHOP_BAYS,
-        estimatedHours: selectedTargetForSuggest.line.tempsEstime || 1,
+        estimatedHours: selectedTargetForSuggest.line.tempsEstime,
         desiredDate: targetDesiredDate,
         dossierId: selectedTargetForSuggest.dossier.id,
         reservations,
@@ -447,6 +457,12 @@ export default function WorkshopPlanning({
   const handleSuggestSlot = () => {
     if (!selectedTargetForSuggest) {
       setSuggestionError("Aucune tâche non planifiée disponible pour suggestion.");
+      setSuggestion(null);
+      setSuggestions([]);
+      return;
+    }
+    if (!isDurationReadyForPlanning(selectedTargetForSuggest.line)) {
+      setSuggestionError("Durée à valider par Chef Atelier avant de proposer un créneau.");
       setSuggestion(null);
       setSuggestions([]);
       return;
@@ -520,16 +536,18 @@ export default function WorkshopPlanning({
     const start = new Date(selectedDate);
     start.setHours(Number(manualStartHour), Number(manualStartMin), 0, 0);
     
-    const activeLine = activeManualDossier?.ordresReparation.find(l => l.id === manualTaskId);
-    const estimatedHours = activeLine ? activeLine.tempsEstime : 1;
+    const activeLine = activeManualLine;
+    const estimatedHours = activeLine ? activeLine.tempsEstime : 0;
     const durationMinutes = Math.ceil(estimatedHours * 60);
-    const end = addWorkingMinutes(start, durationMinutes);
+    const end = durationMinutes > 0 ? addWorkingMinutes(start, durationMinutes) : new Date(start);
     
     return { start, end, estimatedHours };
   };
 
   const checkManualCollisions = () => {
     if (!manualDossierId || !manualTaskId || !manualTechId || !manualBayId) return [];
+    if (!activeManualLine || activeManualLine.tempsEstime <= 0) return ["planning-duration-missing"];
+    if (!activeManualLine.isEstimatedDurationValidated) return ["planning-duration-not-validated"];
     
     const { start, end } = getManualInterval();
     const codes = validatePlanningAssignment({
@@ -822,7 +840,7 @@ export default function WorkshopPlanning({
     const currentStart = overrides.start || (line.planningStart ? new Date(line.planningStart) : selectedDate);
     const durationMinutes = line.planningStart && line.planningEnd
       ? Math.max(15, Math.round((new Date(line.planningEnd).getTime() - new Date(line.planningStart).getTime()) / 60000))
-      : Math.max(15, Math.ceil((line.tempsEstime || 1) * 60));
+      : Math.max(0, Math.ceil((line.tempsEstime || 0) * 60));
 
     setRescheduleTarget({ dossierId: dossier.id, lineId: line.id });
     setRescheduleTechId(overrides.technicianId || line.plannedTechnicianId || dossier.technicienId || techniciens[0]?.id || "");
@@ -843,11 +861,19 @@ export default function WorkshopPlanning({
     const dossier = dossiers.find(current => current.id === rescheduleTarget.dossierId);
     const line = dossier?.ordresReparation.find(current => current.id === rescheduleTarget.lineId);
     if (!dossier || !line) return;
+    if (!isDurationReadyForPlanning(line)) {
+      setRescheduleError("Durée à valider par Chef Atelier avant de modifier le planning.");
+      return;
+    }
+    if (!Number.isFinite(rescheduleDurationMinutes) || rescheduleDurationMinutes <= 0) {
+      setRescheduleError("Durée de créneau invalide.");
+      return;
+    }
 
     const [hour, minute] = rescheduleStart.split(":").map(Number);
     const start = new Date(`${rescheduleDate}T00:00:00`);
     start.setHours(hour, minute, 0, 0);
-    const end = addWorkingMinutes(start, Math.max(15, rescheduleDurationMinutes));
+    const end = addWorkingMinutes(start, rescheduleDurationMinutes);
     const validation = validatePlanningAssignment({
       dossiers,
       dossierId: dossier.id,
@@ -1229,7 +1255,7 @@ export default function WorkshopPlanning({
                 onChange={(e) => setManualTaskId(e.target.value)}
               >
                 {pendingManualTasks.map(t => (
-                  <option key={t.id} value={t.id}>{t.designation} ({t.tempsEstime}H)</option>
+                  <option key={t.id} value={t.id}>{t.designation} ({formatWorkshopDuration(t.tempsEstime)})</option>
                 ))}
               </select>
             </div>

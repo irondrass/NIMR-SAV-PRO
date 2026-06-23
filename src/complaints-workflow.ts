@@ -212,11 +212,11 @@ export function createCorrectiveTaskFromComplaint(
   const line: RepairOrderLine = {
     id: taskId,
     designation: `Action corrective réclamation ${normalized.id}: ${sanitizeFreeText(normalized.motif).slice(0, 90)}`,
-    tempsEstime: 1,
+    tempsEstime: 0,
     tempsPasse: 0,
     status: "pending",
     estimateSource: "manual",
-    isEstimatedDurationValidated: true,
+    isEstimatedDurationValidated: false,
     sourceComplaintId: normalized.id,
     complaintSeverity: normalized.criticite,
     complaintBadge: true,

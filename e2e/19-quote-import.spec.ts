@@ -157,7 +157,7 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
 
   // ─── Test 4 : Ajouter ligne valide ─────────────────────────────────────────
 
-  test("19-04 ajouter ligne manuelle valide crée une tâche", async ({ page }) => {
+  test("19-04 ajouter ligne manuelle crée une tâche à estimer", async ({ page }) => {
     const dossier = makeDossierWithPreset();
     await seedDossiers(page, [dossier]);
     await changeUserRole(page, "role-option-chef-atelier");
@@ -166,7 +166,7 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
     await navigateToDossierRepairOrders(page, dossier.id);
 
     await humanFill(page, page.locator('[data-testid="new-task-desc"]'), "Remplacement filtres fictifs");
-    await page.locator('[data-testid="new-task-time"]').fill("2");
+    await expect(page.locator('[data-testid="new-task-time"]')).toHaveValue("À estimer");
     await humanWait(page);
 
     const submitBtn = page.locator('[data-testid="new-task-submit"]');
@@ -327,9 +327,9 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
     }
   });
 
-  // ─── Test 10 : Badge "Durée preset à valider" visible ─────────────────────
+  // ─── Test 10 : Badge "Durée à valider" visible ─────────────────────────────
 
-  test("19-10 badge 'Durée preset à valider' visible sur tâche preset", async ({ page }) => {
+  test("19-10 badge 'Durée à valider' visible sur tâche preset", async ({ page }) => {
     const dossier = makeDossierWithPreset();
     await seedDossiers(page, [dossier]);
     await changeUserRole(page, "role-option-chef-atelier");
@@ -339,7 +339,7 @@ test.describe("Lot 5F-3 — Import Devis & Durées MO", () => {
 
     const presetBadge = page.locator('[data-testid^="task-duration-preset-badge-"]').first();
     await expect(presetBadge).toBeVisible({ timeout: 5000 });
-    await expect(presetBadge).toHaveText(/preset.*valider/i);
+    await expect(presetBadge).toHaveText(/durée.*valider/i);
   });
 
   // ─── Test 11 : localStorage — aucune clé legacy ───────────────────────────

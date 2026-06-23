@@ -8,6 +8,10 @@ import { DossierSAV, ReclammationClient, RepairOrderLine } from "../types";
 import { getTaskStatusVisual } from "../task-status-visual";
 import { CLIENT_SIDE_SECURITY_NOTICE, PILOT_SIGNATURE_NOTICE } from "../rc-notices";
 
+function formatPrintDuration(hours: number | undefined): string {
+  return hours && hours > 0 ? `${hours} h` : "À estimer";
+}
+
 interface PrintDocumentsProps {
   type: "reception" | "or" | "qc" | "delivery" | "task";
   dossier: DossierSAV;
@@ -191,7 +195,7 @@ export default function PrintDocuments({
                   <tr key={line.id || idx}>
                     <td className="py-2.5 px-3 text-slate-800">{line.designation}</td>
                     <td className="py-2.5 px-3 text-slate-600">{line.plannedTechnicianId || "Non assigné"}</td>
-                    <td className="py-2.5 px-3 text-slate-600 font-mono">{line.tempsEstime} h</td>
+                    <td className="py-2.5 px-3 text-slate-600 font-mono">{formatPrintDuration(line.tempsEstime)}</td>
                     <td className="py-2.5 px-3 text-slate-500 uppercase text-[10px]">{line.status}</td>
                   </tr>
                 ))}
@@ -437,7 +441,7 @@ export function TechnicianTaskSheetPrint({
         <p><span className="font-bold text-slate-700">Tâche / opération :</span> <span className="font-extrabold text-slate-900">{task.designation}</span></p>
         <p><span className="font-bold text-slate-700">Technicien affecté :</span> <span data-testid="technician-task-sheet-technician" className="font-semibold text-slate-800">{technicianName || "À affecter"}</span></p>
         <p><span className="font-bold text-slate-700">Statut :</span> <span className="font-black uppercase">{getTaskStatusVisual(task.status).label}</span></p>
-        <p><span className="font-bold text-slate-700">Temps estimé :</span> {task.tempsEstime} h</p>
+        <p><span className="font-bold text-slate-700">Temps estimé :</span> {formatPrintDuration(task.tempsEstime)}</p>
       </div>
 
       {/* Diagnostic Final */}

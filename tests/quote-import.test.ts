@@ -252,14 +252,14 @@ console.log("▶ Suite 9: mapLaborLinesToRepairOrderLines");
   assert.ok(roLines.length > 0, "Should produce RepairOrderLines");
   for (const line of roLines) {
     assert.equal(line.estimateSource, "quote-import", "estimateSource = quote-import");
-    assert.equal(line.isEstimatedDurationValidated, true, "isEstimatedDurationValidated = true after confirmation");
+    assert.equal(line.isEstimatedDurationValidated, false, "isEstimatedDurationValidated = false until Chef Atelier validation");
     assert.ok(line.tempsEstime > 0, "tempsEstime > 0");
     assert.ok(line.quoteImportId, "quoteImportId set");
     assert.ok(line.quoteLineRef, "quoteLineRef set");
     assert.equal(line.status, "pending", "status = pending");
     assert.equal(line.tempsPasse, 0, "tempsPasse = 0");
   }
-  console.log(`  ✅ mapLaborLinesToRepairOrderLines — ${roLines.length} lignes, toutes validées`);
+  console.log(`  ✅ mapLaborLinesToRepairOrderLines — ${roLines.length} lignes à valider`);
 }
 
 // ─── Suite 10 : applyQuoteImportPreview ──────────────────────────────────────
@@ -344,9 +344,9 @@ console.log("▶ Suite 12: validatePlanningAssignment — preset non validé");
     workshopBays: [{ id: "bay_fast_01", name: "Pont rapide 1" }],
   }, now);
   
-  assert.equal(result.allowed, false, "Should not allow planning with non-validated preset");
-  assert.ok(result.codes.includes("planning-duration-not-validated"), `Expected planning-duration-not-validated, got: ${result.codes.join(", ")}`);
-  console.log("  ✅ planning blocked — preset non validé");
+  assert.equal(result.allowed, false, "Should not allow planning with missing preset duration");
+  assert.ok(result.codes.includes("planning-duration-missing"), `Expected planning-duration-missing, got: ${result.codes.join(", ")}`);
+  console.log("  ✅ planning blocked — durée preset à estimer");
 }
 
 // ─── Suite 13 : planning autorisé — quote-import validé ──────────────────────
