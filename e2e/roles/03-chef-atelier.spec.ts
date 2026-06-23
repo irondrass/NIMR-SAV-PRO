@@ -10,7 +10,17 @@ test.describe("Rôle : Chef d'Atelier", () => {
     clientNom: "Chef Client Test",
     statut: DossierStatus.VEHICULE_RECU,
     ordresReparation: [
-      { id: "ro_chef_1", designation: "Mécanique standard", tempsEstime: 3.0, tempsPasse: 0, status: "pending" }
+      {
+        id: "ro_chef_1",
+        designation: "Mécanique standard",
+        tempsEstime: 3.0,
+        tempsPasse: 0,
+        status: "pending",
+        isEstimatedDurationValidated: true,
+        durationValidationReason: "Fixture E2E planning validée Chef Atelier",
+        durationValidatedBy: "chefatelier",
+        durationValidatedAt: "2026-06-15T08:00:00.000Z",
+      }
     ]
   });
 

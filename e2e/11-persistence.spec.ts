@@ -50,11 +50,14 @@ test.describe("Persistance de données locales et isolation cache", () => {
 
     // Add a new task line
     await humanFill(page, page.locator('[data-testid="new-task-desc"]'), "Vidange boîte pont");
-    await humanFill(page, page.locator('[data-testid="new-task-time"]'), "1.5");
+    await expect(page.locator('[data-testid="new-task-time"]')).toHaveValue("À estimer");
+    await expect(page.locator('[data-testid="new-task-time"]')).toHaveAttribute("readonly", "");
     await humanClick(page, page.locator('[data-testid="new-task-submit"]'));
 
     // Verify task is created in list
-    await expect(page.locator("text=Vidange boîte pont")).toBeVisible();
+    const taskCard = page.locator('[data-testid^="task-card-"]').filter({ hasText: "Vidange boîte pont" });
+    await expect(taskCard).toBeVisible();
+    await expect(taskCard).toContainText("À estimer");
 
     // Perform full page reload/refresh
     await humanRefresh(page);
@@ -66,6 +69,8 @@ test.describe("Persistance de données locales et isolation cache", () => {
     await humanClick(page, page.locator(`text=${testDossier.id}`));
     await humanClick(page, page.locator('[data-testid="tab-repair-orders"]'));
 
-    await expect(page.locator("text=Vidange boîte pont")).toBeVisible();
+    const persistedTaskCard = page.locator('[data-testid^="task-card-"]').filter({ hasText: "Vidange boîte pont" });
+    await expect(persistedTaskCard).toBeVisible();
+    await expect(persistedTaskCard).toContainText("À estimer");
   });
 });

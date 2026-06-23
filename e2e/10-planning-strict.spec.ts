@@ -15,11 +15,16 @@ function localIso(date: string, hour: number, minute = 0): string {
 }
 
 function line(overrides: Partial<RepairOrderLine> & Pick<RepairOrderLine, "id" | "designation">): RepairOrderLine {
+  const effectiveHours = overrides.tempsEstime && overrides.tempsEstime > 0 ? overrides.tempsEstime : 1;
   return {
-    tempsEstime: 1,
-    tempsPasse: 0,
-    status: "pending",
     ...overrides,
+    tempsEstime: effectiveHours,
+    tempsPasse: overrides.tempsPasse ?? 0,
+    status: overrides.status ?? "pending",
+    isEstimatedDurationValidated: overrides.isEstimatedDurationValidated ?? true,
+    durationValidationReason: overrides.durationValidationReason ?? "Fixture E2E planning validée Chef Atelier",
+    durationValidatedBy: overrides.durationValidatedBy ?? "chefatelier",
+    durationValidatedAt: overrides.durationValidatedAt ?? "2026-06-15T08:00:00.000Z",
   };
 }
 
