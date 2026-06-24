@@ -212,6 +212,34 @@ export type VehicleAutoReservationResult =
       error: string;
     };
 
+export interface SuggestedSlotReservationInput {
+  role: UserRole;
+  dossiers: DossierSAV[];
+  reservations: WorkshopReservation[];
+  dossierId: string;
+  lineId: string;
+  suggestion: WorkshopSlotSuggestion;
+  technicians: TechnicienResource[];
+  workshopBays: WorkshopBay[];
+  availabilityConfig?: WorkshopAvailabilityConfig;
+}
+
+export type SuggestedSlotReservationResult =
+  | {
+      ok: true;
+      dossiers: DossierSAV[];
+      dossier: DossierSAV;
+      line: RepairOrderLine;
+      reservations: WorkshopReservation[];
+      reservation: WorkshopReservation;
+      eta: ReturnType<typeof getVehicleETAInfo>;
+    }
+  | {
+      ok: false;
+      error: string;
+      codes: string[];
+    };
+
 export interface DossierDeliveryGate {
   allowed: boolean;
   reasons: string[];
@@ -877,7 +905,8 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
           dossiers: input.dossiers,
           reservations: input.reservations || [],
           excludeDossierId: input.dossierId,
-          config: input.availabilityConfig
+          config: input.availabilityConfig,
+          vehicleDossierId: input.dossierId,
         });
 
         if (slot) {
@@ -2750,6 +2779,197 @@ export function getVehicleETAInfo(
     plannedTaskCount: plannedTasks.length,
     unplannedTaskCount: unplannedTasks.length,
     unvalidatedDurationCount: unvalidatedDurationTasks.length
+  };
+}
+
+export function reserveSuggestedWorkshopSlot(
+  input: SuggestedSlotReservationInput,
+  now: Date = new Date()
+): SuggestedSlotReservationResult {
+  if (input.role !== UserRole.CHEF_ATELIER) {
+    return {
+      ok: false,
+      error: "Action réservée au Chef Atelier.",
+      codes: ["planning-role-forbidden"],
+    };
+  }
+
+  const dossier = input.dossiers.find(current => current.id === input.dossierId);
+  if (!dossier) {
+    return {
+      ok: false,
+      error: "Dossier introuvable.",
+      codes: ["planning-dossier-not-found"],
+    };
+  }
+  if (!isDossierActive(dossier)) {
+    return {
+      ok: false,
+      error: "Le dossier n'est plus actif dans le flux atelier.",
+      codes: ["planning-dossier-inactive"],
+    };
+  }
+
+  const line = dossier.ordresReparation.find(current => current.id === input.lineId);
+  if (!line) {
+    return {
+      ok: false,
+      error: "Tâche introuvable.",
+      codes: ["planning-task-not-found"],
+    };
+  }
+  if (!line.tempsEstime || line.tempsEstime <= 0 || !line.isEstimatedDurationValidated) {
+    return {
+      ok: false,
+      error: "Durée à valider par Chef Atelier avant planification.",
+      codes: ["planning-duration-not-validated"],
+    };
+  }
+
+  const start = new Date(input.suggestion.startTime);
+  const end = new Date(input.suggestion.endTime);
+  const submittedSegments = input.suggestion.segments.length > 0
+    ? input.suggestion.segments
+    : [{ start: input.suggestion.startTime, end: input.suggestion.endTime }];
+  const normalizedSegments = submittedSegments.map(segment => ({
+    start: new Date(segment.start),
+    end: new Date(segment.end),
+  }));
+  const expectedDurationMinutes = Math.ceil(line.tempsEstime * 60);
+  const submittedDurationMinutes = normalizedSegments.reduce(
+    (total, segment) => total + Math.round((segment.end.getTime() - segment.start.getTime()) / 60000),
+    0
+  );
+  const hasInvalidSegment = normalizedSegments.some((segment, index) => {
+    if (
+      !Number.isFinite(segment.start.getTime()) ||
+      !Number.isFinite(segment.end.getTime()) ||
+      segment.end.getTime() <= segment.start.getTime()
+    ) {
+      return true;
+    }
+    return index > 0 && segment.start.getTime() < normalizedSegments[index - 1].end.getTime();
+  });
+  const segmentsMatchSuggestion =
+    normalizedSegments[0]?.start.getTime() === start.getTime() &&
+    normalizedSegments[normalizedSegments.length - 1]?.end.getTime() === end.getTime();
+
+  if (
+    !Number.isFinite(start.getTime()) ||
+    !Number.isFinite(end.getTime()) ||
+    hasInvalidSegment ||
+    !segmentsMatchSuggestion ||
+    submittedDurationMinutes !== expectedDurationMinutes
+  ) {
+    return {
+      ok: false,
+      error: "Le créneau proposé est invalide ou ne couvre pas la durée validée.",
+      codes: ["planning-segments-invalid"],
+    };
+  }
+
+  // A long task may span several working windows or days. Revalidate every
+  // generated segment so closed periods between segments are never treated as work.
+  const segmentValidations = normalizedSegments.map(segment => validatePlanningAssignment({
+    dossiers: input.dossiers,
+    dossierId: dossier.id,
+    lineId: line.id,
+    technicianId: input.suggestion.technicianId,
+    bayId: input.suggestion.bayId,
+    start: segment.start,
+    end: segment.end,
+    planningSegments: [{
+      start: segment.start.toISOString(),
+      end: segment.end.toISOString(),
+    }],
+    technicians: input.technicians,
+    workshopBays: input.workshopBays,
+    reservations: input.reservations,
+    availabilityConfig: input.availabilityConfig,
+  }, now));
+  const rejectedValidations = segmentValidations.filter(validation => !validation.allowed);
+
+  if (rejectedValidations.length > 0) {
+    return {
+      ok: false,
+      error: [...new Set(rejectedValidations.flatMap(validation => validation.reasons))].join(" ")
+        || "Le créneau proposé n'est plus disponible.",
+      codes: [...new Set(rejectedValidations.flatMap(validation => validation.codes))],
+    };
+  }
+
+  const segments = normalizedSegments.map(segment => ({
+    start: segment.start.toISOString(),
+    end: segment.end.toISOString(),
+  }));
+  const updatedLine: RepairOrderLine = {
+    ...line,
+    planningStart: start.toISOString(),
+    planningEnd: end.toISOString(),
+    planningSegments: segments,
+    plannedTechnicianId: input.suggestion.technicianId,
+    plannedBayId: input.suggestion.bayId,
+    planningDate: getLocalDateKey(start),
+  };
+  const updatedDossier: DossierSAV = {
+    ...dossier,
+    ordresReparation: dossier.ordresReparation.map(current =>
+      current.id === line.id ? updatedLine : current
+    ),
+    technicienId: input.suggestion.technicianId,
+    workshopBayId: input.suggestion.bayId,
+    datePlanningDebut: start.toISOString(),
+    datePlanningFin: end.toISOString(),
+    statut: DossierStatus.TRAVAUX_PLANIFIES,
+    dateDernierStatut: now.toISOString(),
+    prochaineActionRecommended: `Tâche "${line.designation}" réservée avec ${input.suggestion.technicianName} sur ${input.suggestion.bayName}.`,
+    historiqueLogs: [
+      `${now.toISOString()} - Créneau réservé pour "${line.designation}" avec ${input.suggestion.technicianId} sur ${input.suggestion.bayId}.`,
+      ...(dossier.historiqueLogs || []),
+    ],
+  };
+  const updatedDossiers = input.dossiers.map(current =>
+    current.id === dossier.id ? updatedDossier : current
+  );
+
+  const existingReservation = input.reservations.find(reservation =>
+    reservation.dossierId === dossier.id &&
+    reservation.taskIds.length === 1 &&
+    reservation.taskIds[0] === line.id &&
+    reservation.status !== "ANNULEE"
+  );
+  const reservation: WorkshopReservation = {
+    reservationId: existingReservation?.reservationId || createRuntimeId("res_suggestion"),
+    dossierId: dossier.id,
+    taskIds: [line.id],
+    totalHours: line.tempsEstime,
+    desiredDate: start.toISOString(),
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+    segments,
+    technicianId: input.suggestion.technicianId,
+    bayId: input.suggestion.bayId,
+    status: "TRANSFORMEE_PLANNING",
+    source: "planning-suggestion",
+    history: [
+      ...(existingReservation?.history || []),
+      `${now.toISOString()} - Créneau suggéré revalidé, réservé et intégré au planning.`,
+    ],
+  };
+  const updatedReservations = existingReservation
+    ? input.reservations.map(current =>
+        current.reservationId === existingReservation.reservationId ? reservation : current
+      )
+    : [...input.reservations, reservation];
+
+  return {
+    ok: true,
+    dossiers: updatedDossiers,
+    dossier: updatedDossier,
+    line: updatedLine,
+    reservations: updatedReservations,
+    reservation,
+    eta: getVehicleETAInfo(updatedDossiers, dossier.id, updatedReservations),
   };
 }
 

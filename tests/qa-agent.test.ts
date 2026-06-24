@@ -3056,6 +3056,25 @@ registerCheck("Lot 6K-B-A Invariants", "planning modifiable uniquement par le Ch
   assert.equal(fs.existsSync("e2e/31-auto-reservation.spec.ts"), true);
 });
 
+registerCheck("Lot 6K-B-B Invariants", "suggestion séparée de la réservation et revalidée au clic", () => {
+  const coreContent = fs.readFileSync("src/sav-core.ts", "utf8");
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(coreContent.includes("reserveSuggestedWorkshopSlot"), "La réservation suggérée doit utiliser un helper métier dédié");
+  assert.ok(coreContent.includes("validatePlanningAssignment({"), "Le créneau suggéré doit être revalidé avant application");
+  assert.ok(coreContent.includes('source: "planning-suggestion"'), "La réservation unitaire doit conserver sa source");
+  assert.ok(planningContent.includes("Créneau réservé avec succès."), "L'interface doit confirmer explicitement la réservation");
+  assert.ok(planningContent.includes("Meilleur créneau déjà affiché."), "Une suggestion identique doit produire un feedback");
+});
+
+registerCheck("Lot 6K-B-B Invariants", "liste réservations et rôles reflètent le créneau appliqué", () => {
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(planningContent.includes('data-testid="planning-suggest-result"'), "Le résultat de suggestion doit être identifiable");
+  assert.ok(planningContent.includes('data-testid="planning-reservation-reserved"'), "La liste doit afficher le statut Réservé");
+  assert.ok(planningContent.includes("Réserver ce créneau"), "L'action terrain explicite doit être visible pour le Chef Atelier");
+  assert.ok(planningContent.includes("activeRole === UserRole.CHEF_ATELIER"), "Les actions planning doivent rester limitées au Chef Atelier");
+  assert.equal(fs.existsSync("e2e/32-planning-suggestion-reservation.spec.ts"), true);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -3079,7 +3098,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6K-B-A - Réservation automatique véhicule et ETA livraison)
+- **Version** : v1.1.1 (Lot 6K-B-B - Suggestion et réservation planning restaurées)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

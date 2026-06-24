@@ -19,7 +19,8 @@ import {
   getVehicleETAInfo,
   isSameVehicle,
   isDossierActive,
-  buildVehicleAutoReservationPlan
+  buildVehicleAutoReservationPlan,
+  reserveSuggestedWorkshopSlot
 } from "../sav-core";
 import { 
   isWorkshopClosed,
@@ -234,6 +235,7 @@ export default function WorkshopPlanning({
   const [suggestion, setSuggestion] = useState<WorkshopSlotSuggestion | null>(null);
   const [suggestions, setSuggestions] = useState<WorkshopSlotSuggestion[]>([]);
   const [suggestionError, setSuggestionError] = useState("");
+  const [suggestionFeedback, setSuggestionFeedback] = useState("");
 
   // Manual planning form states
   const [manualDossierId, setManualDossierId] = useState("");
@@ -427,6 +429,7 @@ export default function WorkshopPlanning({
     setSelectedDate(prev);
     setSuggestion(null);
     setSuggestions([]);
+    setSuggestionFeedback("");
   };
 
   const handleNextDay = () => {
@@ -438,12 +441,14 @@ export default function WorkshopPlanning({
     setSelectedDate(next);
     setSuggestion(null);
     setSuggestions([]);
+    setSuggestionFeedback("");
   };
 
   const handleToday = () => {
     setSelectedDate(new Date());
     setSuggestion(null);
     setSuggestions([]);
+    setSuggestionFeedback("");
   };
 
   const buildSuggestionCandidates = (): WorkshopSlotSuggestion[] => {
@@ -484,35 +489,49 @@ export default function WorkshopPlanning({
 
   // Suggest slot
   const handleSuggestSlot = () => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!selectedTargetForSuggest) {
       setSuggestionError("Aucune tâche non planifiée disponible pour suggestion.");
       setSuggestion(null);
       setSuggestions([]);
+      setSuggestionFeedback("");
       return;
     }
     if (!isDurationReadyForPlanning(selectedTargetForSuggest.line)) {
-      setSuggestionError("Durée à valider par Chef Atelier avant de proposer un créneau.");
+      setSuggestionError("Durée à valider par Chef Atelier avant planification.");
       setSuggestion(null);
       setSuggestions([]);
+      setSuggestionFeedback("");
       return;
     }
 
     try {
       const candidates = buildSuggestionCandidates();
       if (candidates.length === 0) {
-        setSuggestionError("Aucun créneau compatible trouvé.");
+        setSuggestionError("Aucun créneau disponible dans la période sélectionnée.");
         setSuggestion(null);
         setSuggestions([]);
+        setSuggestionFeedback("");
         return;
       }
 
+      const previousFingerprint = suggestion
+        ? `${suggestion.technicianId}-${suggestion.bayId}-${suggestion.startTime}-${suggestion.endTime}`
+        : "";
+      const nextFingerprint = `${candidates[0].technicianId}-${candidates[0].bayId}-${candidates[0].startTime}-${candidates[0].endTime}`;
       setSuggestion(candidates[0]);
       setSuggestions(candidates);
       setSuggestionError("");
+      setSuggestionFeedback(
+        previousFingerprint === nextFingerprint
+          ? "Meilleur créneau déjà affiché."
+          : "Meilleur créneau disponible."
+      );
     } catch (err: any) {
-      setSuggestionError(err.message || "Erreur de suggestion");
+      setSuggestionError(err.message || "Aucun créneau disponible dans la période sélectionnée.");
       setSuggestion(null);
       setSuggestions([]);
+      setSuggestionFeedback("");
     }
   };
 
@@ -520,43 +539,33 @@ export default function WorkshopPlanning({
   const handleApplySuggestion = (selectedSuggestion = suggestion) => {
     if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!selectedTargetForSuggest || !selectedSuggestion) return;
-    
-    const { dossier, line: targetLine } = selectedTargetForSuggest;
-    const start = new Date(selectedSuggestion.startTime);
-    const end = new Date(selectedSuggestion.endTime);
-    const segments = selectedSuggestion.segments.length > 0 ? selectedSuggestion.segments : buildPlanningSegments(start, end);
-    const planningDate = getLocalDateStr(start);
 
-    const updatedLines = dossier.ordresReparation.map(line => {
-      if (line.id === targetLine.id) {
-        return {
-          ...line,
-          planningStart: selectedSuggestion.startTime,
-          planningEnd: selectedSuggestion.endTime,
-          planningSegments: segments,
-          plannedTechnicianId: selectedSuggestion.technicianId,
-          plannedBayId: selectedSuggestion.bayId,
-          planningDate: planningDate
-        };
-      }
-      return line;
-    });
+    const result = reserveSuggestedWorkshopSlot({
+      role: activeRole,
+      dossiers,
+      reservations,
+      dossierId: selectedTargetForSuggest.dossier.id,
+      lineId: selectedTargetForSuggest.line.id,
+      suggestion: selectedSuggestion,
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+      availabilityConfig,
+    }, getSystemTime());
+    if (result.ok === false) {
+      setSuggestionError(result.error);
+      setSuggestionFeedback("");
+      return;
+    }
 
-    onUpdateDossier({
-      ...dossier,
-      ordresReparation: updatedLines,
-      technicienId: selectedSuggestion.technicianId,
-      workshopBayId: selectedSuggestion.bayId,
-      datePlanningDebut: selectedSuggestion.startTime,
-      datePlanningFin: selectedSuggestion.endTime,
-      statut: DossierStatus.TRAVAUX_PLANIFIES,
-      dateDernierStatut: new Date().toISOString(),
-      prochaineActionRecommended: `Tâche "${targetLine.designation}" planifiée sur ${selectedSuggestion.bayName} avec ${selectedSuggestion.technicianName} le ${new Date(selectedSuggestion.startTime).toLocaleDateString("fr-FR")} de ${new Date(selectedSuggestion.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} à ${new Date(selectedSuggestion.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`,
-    });
+    onUpdateDossier(result.dossier);
+    onUpdateReservations(result.reservations);
+    setSelectedDate(new Date(selectedSuggestion.startTime));
 
     setSuggestion(null);
     setSuggestions([]);
     setSuggestionTargetId("");
+    setSuggestionError("");
+    setSuggestionFeedback("Créneau réservé avec succès.");
     setShowSavedIndicator(true);
     setTimeout(() => setShowSavedIndicator(false), 3000);
   };
@@ -849,7 +858,11 @@ export default function WorkshopPlanning({
         reservation: res || null
       };
     })
-    .filter(item => !item.reservation || item.reservation.status !== "TRANSFORMEE_PLANNING");
+    .filter(item =>
+      !item.reservation ||
+      item.reservation.status !== "TRANSFORMEE_PLANNING" ||
+      item.reservation.source === "planning-suggestion"
+    );
 
   const handleSuggestReservation = (dossier: DossierSAV, existingRes: WorkshopReservation | null) => {
     if (activeRole !== UserRole.CHEF_ATELIER) return;
@@ -1200,6 +1213,7 @@ export default function WorkshopPlanning({
         {/* Column 1 containing both Suggestion Engine and ETA/Auto-Reserve */}
         <div className="space-y-6">
           {/* Automatic Slot Suggestion */}
+          {activeRole === UserRole.CHEF_ATELIER && (
           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
           <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-1.5 font-display">
             <Sparkles className="w-4.5 h-4.5 text-blue-600" />
@@ -1217,6 +1231,7 @@ export default function WorkshopPlanning({
                   setSuggestion(null);
                   setSuggestions([]);
                   setSuggestionError("");
+                  setSuggestionFeedback("");
                 }}
               >
                 {taskPlanningTargets.length === 0 ? (
@@ -1254,8 +1269,21 @@ export default function WorkshopPlanning({
             <p data-testid="planning-suggest-error" className="text-xs font-bold text-rose-600">{suggestionError}</p>
           )}
 
+          {suggestionFeedback && (
+            <p
+              data-testid="planning-suggest-feedback"
+              className={`text-xs font-bold ${
+                suggestionFeedback === "Créneau réservé avec succès."
+                  ? "text-emerald-700"
+                  : "text-blue-700"
+              }`}
+            >
+              {suggestionFeedback}
+            </p>
+          )}
+
           {suggestion && suggestions.length > 0 && (
-            <div className="space-y-2">
+            <div data-testid="planning-suggest-result" className="space-y-2">
               {suggestions.slice(0, 3).map((candidate, index) => (
                 <div key={`${candidate.technicianId}-${candidate.bayId}-${candidate.startTime}`} className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-blue-50/40 border border-blue-100 rounded-xl text-xs">
                   <div className="space-y-1.5">
@@ -1293,11 +1321,12 @@ export default function WorkshopPlanning({
                   {activeRole === UserRole.CHEF_ATELIER && (
                     <button
                       onClick={() => handleApplySuggestion(candidate)}
+                      disabled={!selectedTargetForSuggest || !isDurationReadyForPlanning(selectedTargetForSuggest.line)}
                       data-testid={index === 0 ? "planning-suggest-apply" : `planning-suggest-apply-${index + 1}`}
-                      className="sm:col-span-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
+                      className="sm:col-span-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
                     >
                       <Check className="w-4 h-4" />
-                      Appliquer cette suggestion
+                      Réserver ce créneau
                     </button>
                   )}
                 </div>
@@ -1305,6 +1334,7 @@ export default function WorkshopPlanning({
             </div>
           )}
         </div>
+        )}
 
         {(() => {
           const selectedVehicleDossier = dossiers.find(d => d.id === selectedVehicleDossierId);
@@ -1678,6 +1708,12 @@ export default function WorkshopPlanning({
             ) : (
               reservationNeeds.map(({ dossier, duration, reservation }) => {
                 const status = reservation ? reservation.status : "A_RESERVER";
+                const isReservedFromSuggestion =
+                  status === "TRANSFORMEE_PLANNING" &&
+                  reservation?.source === "planning-suggestion";
+                const displayedDuration = isReservedFromSuggestion
+                  ? reservation.totalHours
+                  : duration;
                 
                 // Check if slot has issues
                 let validationErrors: string[] = [];
@@ -1704,7 +1740,9 @@ export default function WorkshopPlanning({
                     <div className="flex items-center justify-between">
                       <strong className="text-gray-900">{dossier.id}</strong>
                       {status === "A_RESERVER" && (
-                        <span className="px-1.5 py-0.5 rounded-lg bg-gray-105 text-gray-750 text-[9px] font-black uppercase">À réserver</span>
+                        <span data-testid="planning-reservation-status" className="px-1.5 py-0.5 rounded-lg bg-gray-105 text-gray-750 text-[9px] font-black uppercase">
+                          <span data-testid="planning-reservation-pending">À réserver</span>
+                        </span>
                       )}
                       {status === "CRENEAU_PROPOSE" && (
                         <span className="px-1.5 py-0.5 rounded-lg bg-blue-105 text-blue-800 text-[9px] font-black uppercase">Créneau proposé</span>
@@ -1712,11 +1750,16 @@ export default function WorkshopPlanning({
                       {status === "RESERVATION_CONFIRMEE" && (
                         <span className="px-1.5 py-0.5 rounded-lg bg-indigo-105 text-indigo-800 text-[9px] font-black uppercase">Réservation confirmée</span>
                       )}
+                      {isReservedFromSuggestion && (
+                        <span data-testid="planning-reservation-status" className="px-1.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase">
+                          <span data-testid="planning-reservation-reserved">Réservé</span>
+                        </span>
+                      )}
                     </div>
                     
                     <div className="text-gray-650 space-y-0.5">
                       <div>Véhicule : <span className="font-extrabold text-gray-805">{dossier.vehiculeMarque} {dossier.vehiculeModele} ({dossier.vehiculeImmatriculation})</span></div>
-                      <div>Durée MO validée : <span className="font-extrabold text-gray-805">{duration}h</span></div>
+                      <div>Durée MO validée : <span className="font-extrabold text-gray-805">{displayedDuration}h</span></div>
                       {reservation && reservation.startTime && (() => {
                         const uniqueDays = reservation.segments && reservation.segments.length > 0
                           ? new Set(reservation.segments.map(seg => seg.start.split("T")[0])).size
@@ -1726,7 +1769,9 @@ export default function WorkshopPlanning({
 
                         return (
                           <div className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mt-1.5 space-y-1">
-                            <div className="font-black text-gray-700 uppercase text-[9px]">Créneau proposé :</div>
+                            <div className="font-black text-gray-700 uppercase text-[9px]">
+                              {isReservedFromSuggestion ? "Créneau réservé :" : "Créneau proposé :"}
+                            </div>
                             <div>
                               Début : <span data-testid="res-start" className="font-bold text-gray-800">
                                 {new Date(reservation.startTime).toLocaleDateString("fr-FR")} à {new Date(reservation.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}

@@ -193,6 +193,7 @@ const dossierQcReturn = createMockDossier({
 const dossierDoneHidden = createMockDossier({
   id: "NIMR-GANTT-DONE-HIDDEN",
   clientNom: "Client Démo Gantt Terminé",
+  vehiculeImmatriculation: "707 TU 7007",
   vehiculeVIN: "GANTTVIN000000007",
   statut: DossierStatus.TRAVAUX_PLANIFIES,
   technicienId: techC.id,
@@ -207,6 +208,7 @@ const dossierDoneHidden = createMockDossier({
 const dossierCancelledHidden = createMockDossier({
   id: "NIMR-GANTT-CANCELLED-HIDDEN",
   clientNom: "Client Démo Gantt Annulé",
+  vehiculeImmatriculation: "708 TU 7008",
   vehiculeVIN: "GANTTVIN000000008",
   statut: DossierStatus.ANNULE,
   technicienId: techC.id,
@@ -218,6 +220,7 @@ const dossierCancelledHidden = createMockDossier({
 const dossierUnplanned = createMockDossier({
   id: "NIMR-GANTT-MANUAL",
   clientNom: "Client Démo Gantt Manuel",
+  vehiculeImmatriculation: "709 TU 7009",
   vehiculeVIN: "GANTTVIN000000009",
   statut: DossierStatus.VEHICULE_RECU,
   ordresReparation: [
@@ -228,6 +231,7 @@ const dossierUnplanned = createMockDossier({
 const dossierLongSaturday = createMockDossier({
   id: "NIMR-GANTT-SAT-LONG",
   clientNom: "Client Démo Gantt Long",
+  vehiculeImmatriculation: "710 TU 7010",
   vehiculeVIN: "GANTTVIN000000010",
   statut: DossierStatus.VEHICULE_RECU,
   ordresReparation: [

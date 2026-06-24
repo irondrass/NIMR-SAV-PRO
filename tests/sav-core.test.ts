@@ -63,6 +63,7 @@ import {
   isDossierActive,
   getActiveVehicleDossiers,
   buildVehicleAutoReservationPlan,
+  reserveSuggestedWorkshopSlot,
 } from "../src/sav-core";
 import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-identity";
 import { buildDirectorDashboardKpis } from "../src/dashboard-kpis";
@@ -1715,6 +1716,176 @@ function testVehicleETAAndAutoReserve() {
     ok: false,
     error: "Aucun créneau disponible dans la période sélectionnée.",
   });
+
+  const suggestedDossier = createVehiclePlanningDossier("SUGGEST-A", "777 TU 777", "SUGGEST-VIN", [{
+    id: "task-suggest",
+    designation: "Diagnostic guidé",
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "pending",
+    isEstimatedDurationValidated: true,
+  }]);
+  const suggestionDate = new Date(2026, 5, 25, 8, 0, 0, 0);
+  const suggestedSlot = suggestWorkshopSlot({
+    dossiers: [suggestedDossier],
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [
+      { id: "bay_diag_01", name: "Pont diagnostic 1", zone: AtelierZone.ELECTRICITE_DIAG },
+      { id: "bay_general_01", name: "Pont polyvalent" },
+    ],
+    estimatedHours: 1,
+    desiredDate: suggestionDate,
+    dossierId: suggestedDossier.id,
+    reservations: [],
+    availabilityConfig: vehiclePlanningConfig,
+  }, new Date(2026, 5, 24, 7, 0, 0, 0));
+  const reservedSuggestion = reserveSuggestedWorkshopSlot({
+    role: UserRole.CHEF_ATELIER,
+    dossiers: [suggestedDossier],
+    reservations: [],
+    dossierId: suggestedDossier.id,
+    lineId: "task-suggest",
+    suggestion: suggestedSlot,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [
+      { id: "bay_diag_01", name: "Pont diagnostic 1", zone: AtelierZone.ELECTRICITE_DIAG },
+      { id: "bay_general_01", name: "Pont polyvalent" },
+    ],
+    availabilityConfig: vehiclePlanningConfig,
+  }, new Date(2026, 5, 24, 7, 5, 0, 0));
+  assert.equal(reservedSuggestion.ok, true);
+  if (reservedSuggestion.ok) {
+    assert.equal(reservedSuggestion.reservation.status, "TRANSFORMEE_PLANNING");
+    assert.equal(reservedSuggestion.reservation.source, "planning-suggestion");
+    assert.deepEqual(reservedSuggestion.reservation.taskIds, ["task-suggest"]);
+    assert.equal(reservedSuggestion.line.planningStart, suggestedSlot.startTime);
+    assert.equal(reservedSuggestion.dossier.statut, DossierStatus.TRAVAUX_PLANIFIES);
+    assert.ok(reservedSuggestion.eta.etaDateTime);
+    assert.equal(reservedSuggestion.eta.unplannedTaskCount, 0);
+  }
+
+  const longSaturdayDossier = createVehiclePlanningDossier("SUGGEST-SATURDAY", "710 TU 7010", "SATURDAY-VIN", [{
+    id: "task-long-saturday",
+    designation: "Intervention longue samedi",
+    tempsEstime: 5,
+    tempsPasse: 0,
+    status: "pending",
+    isEstimatedDurationValidated: true,
+  }]);
+  const longSaturdaySlot = suggestWorkshopSlot({
+    dossiers: [longSaturdayDossier],
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [{ id: "bay_general_01", name: "Pont polyvalent" }],
+    estimatedHours: 5,
+    desiredDate: new Date(2026, 5, 20, 8, 0, 0, 0),
+    dossierId: longSaturdayDossier.id,
+    reservations: [],
+    availabilityConfig: vehiclePlanningConfig,
+  }, new Date(2026, 5, 19, 7, 0, 0, 0));
+  assert.equal(longSaturdaySlot.segments.length, 2);
+  assert.equal(new Date(longSaturdaySlot.segments[0].start).getDate(), 20);
+  assert.equal(new Date(longSaturdaySlot.segments[1].start).getDate(), 22);
+
+  const reservedLongSaturday = reserveSuggestedWorkshopSlot({
+    role: UserRole.CHEF_ATELIER,
+    dossiers: [longSaturdayDossier],
+    reservations: [],
+    dossierId: longSaturdayDossier.id,
+    lineId: "task-long-saturday",
+    suggestion: longSaturdaySlot,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [{ id: "bay_general_01", name: "Pont polyvalent" }],
+    availabilityConfig: vehiclePlanningConfig,
+  }, new Date(2026, 5, 19, 7, 5, 0, 0));
+  assert.equal(reservedLongSaturday.ok, true);
+  if (reservedLongSaturday.ok) {
+    assert.equal(reservedLongSaturday.line.planningSegments?.length, 2);
+    assert.equal(reservedLongSaturday.reservation.segments?.length, 2);
+  }
+
+  const roleRefusal = reserveSuggestedWorkshopSlot({
+    role: UserRole.RECEPTIONNAIRE,
+    dossiers: [suggestedDossier],
+    reservations: [],
+    dossierId: suggestedDossier.id,
+    lineId: "task-suggest",
+    suggestion: suggestedSlot,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [{ id: "bay_general_01", name: "Pont polyvalent" }],
+    availabilityConfig: vehiclePlanningConfig,
+  });
+  assert.equal(roleRefusal.ok, false);
+  if (roleRefusal.ok === false) {
+    assert.deepEqual(roleRefusal.codes, ["planning-role-forbidden"]);
+  }
+
+  const durationRefusal = reserveSuggestedWorkshopSlot({
+    role: UserRole.CHEF_ATELIER,
+    dossiers: [unvalidatedB],
+    reservations: [],
+    dossierId: unvalidatedB.id,
+    lineId: "task-b1",
+    suggestion: suggestedSlot,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [{ id: "bay_general_01", name: "Pont polyvalent" }],
+    availabilityConfig: vehiclePlanningConfig,
+  });
+  assert.equal(durationRefusal.ok, false);
+  if (durationRefusal.ok === false) {
+    assert.deepEqual(durationRefusal.codes, ["planning-duration-not-validated"]);
+  }
+
+  const occupiedVehicleDossier = createVehiclePlanningDossier("SUGGEST-OCCUPIED", "888 TU 888", "STALE-VIN", [{
+    id: "task-occupied",
+    designation: "Réparation en place",
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "in_progress",
+    isEstimatedDurationValidated: true,
+    planningStart: new Date(2026, 5, 25, 8, 0, 0, 0).toISOString(),
+    planningEnd: new Date(2026, 5, 25, 9, 0, 0, 0).toISOString(),
+    plannedTechnicianId: "tech_01",
+    plannedBayId: "bay_diag_01",
+  }]);
+  const staleTargetDossier = createVehiclePlanningDossier("SUGGEST-STALE", "888tu888", " stale-vin ", [{
+    id: "task-stale",
+    designation: "Contrôle suivant",
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "pending",
+    isEstimatedDurationValidated: true,
+  }]);
+  const staleSuggestion = {
+    ...suggestedSlot,
+    technicianId: "tech_02",
+    technicianName: "Technicien Démo 002",
+    bayId: "bay_general_01",
+    bayName: "Pont polyvalent",
+    startTime: new Date(2026, 5, 25, 8, 30, 0, 0).toISOString(),
+    endTime: new Date(2026, 5, 25, 9, 30, 0, 0).toISOString(),
+    segments: [{
+      start: new Date(2026, 5, 25, 8, 30, 0, 0).toISOString(),
+      end: new Date(2026, 5, 25, 9, 30, 0, 0).toISOString(),
+    }],
+  };
+  const staleCollision = reserveSuggestedWorkshopSlot({
+    role: UserRole.CHEF_ATELIER,
+    dossiers: [occupiedVehicleDossier, staleTargetDossier],
+    reservations: [],
+    dossierId: staleTargetDossier.id,
+    lineId: "task-stale",
+    suggestion: staleSuggestion,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [
+      { id: "bay_diag_01", name: "Pont diagnostic 1" },
+      { id: "bay_general_01", name: "Pont polyvalent" },
+    ],
+    availabilityConfig: vehiclePlanningConfig,
+  }, new Date(2026, 5, 24, 7, 0, 0, 0));
+  assert.equal(staleCollision.ok, false);
+  if (staleCollision.ok === false) {
+    assert.ok(staleCollision.codes.includes("planning-collision-vehicle"));
+  }
 }
 
 testVehicleETAAndAutoReserve();

@@ -1,9 +1,9 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 24/06/2026 05:49:46
-- **Version** : v1.1.1 (Lot 6K-B-A - Réservation automatique véhicule et ETA livraison)
-- **Contrôles exécutés** : 149
-- **Résultat global** : **OK** (149 OK / 0 KO)
+- **Date** : 24/06/2026 11:36:01
+- **Version** : v1.1.1 (Lot 6K-B-B - Suggestion et réservation planning restaurées)
+- **Contrôles exécutés** : 151
+- **Résultat global** : **OK** (151 OK / 0 KO)
 
 
 ## Anomalies détectées
