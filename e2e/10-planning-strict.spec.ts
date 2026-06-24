@@ -92,6 +92,7 @@ const dossierMorning = createMockDossier({
   vehiculeMarque: "Forthing",
   vehiculeModele: "T5 EVO",
   vehiculeImmatriculation: "111 TU 1111",
+  vehiculeVIN: "GANTTVIN000000001",
   statut: DossierStatus.TRAVAUX_PLANIFIES,
   technicienId: techA.id,
   ordresReparation: [
@@ -105,6 +106,7 @@ const dossierAfternoon = createMockDossier({
   vehiculeMarque: "DFSK",
   vehiculeModele: "Glory 500",
   vehiculeImmatriculation: "222 TU 2222",
+  vehiculeVIN: "GANTTVIN000000002",
   statut: DossierStatus.TRAVAUX_PLANIFIES,
   technicienId: techB.id,
   ordresReparation: [
@@ -123,6 +125,7 @@ const dossierSplit = createMockDossier({
   vehiculeMarque: "Dongfeng",
   vehiculeModele: "Aeolus Huge",
   vehiculeImmatriculation: "333 TU 3333",
+  vehiculeVIN: "GANTTVIN000000003",
   statut: DossierStatus.TRAVAUX_PLANIFIES,
   technicienId: techC.id,
   ordresReparation: [
@@ -136,6 +139,7 @@ const dossierNoPlanningDate = createMockDossier({
   vehiculeMarque: "DFSK",
   vehiculeModele: "E5",
   vehiculeImmatriculation: "444 TU 4444",
+  vehiculeVIN: "GANTTVIN000000004",
   statut: DossierStatus.TRAVAUX_PLANIFIES,
   technicienId: techA.id,
   ordresReparation: [
@@ -157,6 +161,7 @@ const dossierInProgress = createMockDossier({
   vehiculeMarque: "Forthing",
   vehiculeModele: "Friday",
   vehiculeImmatriculation: "555 TU 5555",
+  vehiculeVIN: "GANTTVIN000000005",
   statut: DossierStatus.EN_TRAVAUX,
   technicienId: techA.id,
   ordresReparation: [
@@ -173,6 +178,7 @@ const dossierQcReturn = createMockDossier({
   vehiculeMarque: "DFSK",
   vehiculeModele: "Seres",
   vehiculeImmatriculation: "666 TU 6666",
+  vehiculeVIN: "GANTTVIN000000006",
   statut: DossierStatus.EN_TRAVAUX,
   technicienId: techB.id,
   retourQualite: true,
@@ -187,6 +193,7 @@ const dossierQcReturn = createMockDossier({
 const dossierDoneHidden = createMockDossier({
   id: "NIMR-GANTT-DONE-HIDDEN",
   clientNom: "Client Démo Gantt Terminé",
+  vehiculeVIN: "GANTTVIN000000007",
   statut: DossierStatus.TRAVAUX_PLANIFIES,
   technicienId: techC.id,
   ordresReparation: [
@@ -200,6 +207,7 @@ const dossierDoneHidden = createMockDossier({
 const dossierCancelledHidden = createMockDossier({
   id: "NIMR-GANTT-CANCELLED-HIDDEN",
   clientNom: "Client Démo Gantt Annulé",
+  vehiculeVIN: "GANTTVIN000000008",
   statut: DossierStatus.ANNULE,
   technicienId: techC.id,
   ordresReparation: [
@@ -210,6 +218,7 @@ const dossierCancelledHidden = createMockDossier({
 const dossierUnplanned = createMockDossier({
   id: "NIMR-GANTT-MANUAL",
   clientNom: "Client Démo Gantt Manuel",
+  vehiculeVIN: "GANTTVIN000000009",
   statut: DossierStatus.VEHICULE_RECU,
   ordresReparation: [
     line({ id: "ro_manual", designation: "Tâche manuelle 1h", tempsEstime: 1 }),
@@ -219,6 +228,7 @@ const dossierUnplanned = createMockDossier({
 const dossierLongSaturday = createMockDossier({
   id: "NIMR-GANTT-SAT-LONG",
   clientNom: "Client Démo Gantt Long",
+  vehiculeVIN: "GANTTVIN000000010",
   statut: DossierStatus.VEHICULE_RECU,
   ordresReparation: [
     line({ id: "ro_long_sat", designation: "Tâche longue samedi 5h", tempsEstime: 5 }),

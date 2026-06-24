@@ -147,6 +147,7 @@ export interface WorkshopSlotSuggestion {
 export type PlanningBlockingCode =
   | "planning-collision-tech"
   | "planning-collision-bay"
+  | "planning-collision-vehicle"
   | "planning-collision-overload"
   | "planning-collision-hours"
   | "planning-collision-saturday-afternoon"
@@ -188,6 +189,28 @@ export interface PlanningAssignmentValidation {
   reasons: string[];
   segments: Array<{ start: string; end: string }>;
 }
+
+export interface VehicleAutoReservationInput {
+  dossiers: DossierSAV[];
+  reservations: WorkshopReservation[];
+  targetDossierId: string;
+  selectedDate: Date;
+  technicians: TechnicienResource[];
+  workshopBays: WorkshopBay[];
+  availabilityConfig: WorkshopAvailabilityConfig;
+}
+
+export type VehicleAutoReservationResult =
+  | {
+      ok: true;
+      reservations: WorkshopReservation[];
+      createdReservations: WorkshopReservation[];
+      warning?: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 export interface DossierDeliveryGate {
   allowed: boolean;
@@ -740,7 +763,11 @@ function isSlotOverlappingActiveReservations(
   const requestedSegments = buildPlanningSegments(start, end);
   for (const res of reservations) {
     if (ignoreDossierId && res.dossierId === ignoreDossierId) continue;
-    if (res.status !== "CRENEAU_PROPOSE" && res.status !== "RESERVATION_CONFIRMEE") continue;
+    if (
+      res.status !== "CRENEAU_PROPOSE" &&
+      res.status !== "RESERVATION_CONFIRMEE" &&
+      res.status !== "AFFECTEE_ATELIER"
+    ) continue;
     if (!res.startTime || !res.endTime) continue;
 
     const matchTech = techId && res.technicianId === techId;
@@ -1176,6 +1203,12 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   }
   if (isSlotOverlappingActiveReservations(input.reservations, undefined, input.bayId, start, end, input.dossierId)) {
     pushIssue("planning-collision-bay");
+  }
+  if (detectVehicleCollision(input.dossiers, input.dossierId, start, end, input.lineId)) {
+    pushIssue("planning-collision-vehicle");
+  }
+  if (isVehicleOverlappingActiveReservations(input.reservations || [], input.dossiers, input.dossierId, start, end, input.lineId)) {
+    pushIssue("planning-collision-vehicle");
   }
 
   const planningDate = getLocalDateKey(start);
@@ -2004,6 +2037,7 @@ function buildPlanningValidationResult(
   const labels: Record<PlanningBlockingCode, string> = {
     "planning-collision-tech": "Le technicien est déjà affecté sur un autre dossier durant cette période.",
     "planning-collision-bay": "Le pont d'atelier sélectionné est déjà occupé durant cette période.",
+    "planning-collision-vehicle": "Le véhicule a déjà une autre tâche planifiée sur cette période.",
     "planning-collision-overload": "La tâche dépasse la capacité journalière restante du technicien.",
     "planning-collision-hours": "Créneau en dehors des horaires d'ouverture de l'atelier.",
     "planning-collision-saturday-afternoon": "Samedi après-midi fermé.",
@@ -2407,4 +2441,544 @@ function isNumber(value: unknown): value is number {
 
 function isEnumValue<T extends Record<string, string>>(enumValue: T, value: unknown): value is T[keyof T] {
   return typeof value === "string" && Object.values(enumValue).includes(value);
+}
+
+export function normalizeVehicleIdentity(value: string | undefined | null): string {
+  if (!value) return "";
+  return value.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+export function isSameVehicle(dA: DossierSAV, dB: DossierSAV): boolean {
+  const vinA = normalizeVehicleIdentity(dA.vehiculeVIN);
+  const vinB = normalizeVehicleIdentity(dB.vehiculeVIN);
+  const immA = normalizeVehicleIdentity(dA.vehiculeImmatriculation);
+  const immB = normalizeVehicleIdentity(dB.vehiculeImmatriculation);
+
+  return Boolean(
+    (vinA && vinB && vinA === vinB) ||
+    (immA && immB && immA === immB)
+  );
+}
+
+export function isDossierActive(dossier: DossierSAV): boolean {
+  return (
+    dossier.statut !== DossierStatus.LIVRE &&
+    dossier.statut !== DossierStatus.CLOTURE &&
+    dossier.statut !== DossierStatus.PRET_FACTURATION &&
+    dossier.statut !== DossierStatus.ANNULE &&
+    !dossier.archiveOperationnelle
+  );
+}
+
+export function getActiveVehicleDossiers(
+  dossiers: DossierSAV[],
+  targetDossierId: string
+): DossierSAV[] {
+  const target = dossiers.find(d => d.id === targetDossierId);
+  if (!target) return [];
+  return dossiers.filter(d =>
+    isDossierActive(d) &&
+    (d.id === targetDossierId || isSameVehicle(target, d))
+  );
+}
+
+export function detectVehicleCollision(
+  dossiers: DossierSAV[],
+  targetDossierId: string,
+  start: Date,
+  end: Date,
+  ignoreTaskId?: string
+): boolean {
+  const activeVehicleDossiers = getActiveVehicleDossiers(dossiers, targetDossierId);
+  if (activeVehicleDossiers.length === 0) return false;
+
+  const requestedSegments = buildPlanningSegments(start, end);
+
+  for (const dossier of activeVehicleDossiers) {
+    for (const line of dossier.ordresReparation) {
+      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (normalizeRepairOrderStatus(line.status) === "done") continue;
+      if (line.planningStart && line.planningEnd) {
+        if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+export function isVehicleOverlappingActiveReservations(
+  reservations: WorkshopReservation[],
+  dossiers: DossierSAV[],
+  targetDossierId: string,
+  start: Date,
+  end: Date,
+  ignoreTaskId?: string
+): boolean {
+  const activeVehicleDossiers = getActiveVehicleDossiers(dossiers, targetDossierId);
+  if (activeVehicleDossiers.length === 0) return false;
+
+  const vehicleDossierIds = new Set(activeVehicleDossiers.map(d => d.id));
+  const requestedSegments = buildPlanningSegments(start, end);
+
+  for (const res of reservations) {
+    if (!vehicleDossierIds.has(res.dossierId)) continue;
+    if (
+      res.status !== "CRENEAU_PROPOSE" &&
+      res.status !== "RESERVATION_CONFIRMEE" &&
+      res.status !== "AFFECTEE_ATELIER"
+    ) continue;
+    if (!res.startTime || !res.endTime) continue;
+
+    if (ignoreTaskId && res.taskIds && res.taskIds.includes(ignoreTaskId)) continue;
+
+    const resSegments = res.segments || buildPlanningSegments(new Date(res.startTime), new Date(res.endTime));
+    if (segmentsOverlap(requestedSegments, resSegments)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const ACTIVE_VEHICLE_RESERVATION_STATUSES = new Set<WorkshopReservation["status"]>([
+  "CRENEAU_PROPOSE",
+  "RESERVATION_CONFIRMEE",
+  "AFFECTEE_ATELIER",
+]);
+
+function getActiveVehicleReservations(
+  reservations: WorkshopReservation[],
+  vehicleDossierIds: Set<string>
+): WorkshopReservation[] {
+  return reservations.filter(reservation =>
+    vehicleDossierIds.has(reservation.dossierId) &&
+    ACTIVE_VEHICLE_RESERVATION_STATUSES.has(reservation.status) &&
+    Boolean(reservation.startTime && reservation.endTime)
+  );
+}
+
+function getVehicleTaskCategoryRank(designation: string): number {
+  const normalized = designation.toLocaleLowerCase("fr-FR");
+  if (normalized.includes("diag") || normalized.includes("recherche") || normalized.includes("panne")) return 1;
+  if (normalized.includes("livrais") || normalized.includes("livrer")) return 6;
+  if (normalized.includes("lavage") || normalized.includes("nettoy") || normalized.includes("finition")) return 5;
+  if (normalized.includes("qc") || normalized.includes("qualit") || normalized.includes("essai") || normalized.includes("contrôle")) return 4;
+  if (normalized.includes("prep") || normalized.includes("prép") || normalized.includes("valida")) return 2;
+  return 3;
+}
+
+function hasVehiclePlanningCollision(
+  tasks: RepairOrderLine[],
+  reservations: WorkshopReservation[]
+): boolean {
+  const intervals: Array<{
+    taskIds: Set<string>;
+    segments: Array<{ start: string; end: string }>;
+  }> = [];
+
+  for (const task of tasks) {
+    const segments = getLinePlanningSegments(task);
+    if (segments.length > 0) {
+      intervals.push({ taskIds: new Set([task.id]), segments });
+    }
+  }
+
+  for (const reservation of reservations) {
+    if (!reservation.startTime || !reservation.endTime) continue;
+    intervals.push({
+      taskIds: new Set(reservation.taskIds),
+      segments: reservation.segments || buildPlanningSegments(new Date(reservation.startTime), new Date(reservation.endTime)),
+    });
+  }
+
+  for (let leftIndex = 0; leftIndex < intervals.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < intervals.length; rightIndex += 1) {
+      const left = intervals[leftIndex];
+      const right = intervals[rightIndex];
+      const sameTask = [...left.taskIds].some(taskId => right.taskIds.has(taskId));
+      if (!sameTask && segmentsOverlap(left.segments, right.segments)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function getVehicleETAInfo(
+  dossiers: DossierSAV[],
+  targetDossierId: string,
+  reservations: WorkshopReservation[] = []
+): {
+  etaDateTime?: string;
+  technicalEndDateTime?: string;
+  reliability: "Élevée" | "Moyenne" | "Faible";
+  message: string;
+  receptionMessage: string;
+  blockingReasons: string[];
+  vehicleDossierIds: string[];
+  plannedTaskCount: number;
+  unplannedTaskCount: number;
+  unvalidatedDurationCount: number;
+} {
+  const activeVehicleDossiers = getActiveVehicleDossiers(dossiers, targetDossierId);
+  const vehicleDossierIds = activeVehicleDossiers.map(d => d.id);
+  const vehicleDossierIdSet = new Set(vehicleDossierIds);
+
+  if (activeVehicleDossiers.length === 0) {
+    return {
+      reliability: "Faible",
+      message: "Dossier introuvable.",
+      receptionMessage: "Livraison estimée sous réserve de validation atelier.",
+      blockingReasons: ["Dossier introuvable."],
+      vehicleDossierIds: [],
+      plannedTaskCount: 0,
+      unplannedTaskCount: 0,
+      unvalidatedDurationCount: 0
+    };
+  }
+
+  const allActiveTasks = activeVehicleDossiers
+    .flatMap(dossier => dossier.ordresReparation)
+    .filter(task => normalizeRepairOrderStatus(task.status) !== "done");
+  const activeReservations = getActiveVehicleReservations(reservations, vehicleDossierIdSet);
+  const reservedTaskIds = new Set(activeReservations.flatMap(reservation => reservation.taskIds));
+  const plannedTasks = allActiveTasks.filter(task =>
+    Boolean(task.planningStart && task.planningEnd) || reservedTaskIds.has(task.id)
+  );
+  const unplannedTasks = allActiveTasks.filter(task =>
+    (!task.planningStart || !task.planningEnd) && !reservedTaskIds.has(task.id)
+  );
+  const unvalidatedDurationTasks = allActiveTasks.filter(task =>
+    !task.tempsEstime || task.tempsEstime <= 0 || !task.isEstimatedDurationValidated
+  );
+  const hasUnreservedBlockedTask = unplannedTasks.some(task => normalizeRepairOrderStatus(task.status) === "blocked");
+  const isVehicleBlocked = activeVehicleDossiers.some(dossier => dossier.statut === DossierStatus.BLOQUE);
+  const hasCollision = hasVehiclePlanningCollision(allActiveTasks, activeReservations);
+
+  let reliability: "Élevée" | "Moyenne" | "Faible";
+  const blockingReasons: string[] = [];
+
+  if (unvalidatedDurationTasks.length > 0) {
+    blockingReasons.push("Certaines tâches ont une durée non validée ou manquante.");
+  }
+  if (isVehicleBlocked || hasUnreservedBlockedTask) {
+    blockingReasons.push("Le véhicule est marqué comme Bloqué.");
+  }
+  if (hasCollision) {
+    blockingReasons.push("Une collision de planning existe pour ce véhicule.");
+  }
+  if (unplannedTasks.length > 0) {
+    blockingReasons.push("Certaines tâches du véhicule ne sont pas réservées.");
+  }
+
+  if (
+    unvalidatedDurationTasks.length > 0 ||
+    isVehicleBlocked ||
+    hasUnreservedBlockedTask ||
+    hasCollision
+  ) {
+    reliability = "Faible";
+  } else if (unplannedTasks.length > 0) {
+    reliability = "Moyenne";
+  } else {
+    reliability = "Élevée";
+  }
+
+  let maxTechnicalEnd: Date | null = null;
+  for (const task of allActiveTasks) {
+    if (task.planningEnd) {
+      const end = new Date(task.planningEnd);
+      if (Number.isFinite(end.getTime()) && (!maxTechnicalEnd || end.getTime() > maxTechnicalEnd.getTime())) {
+        maxTechnicalEnd = end;
+      }
+    }
+  }
+
+  for (const reservation of activeReservations) {
+    if (reservation.endTime) {
+      const end = new Date(reservation.endTime);
+      if (Number.isFinite(end.getTime()) && (!maxTechnicalEnd || end.getTime() > maxTechnicalEnd.getTime())) {
+        maxTechnicalEnd = end;
+      }
+    }
+  }
+
+  let etaDateTime: string | undefined;
+  let technicalEndDateTime: string | undefined;
+
+  if (maxTechnicalEnd) {
+    technicalEndDateTime = maxTechnicalEnd.toISOString();
+
+    const hasQcOrDeliveryTask = allActiveTasks.some(t => {
+      const name = t.designation.toLocaleLowerCase("fr-FR");
+      return name.includes("qc") || name.includes("qualit") || name.includes("livrais") || name.includes("livrer");
+    });
+
+    const marginMinutes = hasQcOrDeliveryTask ? 0 : 15;
+    const etaDate = new Date(maxTechnicalEnd.getTime() + marginMinutes * 60 * 1000);
+    etaDateTime = etaDate.toISOString();
+  }
+
+  let message = "";
+  if (unvalidatedDurationTasks.length > 0) {
+    message = "Livraison non confirmée : durée à valider par Chef Atelier.";
+  } else if (isVehicleBlocked || hasUnreservedBlockedTask) {
+    message = "Livraison non confirmée : véhicule bloqué.";
+  } else if (hasCollision) {
+    message = "Livraison non confirmée : collision de planning véhicule.";
+  } else if (unplannedTasks.length > 0) {
+    message = "Livraison non confirmée : tâches véhicule non réservées.";
+  } else if (etaDateTime) {
+    const d = new Date(etaDateTime);
+    const dateStr = d.toLocaleDateString("fr-FR");
+    const timeStr = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    message = `Véhicule prêt estimé le ${dateStr} vers ${timeStr}.`;
+  } else {
+    message = "Livraison non confirmée : tâches véhicule non réservées.";
+  }
+
+  return {
+    etaDateTime,
+    technicalEndDateTime,
+    reliability,
+    message,
+    receptionMessage: "Livraison estimée sous réserve de validation atelier.",
+    blockingReasons,
+    vehicleDossierIds,
+    plannedTaskCount: plannedTasks.length,
+    unplannedTaskCount: unplannedTasks.length,
+    unvalidatedDurationCount: unvalidatedDurationTasks.length
+  };
+}
+
+export function buildVehicleAutoReservationPlan(
+  input: VehicleAutoReservationInput,
+  now: Date = new Date()
+): VehicleAutoReservationResult {
+  const activeVehicleDossiers = getActiveVehicleDossiers(input.dossiers, input.targetDossierId);
+  if (activeVehicleDossiers.length === 0) {
+    return { ok: false, error: "Aucun dossier actif trouvé pour ce véhicule." };
+  }
+
+  const taskEntries = activeVehicleDossiers.flatMap(dossier =>
+    dossier.ordresReparation
+      .map((task, orderIndex) => ({ dossier, task, orderIndex }))
+      .filter(entry => normalizeRepairOrderStatus(entry.task.status) !== "done")
+  );
+  if (taskEntries.some(({ task }) =>
+    !task.tempsEstime || task.tempsEstime <= 0 || !task.isEstimatedDurationValidated
+  )) {
+    return { ok: false, error: "Durée à valider avant réservation automatique." };
+  }
+
+  const vehicleDossierIds = new Set(activeVehicleDossiers.map(dossier => dossier.id));
+  const activeReservations = getActiveVehicleReservations(input.reservations, vehicleDossierIds);
+  const reservedTaskIds = new Set(activeReservations.flatMap(reservation => reservation.taskIds));
+  const tasksToReserve = taskEntries
+    .filter(({ task }) =>
+      (!task.planningStart || !task.planningEnd) &&
+      !reservedTaskIds.has(task.id)
+    )
+    .sort((left, right) => {
+      const rankDifference =
+        getVehicleTaskCategoryRank(left.task.designation) -
+        getVehicleTaskCategoryRank(right.task.designation);
+      if (rankDifference !== 0) return rankDifference;
+      const dossierDateDifference =
+        new Date(left.dossier.dateReception).getTime() -
+        new Date(right.dossier.dateReception).getTime();
+      if (Number.isFinite(dossierDateDifference) && dossierDateDifference !== 0) {
+        return dossierDateDifference;
+      }
+      return left.orderIndex - right.orderIndex;
+    });
+
+  if (tasksToReserve.length === 0) {
+    return {
+      ok: true,
+      reservations: input.reservations,
+      createdReservations: [],
+    };
+  }
+
+  const usableTechnicians = input.technicians.filter(technician =>
+    technician.disponibilite !== "absent" && technician.disponibilite !== "formation"
+  );
+  if (usableTechnicians.length === 0 || input.workshopBays.length === 0) {
+    return { ok: false, error: "Aucun créneau disponible dans la période sélectionnée." };
+  }
+
+  const selectedDateKey = getLocalDateKey(input.selectedDate);
+  const nowDateKey = getLocalDateKey(now);
+  const initialCursor = selectedDateKey === nowDateKey && now.getTime() > input.selectedDate.getTime()
+    ? roundToNextSlot(now)
+    : new Date(input.selectedDate);
+  if (selectedDateKey !== nowDateKey) {
+    initialCursor.setHours(0, 0, 0, 0);
+  }
+
+  let vehicleCursor = initialCursor;
+  let temporaryReservations = [...input.reservations];
+  const createdReservations: WorkshopReservation[] = [];
+  const scheduledEndByTaskId = new Map<string, Date>();
+  for (const { task } of taskEntries) {
+    if (task.planningEnd) {
+      scheduledEndByTaskId.set(task.id, new Date(task.planningEnd));
+    }
+  }
+  for (const reservation of activeReservations) {
+    if (!reservation.endTime) continue;
+    for (const taskId of reservation.taskIds) {
+      if (taskEntries.some(entry => entry.task.id === taskId)) {
+        scheduledEndByTaskId.set(taskId, new Date(reservation.endTime));
+      }
+    }
+  }
+
+  for (const { dossier, task } of tasksToReserve) {
+    const taskRank = getVehicleTaskCategoryRank(task.designation);
+    const predecessorEnds = taskEntries
+      .filter(entry => getVehicleTaskCategoryRank(entry.task.designation) < taskRank)
+      .map(entry => scheduledEndByTaskId.get(entry.task.id))
+      .filter((end): end is Date => Boolean(end && Number.isFinite(end.getTime())));
+    const predecessorEnd = predecessorEnds.length > 0
+      ? new Date(Math.max(...predecessorEnds.map(end => end.getTime())))
+      : null;
+    const taskCursor = predecessorEnd && predecessorEnd.getTime() > vehicleCursor.getTime()
+      ? predecessorEnd
+      : vehicleCursor;
+    const sortedTechnicians = [...usableTechnicians].sort((left, right) => {
+      const leftCompatible = isTechnicianCompatible(left, dossier.typeDossier);
+      const rightCompatible = isTechnicianCompatible(right, dossier.typeDossier);
+      if (leftCompatible !== rightCompatible) return leftCompatible ? -1 : 1;
+      return left.chargeActuelle - right.chargeActuelle;
+    });
+    let bestSlot: {
+      startTime: Date;
+      endTime: Date;
+      segments: Array<{ start: string; end: string }>;
+      technicianId: string;
+      bayId: string;
+    } | null = null;
+
+    for (const technician of sortedTechnicians) {
+      const compatibleBays = input.workshopBays.filter(bay =>
+        !bay.zone || bay.zone === technician.zoneAffectee
+      );
+      const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays;
+
+      for (const bay of baysToTry) {
+        let searchStart = new Date(taskCursor);
+
+        for (let attempt = 0; attempt < 90; attempt += 1) {
+          const slot = findNextAvailableWorkingSlot({
+            durationMinutes: Math.ceil(task.tempsEstime * 60),
+            startDate: searchStart,
+            technicianId: technician.id,
+            bayId: bay.id,
+            dossiers: input.dossiers,
+            reservations: temporaryReservations,
+            config: input.availabilityConfig,
+            vehicleDossierId: dossier.id,
+            ignoreTaskId: task.id,
+          });
+          if (!slot) break;
+
+          const hoursByDate = new Map<string, number>();
+          for (const segment of slot.segments) {
+            const segmentStart = new Date(segment.start);
+            const segmentEnd = new Date(segment.end);
+            const dateKey = getLocalDateKey(segmentStart);
+            const hours = Math.max(0, (segmentEnd.getTime() - segmentStart.getTime()) / 3600000);
+            hoursByDate.set(dateKey, (hoursByDate.get(dateKey) || 0) + hours);
+          }
+          const fitsCapacity = [...hoursByDate].every(([dateKey, addedHours]) =>
+            calculateTechnicianDailyLoad(
+              technician.id,
+              dateKey,
+              input.dossiers,
+              temporaryReservations,
+              task.id
+            ) + addedHours <= technician.capaciteJournaliere
+          );
+
+          if (fitsCapacity) {
+            if (!bestSlot || slot.startTime.getTime() < bestSlot.startTime.getTime()) {
+              bestSlot = {
+                ...slot,
+                technicianId: technician.id,
+                bayId: bay.id,
+              };
+            }
+            break;
+          }
+
+          searchStart = new Date(slot.startTime);
+          searchStart.setDate(searchStart.getDate() + 1);
+          searchStart.setHours(0, 0, 0, 0);
+        }
+      }
+    }
+
+    if (!bestSlot) {
+      return { ok: false, error: "Aucun créneau disponible dans la période sélectionnée." };
+    }
+
+    const reservation: WorkshopReservation = {
+      reservationId: createRuntimeId("res_vehicle"),
+      dossierId: dossier.id,
+      taskIds: [task.id],
+      totalHours: task.tempsEstime,
+      desiredDate: input.selectedDate.toISOString(),
+      startTime: bestSlot.startTime.toISOString(),
+      endTime: bestSlot.endTime.toISOString(),
+      segments: bestSlot.segments,
+      technicianId: bestSlot.technicianId,
+      bayId: bestSlot.bayId,
+      status: "RESERVATION_CONFIRMEE",
+      source: "vehicle-auto-reservation",
+      history: [
+        `${now.toISOString()} - Tâche réservée automatiquement au niveau véhicule.`,
+      ],
+    };
+    createdReservations.push(reservation);
+    temporaryReservations = [...temporaryReservations, reservation];
+    vehicleCursor = new Date(bestSlot.endTime);
+    scheduledEndByTaskId.set(task.id, new Date(bestSlot.endTime));
+  }
+
+  const taskById = new Map(taskEntries.map(({ task }) => [task.id, task]));
+  const scheduledTaskStarts = new Map<string, Date>();
+  for (const { task } of taskEntries) {
+    if (task.planningStart) scheduledTaskStarts.set(task.id, new Date(task.planningStart));
+  }
+  for (const reservation of temporaryReservations) {
+    if (!ACTIVE_VEHICLE_RESERVATION_STATUSES.has(reservation.status) || !reservation.startTime) continue;
+    for (const taskId of reservation.taskIds) {
+      if (taskById.has(taskId) && !scheduledTaskStarts.has(taskId)) {
+        scheduledTaskStarts.set(taskId, new Date(reservation.startTime));
+      }
+    }
+  }
+  const chronologicalTasks = [...scheduledTaskStarts]
+    .map(([taskId, start]) => ({ task: taskById.get(taskId), start }))
+    .filter((entry): entry is { task: RepairOrderLine; start: Date } => Boolean(entry.task))
+    .sort((left, right) => left.start.getTime() - right.start.getTime());
+  const hasLogicalOrderWarning = chronologicalTasks.some((entry, index) =>
+    chronologicalTasks.slice(index + 1).some(next =>
+      getVehicleTaskCategoryRank(entry.task.designation) >
+      getVehicleTaskCategoryRank(next.task.designation)
+    )
+  );
+
+  return {
+    ok: true,
+    reservations: temporaryReservations,
+    createdReservations,
+    warning: hasLogicalOrderWarning
+      ? "Attention : certaines tâches déjà planifiées ou réservées violent l'ordre logique conseillé."
+      : undefined,
+  };
 }

@@ -57,6 +57,12 @@ import {
   detectBayCollision,
   calculateTechnicianDailyLoad,
   validatePlanningAssignment,
+  isSameVehicle,
+  detectVehicleCollision,
+  getVehicleETAInfo,
+  isDossierActive,
+  getActiveVehicleDossiers,
+  buildVehicleAutoReservationPlan,
 } from "../src/sav-core";
 import { APP_BASE_URL, APP_CACHE_NAME, APP_NAME, APP_VERSION } from "../src/app-identity";
 import { buildDirectorDashboardKpis } from "../src/dashboard-kpis";
@@ -64,7 +70,8 @@ import { INITIAL_ACTIVITE_LOGS, INITIAL_DOSSIERS, INITIAL_RECLAMATIONS, MOCK_TEC
 import { canAccessTab, canChangeRole, getDefaultTabForRole, normalizeTabForRole, ROLE_TABS } from "../src/roles";
 import * as perm from "../src/permissions";
 import { LOCAL_STORAGE_PREFIX, STORAGE_KEYS } from "../src/storage-keys";
-import { AtelierZone, DossierPriority, DossierSAV, DossierStatus, InterventionType, RepairOrderLine, TechnicienResource, UserRole, WorkshopBay } from "../src/types";
+import { getDefaultWorkshopSchedule, getDefaultWorkshopShiftProfiles } from "../src/workshop-availability";
+import { AtelierZone, DossierPriority, DossierSAV, DossierStatus, InterventionType, RepairOrderLine, TechnicienResource, UserRole, WorkshopAvailabilityConfig, WorkshopBay, WorkshopReservation } from "../src/types";
 
 const fixedNow = new Date("2026-06-09T10:00:00.000Z");
 
@@ -1464,6 +1471,253 @@ testDirectorDashboardKpis();
 await testLocalUsersAndSessions();
 testCentralizedPermissions();
 testLot5DNewPlanningRules();
+
+function createVehiclePlanningDossier(
+  id: string,
+  plate: string,
+  vin: string,
+  lines: RepairOrderLine[],
+  status: DossierStatus = DossierStatus.EN_TRAVAUX
+): DossierSAV {
+  return {
+    ...createReceptionFixture([]),
+    id,
+    vehiculeImmatriculation: plate,
+    vehiculeVIN: vin,
+    statut: status,
+    ordresReparation: lines,
+    dateReception: "2026-06-12T08:00:00.000Z",
+    dateDernierStatut: "2026-06-12T08:00:00.000Z",
+  };
+}
+
+const vehiclePlanningConfig: WorkshopAvailabilityConfig = {
+  schedule: getDefaultWorkshopSchedule(),
+  exceptions: [],
+  absences: [],
+  bayUnavailabilities: [],
+  holidays: [],
+  shiftProfiles: getDefaultWorkshopShiftProfiles(),
+};
+
+function testVehicleETAAndAutoReserve() {
+  console.log("Running testVehicleETAAndAutoReserve...");
+
+  const plannedA: RepairOrderLine = {
+    id: "task-a1",
+    designation: "Diagnostic moteur",
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "in_progress",
+    isEstimatedDurationValidated: true,
+    planningStart: "2026-06-12T09:00:00.000Z",
+    planningEnd: "2026-06-12T10:00:00.000Z",
+    plannedTechnicianId: "tech_01",
+    plannedBayId: "bay_diag_01",
+  };
+  const pendingB: RepairOrderLine = {
+    id: "task-b1",
+    designation: "Réparation freinage",
+    tempsEstime: 1.5,
+    tempsPasse: 0,
+    status: "pending",
+    isEstimatedDurationValidated: true,
+  };
+  const dossierA = createVehiclePlanningDossier("DOSSIER-A", "123 TU 456", "VIN123456789", [plannedA]);
+  const dossierB = createVehiclePlanningDossier("DOSSIER-B", "123tu456", "  vin123456789  ", [pendingB]);
+  const dossierSameVin = createVehiclePlanningDossier("DOSSIER-VIN", "999 TU 999", " vin123456789 ", [pendingB]);
+  const dossierSamePlate = createVehiclePlanningDossier("DOSSIER-PLATE", " 123 tu 456 ", "OTHER-VIN", [pendingB]);
+  const dossierDifferent = createVehiclePlanningDossier("DOSSIER-C", "987 TU 654", "VIN987654321", [pendingB]);
+
+  assert.equal(isSameVehicle(dossierA, dossierSameVin), true);
+  assert.equal(isSameVehicle(dossierA, dossierSamePlate), true);
+  assert.equal(isSameVehicle(dossierA, dossierDifferent), false);
+  assert.equal(
+    isSameVehicle(
+      { ...dossierA, vehiculeVIN: "", vehiculeImmatriculation: "" },
+      { ...dossierB, vehiculeVIN: "", vehiculeImmatriculation: "" }
+    ),
+    false
+  );
+
+  const overlapStart = new Date("2026-06-12T09:30:00.000Z");
+  const overlapEnd = new Date("2026-06-12T10:30:00.000Z");
+  assert.equal(detectVehicleCollision([dossierA], "DOSSIER-A", overlapStart, overlapEnd), true);
+  assert.equal(detectVehicleCollision([dossierA], "DOSSIER-A", overlapStart, overlapEnd, "task-a1"), false);
+  assert.equal(detectVehicleCollision([dossierA, dossierB], "DOSSIER-B", overlapStart, overlapEnd), true);
+  assert.equal(detectVehicleCollision([dossierA, dossierDifferent], "DOSSIER-C", overlapStart, overlapEnd), false);
+
+  for (const terminal of [DossierStatus.LIVRE, DossierStatus.CLOTURE, DossierStatus.ANNULE]) {
+    const terminalDossier = { ...dossierA, id: `TERMINAL-${terminal}`, statut: terminal };
+    assert.equal(
+      detectVehicleCollision([dossierB, terminalDossier], "DOSSIER-B", overlapStart, overlapEnd),
+      false
+    );
+  }
+  assert.equal(
+    detectVehicleCollision(
+      [dossierB, { ...dossierA, id: "ARCHIVE", archiveOperationnelle: true }],
+      "DOSSIER-B",
+      overlapStart,
+      overlapEnd
+    ),
+    false
+  );
+
+  const reservationB: WorkshopReservation = {
+    reservationId: "res-b",
+    dossierId: dossierB.id,
+    taskIds: [pendingB.id],
+    totalHours: 1.5,
+    desiredDate: "2026-06-12T00:00:00.000Z",
+    startTime: "2026-06-12T10:00:00.000Z",
+    endTime: "2026-06-12T11:30:00.000Z",
+    technicianId: "tech_02",
+    bayId: "bay_mech_01",
+    status: "RESERVATION_CONFIRMEE",
+    source: "test",
+    history: [],
+  };
+  const ignoredDelivered = createVehiclePlanningDossier(
+    "DOSSIER-DELIVERED",
+    "123 TU 456",
+    "VIN123456789",
+    [{
+      ...pendingB,
+      id: "task-delivered",
+      planningStart: "2026-06-15T09:00:00.000Z",
+      planningEnd: "2026-06-15T10:00:00.000Z",
+    }],
+    DossierStatus.LIVRE
+  );
+  const etaInfo = getVehicleETAInfo([dossierA, dossierB, ignoredDelivered], "DOSSIER-A", [reservationB]);
+  assert.equal(etaInfo.reliability, "Élevée");
+  assert.equal(etaInfo.plannedTaskCount, 2);
+  assert.equal(etaInfo.unplannedTaskCount, 0);
+  assert.equal(etaInfo.receptionMessage, "Livraison estimée sous réserve de validation atelier.");
+  assert.equal(etaInfo.technicalEndDateTime, "2026-06-12T11:30:00.000Z");
+  assert.equal(etaInfo.etaDateTime, "2026-06-12T11:45:00.000Z");
+
+  const etaInfoAverage = getVehicleETAInfo([dossierA, dossierB], "DOSSIER-A");
+  assert.equal(etaInfoAverage.reliability, "Moyenne");
+  assert.equal(etaInfoAverage.unplannedTaskCount, 1);
+
+  const unvalidatedB = {
+    ...dossierB,
+    ordresReparation: [{ ...pendingB, tempsEstime: 0, isEstimatedDurationValidated: false }],
+  };
+  const etaInfoLow = getVehicleETAInfo([dossierA, unvalidatedB], "DOSSIER-A");
+  assert.equal(etaInfoLow.reliability, "Faible");
+  assert.equal(etaInfoLow.unvalidatedDurationCount, 1);
+
+  const autoDate = new Date(2026, 5, 25, 0, 0, 0, 0);
+  const fixedRepair: RepairOrderLine = {
+    id: "task-repair-fixed",
+    designation: "Réparation mécanique",
+    tempsEstime: 1,
+    tempsPasse: 0,
+    status: "pending",
+    isEstimatedDurationValidated: true,
+    planningStart: new Date(2026, 5, 25, 13, 0, 0, 0).toISOString(),
+    planningEnd: new Date(2026, 5, 25, 14, 0, 0, 0).toISOString(),
+    plannedTechnicianId: "tech_02",
+    plannedBayId: "bay_mech_01",
+  };
+  const autoDossierA = createVehiclePlanningDossier("AUTO-A", "555 TU 555", "AUTO-VIN", [
+    {
+      id: "task-diagnostic",
+      designation: "Diagnostic initial",
+      tempsEstime: 1,
+      tempsPasse: 0,
+      status: "pending",
+      isEstimatedDurationValidated: true,
+    },
+    fixedRepair,
+  ]);
+  const autoDossierB = createVehiclePlanningDossier("AUTO-B", "555tu555", " auto-vin ", [
+    {
+      id: "task-qc",
+      designation: "Contrôle qualité",
+      tempsEstime: 0.5,
+      tempsPasse: 0,
+      status: "pending",
+      isEstimatedDurationValidated: true,
+    },
+    {
+      id: "task-delivery",
+      designation: "Préparation livraison",
+      tempsEstime: 0.5,
+      tempsPasse: 0,
+      status: "pending",
+      isEstimatedDurationValidated: true,
+    },
+  ]);
+  const existingReservation: WorkshopReservation = {
+    ...reservationB,
+    reservationId: "existing-unrelated",
+    dossierId: dossierDifferent.id,
+    taskIds: ["unrelated-task"],
+  };
+  const autoResult = buildVehicleAutoReservationPlan({
+    dossiers: [autoDossierA, autoDossierB, dossierDifferent],
+    reservations: [existingReservation],
+    targetDossierId: autoDossierA.id,
+    selectedDate: autoDate,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [
+      { id: "bay_diag_01", name: "Diagnostic", zone: AtelierZone.ELECTRICITE_DIAG },
+      { id: "bay_mech_01", name: "Mécanique", zone: AtelierZone.GRANDS_TRAVAUX },
+      { id: "bay_fast_01", name: "Rapide", zone: AtelierZone.MECANIQUE_RAPIDE },
+      { id: "bay_general_01", name: "Polyvalent" },
+    ],
+    availabilityConfig: vehiclePlanningConfig,
+  }, new Date(2026, 5, 24, 7, 0, 0, 0));
+  assert.equal(autoResult.ok, true);
+  if (autoResult.ok) {
+    assert.equal(autoResult.createdReservations.length, 3);
+    assert.equal(autoResult.reservations[0], existingReservation);
+    const byTask = new Map(autoResult.createdReservations.map(reservation => [reservation.taskIds[0], reservation]));
+    const diagnostic = byTask.get("task-diagnostic");
+    const qc = byTask.get("task-qc");
+    const delivery = byTask.get("task-delivery");
+    assert.ok(diagnostic?.endTime);
+    assert.ok(qc?.startTime && qc.endTime);
+    assert.ok(delivery?.startTime);
+    assert.ok(new Date(diagnostic.endTime).getTime() <= new Date(fixedRepair.planningStart!).getTime());
+    assert.ok(new Date(qc.startTime).getTime() >= new Date(fixedRepair.planningEnd!).getTime());
+    assert.ok(new Date(delivery.startTime).getTime() >= new Date(qc.endTime).getTime());
+  }
+
+  const refusedDuration = buildVehicleAutoReservationPlan({
+    dossiers: [unvalidatedB],
+    reservations: [],
+    targetDossierId: unvalidatedB.id,
+    selectedDate: autoDate,
+    technicians: MOCK_TECHNICIENS,
+    workshopBays: [{ id: "bay_general_01", name: "Polyvalent" }],
+    availabilityConfig: vehiclePlanningConfig,
+  });
+  assert.deepEqual(refusedDuration, {
+    ok: false,
+    error: "Durée à valider avant réservation automatique.",
+  });
+
+  const atomicFailure = buildVehicleAutoReservationPlan({
+    dossiers: [autoDossierA, autoDossierB],
+    reservations: [existingReservation],
+    targetDossierId: autoDossierA.id,
+    selectedDate: autoDate,
+    technicians: [],
+    workshopBays: [{ id: "bay_general_01", name: "Polyvalent" }],
+    availabilityConfig: vehiclePlanningConfig,
+  });
+  assert.deepEqual(atomicFailure, {
+    ok: false,
+    error: "Aucun créneau disponible dans la période sélectionnée.",
+  });
+}
+
+testVehicleETAAndAutoReserve();
 
 // Run vehicle status tests
 import "./vehicle-status.test.js";

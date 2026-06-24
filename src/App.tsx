@@ -1151,6 +1151,7 @@ export default function App() {
               onBack={() => setSelectedDossierId(null)}
               onUpdateDossier={handleUpdateDossier}
               techniciensList={techList.map(t => ({ id: t.id, nom: t.nom }))}
+              reservations={reservations}
             />
           ) : (
             /* Render active tabs */

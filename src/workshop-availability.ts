@@ -639,6 +639,37 @@ export function validateAvailabilityForSlot(input: {
   };
 }
 
+function normalizeVehicleIdentityLocal(value: string | undefined | null): string {
+  if (!value) return "";
+  return value.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function isSameVehicleLocal(dA: DossierSAV, dB: DossierSAV): boolean {
+  const vinA = normalizeVehicleIdentityLocal(dA.vehiculeVIN);
+  const vinB = normalizeVehicleIdentityLocal(dB.vehiculeVIN);
+  const immA = normalizeVehicleIdentityLocal(dA.vehiculeImmatriculation);
+  const immB = normalizeVehicleIdentityLocal(dB.vehiculeImmatriculation);
+
+  let matched = false;
+  if (vinA && vinB && vinA === vinB) {
+    matched = true;
+  }
+  if (immA && immB && immA === immB) {
+    matched = true;
+  }
+  return matched;
+}
+
+function isActiveVehicleDossierLocal(dossier: DossierSAV): boolean {
+  return (
+    dossier.statut !== DossierStatus.LIVRE &&
+    dossier.statut !== DossierStatus.CLOTURE &&
+    dossier.statut !== DossierStatus.PRET_FACTURATION &&
+    dossier.statut !== DossierStatus.ANNULE &&
+    !dossier.archiveOperationnelle
+  );
+}
+
 export function findNextAvailableWorkingSlot(input: {
   durationMinutes: number;
   startDate: Date;
@@ -648,6 +679,8 @@ export function findNextAvailableWorkingSlot(input: {
   reservations: WorkshopReservation[];
   excludeDossierId?: string;
   config: WorkshopAvailabilityConfig;
+  vehicleDossierId?: string;
+  ignoreTaskId?: string;
 }): { startTime: Date; endTime: Date; segments: Array<{ start: string; end: string }> } | null {
   let cursor = new Date(input.startDate);
   const mins = cursor.getMinutes();
@@ -661,11 +694,23 @@ export function findNextAvailableWorkingSlot(input: {
   let remainingMinutes = input.durationMinutes;
 
   const checkOverlapWithTasksAndReservations = (start: Date, end: Date): { start: Date; end: Date } | null => {
+    const targetDossier = input.vehicleDossierId ? input.dossiers.find(d => d.id === input.vehicleDossierId) : null;
+
     // 1. Check planning lines
     for (const dossier of input.dossiers) {
-      if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.CLOTURE || dossier.statut === DossierStatus.ANNULE) continue;
+      if (!isActiveVehicleDossierLocal(dossier)) continue;
+
+      const isVehicleMatch = input.vehicleDossierId && (dossier.id === input.vehicleDossierId || (targetDossier && isSameVehicleLocal(targetDossier, dossier)));
+
       for (const line of dossier.ordresReparation) {
-        if (line.planningStart && line.planningEnd && (line.plannedTechnicianId === input.technicianId || line.plannedBayId === input.bayId)) {
+        if (input.ignoreTaskId && line.id === input.ignoreTaskId) continue;
+        if (line.status === "done") continue;
+
+        const matchTech = line.plannedTechnicianId === input.technicianId;
+        const matchBay = line.plannedBayId === input.bayId;
+        const matchVehicle = isVehicleMatch;
+
+        if (line.planningStart && line.planningEnd && (matchTech || matchBay || matchVehicle)) {
           const lineSegs = line.planningSegments || [{ start: line.planningStart, end: line.planningEnd }];
           for (const seg of lineSegs) {
             const s = new Date(seg.start);
@@ -680,13 +725,25 @@ export function findNextAvailableWorkingSlot(input: {
 
     // 2. Check reservations
     for (const res of input.reservations) {
-      if (res.dossierId === input.excludeDossierId) continue;
+      if (input.ignoreTaskId && res.taskIds.includes(input.ignoreTaskId)) continue;
+      if (!input.vehicleDossierId && res.dossierId === input.excludeDossierId) continue;
       if (
-        (res.status === "CRENEAU_PROPOSE" || res.status === "RESERVATION_CONFIRMEE") &&
+        (
+          res.status === "CRENEAU_PROPOSE" ||
+          res.status === "RESERVATION_CONFIRMEE" ||
+          res.status === "AFFECTEE_ATELIER"
+        ) &&
         res.startTime &&
         res.endTime
       ) {
-        if (res.technicianId === input.technicianId || res.bayId === input.bayId) {
+        const resDossier = input.dossiers.find(d => d.id === res.dossierId);
+        if (resDossier && !isActiveVehicleDossierLocal(resDossier)) continue;
+        const isVehicleMatch = input.vehicleDossierId && resDossier && targetDossier && (
+          resDossier.id === input.vehicleDossierId ||
+          isSameVehicleLocal(targetDossier, resDossier)
+        );
+
+        if (res.technicianId === input.technicianId || res.bayId === input.bayId || isVehicleMatch) {
           const resSegs = res.segments || [{ start: res.startTime, end: res.endTime }];
           for (const seg of resSegs) {
             const s = new Date(seg.start);

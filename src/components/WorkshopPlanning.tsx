@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile } from "../types";
 import { 
@@ -15,7 +15,11 @@ import {
   buildPlanningSegments,
   calculateTechnicianDailyLoad,
   calculateBayDailyLoad,
-  validatePlanningAssignment
+  validatePlanningAssignment,
+  getVehicleETAInfo,
+  isSameVehicle,
+  isDossierActive,
+  buildVehicleAutoReservationPlan
 } from "../sav-core";
 import { 
   isWorkshopClosed,
@@ -252,6 +256,10 @@ export default function WorkshopPlanning({
   const [rescheduleError, setRescheduleError] = useState("");
   const [draggingTask, setDraggingTask] = useState<{ dossierId: string; lineId: string } | null>(null);
   const [taskSheetTarget, setTaskSheetTarget] = useState<{ dossier: DossierSAV; line: RepairOrderLine } | null>(null);
+  const [autoPlanningError, setAutoPlanningError] = useState("");
+  const [autoPlanningSuccess, setAutoPlanningSuccess] = useState("");
+  const [selectedVehicleDossierId, setSelectedVehicleDossierId] = useState("");
+  const [autoPlanningWarning, setAutoPlanningWarning] = useState("");
 
   // Shift profile editing (Part 3)
   const [editingProfile, setEditingProfile] = useState<WorkshopShiftProfile | null>(null);
@@ -358,9 +366,11 @@ export default function WorkshopPlanning({
 
   const activeManualDossier = dossiers.find(d => d.id === manualDossierId);
   const activeManualLine = activeManualDossier?.ordresReparation.find(l => l.id === manualTaskId);
-  const pendingManualTasks = activeManualDossier 
-    ? activeManualDossier.ordresReparation.filter(line => normalizeRepairOrderStatus(line.status) !== "done")
-    : [];
+  const pendingManualTasks = useMemo(() => {
+    return activeManualDossier
+      ? activeManualDossier.ordresReparation.filter(line => normalizeRepairOrderStatus(line.status) !== "done")
+      : [];
+  }, [activeManualDossier?.id, activeManualDossier ? activeManualDossier.ordresReparation.map(t => `${t.id}-${t.status}`).join(",") : ""]);
 
   useEffect(() => {
     if (targetDossiers.length > 0 && !manualDossierId) {
@@ -370,11 +380,13 @@ export default function WorkshopPlanning({
 
   useEffect(() => {
     if (pendingManualTasks.length > 0) {
-      setManualTaskId(pendingManualTasks[0].id);
+      if (!manualTaskId || !pendingManualTasks.some(t => t.id === manualTaskId)) {
+        setManualTaskId(pendingManualTasks[0].id);
+      }
     } else {
       setManualTaskId("");
     }
-  }, [pendingManualTasks]);
+  }, [pendingManualTasks, manualTaskId]);
 
   useEffect(() => {
     if (techniciens.length > 0 && !manualTechId) {
@@ -387,6 +399,23 @@ export default function WorkshopPlanning({
       setManualBayId(DEFAULT_WORKSHOP_BAYS[0].id);
     }
   }, [manualBayId]);
+
+  const activeDossiersList = useMemo(
+    () => dossiers.filter(isDossierActive),
+    [dossiers]
+  );
+
+  useEffect(() => {
+    if (activeDossiersList.length > 0 && !selectedVehicleDossierId) {
+      setSelectedVehicleDossierId(activeDossiersList[0].id);
+    }
+  }, [activeDossiersList, selectedVehicleDossierId]);
+
+  useEffect(() => {
+    if (manualDossierId) {
+      setSelectedVehicleDossierId(manualDossierId);
+    }
+  }, [manualDossierId]);
 
   // Date Navigation Helpers (skip Sundays)
   const handlePrevDay = () => {
@@ -489,6 +518,7 @@ export default function WorkshopPlanning({
 
   // Apply suggestion
   const handleApplySuggestion = (selectedSuggestion = suggestion) => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!selectedTargetForSuggest || !selectedSuggestion) return;
     
     const { dossier, line: targetLine } = selectedTargetForSuggest;
@@ -601,6 +631,7 @@ export default function WorkshopPlanning({
   const isManualSaveBlocked = manualWarnings.length > 0;
 
   const handleSaveManualPlanning = () => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!activeManualDossier || !manualTaskId || !manualTechId || !manualBayId) return;
 
     const { start, end } = getManualInterval();
@@ -650,6 +681,46 @@ export default function WorkshopPlanning({
       prochaineActionRecommended: `Planification manuelle sur ${DEFAULT_WORKSHOP_BAYS.find(b => b.id === manualBayId)?.name} le ${selectedDate.toLocaleDateString("fr-FR")} de ${start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} à ${end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`,
     });
 
+    setShowSavedIndicator(true);
+    setTimeout(() => setShowSavedIndicator(false), 3000);
+  };
+
+  const handleAutoReserve = (vehicleDossierId: string) => {
+    if (activeRole !== UserRole.CHEF_ATELIER || !vehicleDossierId) return;
+
+    setAutoPlanningError("");
+    setAutoPlanningSuccess("");
+    setAutoPlanningWarning("");
+
+    if (!availabilityConfig) {
+      setAutoPlanningError("Aucun créneau disponible dans la période sélectionnée.");
+      return;
+    }
+
+    const result = buildVehicleAutoReservationPlan({
+      dossiers,
+      reservations,
+      targetDossierId: vehicleDossierId,
+      selectedDate,
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+      availabilityConfig,
+    }, getSystemTime());
+    if (result.ok === false) {
+      setAutoPlanningError(result.error);
+      return;
+    }
+
+    if (result.createdReservations.length === 0) {
+      setAutoPlanningSuccess("Toutes les tâches actives du véhicule sont déjà planifiées ou réservées.");
+      return;
+    }
+
+    onUpdateReservations(result.reservations);
+    setAutoPlanningWarning(result.warning || "");
+    setAutoPlanningSuccess(
+      `${result.createdReservations.length} tâche(s) du véhicule réservée(s) automatiquement.`
+    );
     setShowSavedIndicator(true);
     setTimeout(() => setShowSavedIndicator(false), 3000);
   };
@@ -781,6 +852,7 @@ export default function WorkshopPlanning({
     .filter(item => !item.reservation || item.reservation.status !== "TRANSFORMEE_PLANNING");
 
   const handleSuggestReservation = (dossier: DossierSAV, existingRes: WorkshopReservation | null) => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     const baseRes = existingRes && existingRes.status !== "ANNULEE" 
       ? existingRes 
       : createReservationNeed(dossier, getSystemTime());
@@ -809,18 +881,21 @@ export default function WorkshopPlanning({
   };
 
   const handleConfirmReservation = (res: WorkshopReservation) => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     const confirmed = confirmReservation(res, getSystemTime());
     const nextRes = reservations.map(r => r.reservationId === res.reservationId ? confirmed : r);
     onUpdateReservations(nextRes);
   };
 
   const handleCancelReservation = (res: WorkshopReservation) => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     const cancelled = cancelReservation(res, getSystemTime());
     const nextRes = reservations.map(r => r.reservationId === res.reservationId ? cancelled : r);
     onUpdateReservations(nextRes);
   };
 
   const handleConvertReservation = (res: WorkshopReservation) => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     const { dossiers: nextDossiers, reservation: nextResObj } = convertReservationToPlanning(res, dossiers, getSystemTime());
     
     const updatedDossier = nextDossiers.find(d => d.id === res.dossierId);
@@ -837,6 +912,7 @@ export default function WorkshopPlanning({
     line: RepairOrderLine,
     overrides: { technicianId?: string; bayId?: string; start?: Date } = {}
   ) => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     const currentStart = overrides.start || (line.planningStart ? new Date(line.planningStart) : selectedDate);
     const durationMinutes = line.planningStart && line.planningEnd
       ? Math.max(15, Math.round((new Date(line.planningEnd).getTime() - new Date(line.planningStart).getTime()) / 60000))
@@ -857,6 +933,7 @@ export default function WorkshopPlanning({
   };
 
   const handleSaveReschedule = () => {
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!rescheduleTarget || !rescheduleTechId || !rescheduleBayId || !rescheduleDate || !rescheduleStart) return;
     const dossier = dossiers.find(current => current.id === rescheduleTarget.dossierId);
     const line = dossier?.ordresReparation.find(current => current.id === rescheduleTarget.lineId);
@@ -941,6 +1018,7 @@ export default function WorkshopPlanning({
     defaults: { technicianId?: string; bayId?: string }
   ) => {
     event.preventDefault();
+    if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!draggingTask) return;
     const dossier = dossiers.find(current => current.id === draggingTask.dossierId);
     const line = dossier?.ordresReparation.find(current => current.id === draggingTask.lineId);
@@ -1119,8 +1197,10 @@ export default function WorkshopPlanning({
       {/* Auto suggest, manual form & reservations Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Automatic Slot Suggestion */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
+        {/* Column 1 containing both Suggestion Engine and ETA/Auto-Reserve */}
+        <div className="space-y-6">
+          {/* Automatic Slot Suggestion */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
           <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-1.5 font-display">
             <Sparkles className="w-4.5 h-4.5 text-blue-600" />
             MOTEUR DE SUGGESTION DE PLANNING
@@ -1210,23 +1290,164 @@ export default function WorkshopPlanning({
                       )}
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleApplySuggestion(candidate)}
-                    data-testid={index === 0 ? "planning-suggest-apply" : `planning-suggest-apply-${index + 1}`}
-                    className="sm:col-span-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
-                  >
-                    <Check className="w-4 h-4" />
-                    Appliquer cette suggestion
-                  </button>
+                  {activeRole === UserRole.CHEF_ATELIER && (
+                    <button
+                      onClick={() => handleApplySuggestion(candidate)}
+                      data-testid={index === 0 ? "planning-suggest-apply" : `planning-suggest-apply-${index + 1}`}
+                      className="sm:col-span-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
+                    >
+                      <Check className="w-4 h-4" />
+                      Appliquer cette suggestion
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Manual Planning Form & Collision warning panel */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
-          <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-1.5 font-display">
+        {(() => {
+          const selectedVehicleDossier = dossiers.find(d => d.id === selectedVehicleDossierId);
+          const vehicleETAInfo = selectedVehicleDossierId ? getVehicleETAInfo(dossiers, selectedVehicleDossierId, reservations) : null;
+          const otherActiveDossiers = selectedVehicleDossier ? dossiers.filter(d =>
+            d.id !== selectedVehicleDossierId &&
+            isDossierActive(d) &&
+            isSameVehicle(selectedVehicleDossier, d)
+          ) : [];
+
+          return (
+            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
+              <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-1.5 font-display">
+                <Clock className="w-4.5 h-4.5 text-blue-600" />
+                ETA Livraison & Réservation Automatique
+              </h3>
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-widest font-black text-gray-400">Véhicule à consulter :</label>
+                  <select
+                    data-testid="planning-eta-vehicle-select"
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    value={selectedVehicleDossierId}
+                    onChange={(e) => setSelectedVehicleDossierId(e.target.value)}
+                  >
+                    {activeDossiersList.length === 0 ? (
+                      <option value="">Aucun véhicule actif</option>
+                    ) : (
+                      activeDossiersList.map(d => (
+                        <option key={`eta-select-${d.id}`} value={d.id}>
+                          {d.vehiculeModele} ({d.vehiculeImmatriculation}) - {d.id}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {selectedVehicleDossier && vehicleETAInfo && (
+                  <div className="space-y-3 border-t border-gray-100 pt-3 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-gray-400 font-bold uppercase block">Modèle</span>
+                        <strong className="text-gray-800">{selectedVehicleDossier.vehiculeModele}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 font-bold uppercase block">Immatriculation</span>
+                        <strong className="text-gray-800">{selectedVehicleDossier.vehiculeImmatriculation}</strong>
+                      </div>
+                      {selectedVehicleDossier.vehiculeVIN && (
+                        <div className="col-span-2">
+                          <span className="text-[10px] text-gray-400 font-bold uppercase block">VIN</span>
+                          <strong className="text-gray-800 font-mono text-[10px]">{selectedVehicleDossier.vehiculeVIN}</strong>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                      <div>
+                        <span className="text-[10px] text-gray-400 font-bold uppercase block">ETA Livraison</span>
+                        <strong data-testid="vehicle-eta-value" className="text-gray-800 font-black text-sm">
+                          {vehicleETAInfo.etaDateTime
+                            ? new Date(vehicleETAInfo.etaDateTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
+                            : "Non définie"}
+                        </strong>
+                      </div>
+
+                      <div className="pt-1">
+                        <span data-testid="vehicle-eta-reliability" className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-black uppercase border ${
+                          vehicleETAInfo.reliability === "Élevée"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                            : vehicleETAInfo.reliability === "Moyenne"
+                              ? "bg-amber-50 text-amber-700 border-amber-100"
+                              : "bg-rose-50 text-rose-700 border-rose-100"
+                        }`}>
+                          Fiabilité : {vehicleETAInfo.reliability}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 bg-gray-50 border border-gray-100 p-2.5 rounded-lg">
+                        <p data-testid="vehicle-eta-message" className="text-gray-800 font-bold leading-normal">{vehicleETAInfo.message}</p>
+                        {activeRole === UserRole.RECEPTIONNAIRE && (
+                          <p data-testid="vehicle-eta-reception-message" className="text-blue-800 font-bold text-[10px] mt-1">
+                            {vehicleETAInfo.receptionMessage}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="pt-2">
+                        <ul className="space-y-1 text-[11px] font-semibold text-gray-500 list-disc list-inside">
+                          <li>Tâches planifiées : {vehicleETAInfo.plannedTaskCount}</li>
+                          <li>Tâches non réservées : {vehicleETAInfo.unplannedTaskCount}</li>
+                          <li>Durées à valider : {vehicleETAInfo.unvalidatedDurationCount}</li>
+                        </ul>
+                      </div>
+
+                      {otherActiveDossiers.length > 0 && (
+                        <div className="pt-2 border-t border-gray-100 mt-2">
+                          <span className="text-[9px] text-gray-400 font-black uppercase block">Autres dossiers actifs du véhicule :</span>
+                          <ul className="space-y-0.5 mt-1 font-mono text-[10px] text-blue-600">
+                            {otherActiveDossiers.map(d => (
+                              <li key={d.id}>{d.id} ({d.vehiculeModele})</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {autoPlanningError && (
+                  <p data-testid="auto-planning-error" className="text-xs font-bold text-rose-600">{autoPlanningError}</p>
+                )}
+
+                {autoPlanningWarning && (
+                  <p data-testid="auto-planning-warning" className="text-xs font-bold text-amber-600">{autoPlanningWarning}</p>
+                )}
+
+                {autoPlanningSuccess && (
+                  <p data-testid="auto-planning-success" className="text-xs font-bold text-emerald-600">{autoPlanningSuccess}</p>
+                )}
+
+                {activeRole === UserRole.CHEF_ATELIER && (
+                  <button
+                    onClick={() => handleAutoReserve(selectedVehicleDossierId)}
+                    data-testid="planning-auto-reserve-btn"
+                    disabled={activeDossiersList.length === 0}
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Réserver automatiquement les tâches du véhicule
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Manual Planning Form & Collision warning panel */}
+        {activeRole === UserRole.CHEF_ATELIER && (
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
+            <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-1.5 font-display">
             <Settings className="w-4.5 h-4.5 text-gray-600" />
             AFFECTATION MANUELLE ET CONTRÔLE DE COLLISION
           </h3>
@@ -1428,11 +1649,18 @@ export default function WorkshopPlanning({
                     Durée estimée à valider. Ouvrez le dossier et validez la durée avant de planifier.
                   </p>
                 )}
+                {manualWarnings.includes("planning-collision-vehicle") && (
+                  <p data-testid="planning-collision-vehicle" className="text-[10px] text-red-700 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    Le véhicule a déjà une autre tâche planifiée sur cette période.
+                  </p>
+                )}
               </div>
             </div>
           )}
 
         </div>
+        )}
 
         {/* Réservations Atelier Panel */}
         <div 
@@ -1563,6 +1791,7 @@ export default function WorkshopPlanning({
                       </div>
                     )}
 
+                    {activeRole === UserRole.CHEF_ATELIER && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {/* Suggérer button */}
                       {(status === "A_RESERVER" || status === "CRENEAU_PROPOSE") && (
@@ -1615,6 +1844,7 @@ export default function WorkshopPlanning({
                         </button>
                       )}
                     </div>
+                    )}
                   </div>
                 );
               })
@@ -1924,12 +2154,16 @@ export default function WorkshopPlanning({
                                 data-start={s.toISOString()}
                                 data-end={e.toISOString()}
                                 onClick={() => onSelectDossier(dossier.id)}
-                                draggable
+                                draggable={activeRole === UserRole.CHEF_ATELIER}
                                 onDragStart={(event) => {
+                                  if (activeRole !== UserRole.CHEF_ATELIER) {
+                                    event.preventDefault();
+                                    return;
+                                  }
                                   event.dataTransfer.effectAllowed = "move";
                                   setDraggingTask({ dossierId: dossier.id, lineId: line.id });
                                 }}
-                                className={`absolute ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
+                                className={`absolute ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs px-2 py-1 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
                                 style={{
                                   left: `${leftPct}%`,
                                   width: `${widthPct}%`,
@@ -1938,7 +2172,7 @@ export default function WorkshopPlanning({
                                 }}
                                 title={`${dossier.id} - ${line.designation} (${dossier.vehiculeMarque} ${dossier.vehiculeModele}) ${dossier.vehiculeImmatriculation}`}
                               >
-                                <div className="flex items-center justify-between gap-1 overflow-hidden">
+                                <div className="pointer-events-none flex items-center justify-between gap-1 overflow-hidden pr-9">
                                   <span className="truncate block leading-tight font-extrabold">{dossier.vehiculeModele}</span>
                                   <span
                                     data-testid={statusVisual.testId}
@@ -1947,35 +2181,44 @@ export default function WorkshopPlanning({
                                     {statusVisual.label}
                                   </span>
                                 </div>
-                                <span className="truncate block text-[7px] opacity-90 leading-none">
+                                <span className="pointer-events-none truncate block text-[7px] opacity-90 leading-none pr-9">
                                   {dossier.vehiculeImmatriculation}
                                   {(line.complaintBadge || line.sourceComplaintId) && (
                                     <span data-testid={`gantt-complaint-badge-${line.id}`} className="ml-1 rounded bg-red-600 px-1 py-0.2 text-white">REC</span>
                                   )}
                                 </span>
-                                <span className="truncate block text-[7px] opacity-80 leading-none">
+                                <span className="pointer-events-none truncate block text-[7px] opacity-80 leading-none pr-9">
                                   {s.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}-{e.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                                 </span>
-                                <div className="mt-0.5 flex gap-1 relative z-30">
-                                  <button
-                                    type="button"
-                                    data-testid={`gantt-reschedule-${line.id}`}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      openRescheduleModal(dossier, line);
-                                    }}
-                                    className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700 relative z-30 hover:bg-white"
-                                  >
-                                    Modifier créneau
-                                  </button>
+                                <div className="absolute bottom-1 right-1 z-40 flex gap-1">
+                                  {activeRole === UserRole.CHEF_ATELIER && (
+                                    <button
+                                      type="button"
+                                      data-testid={`gantt-reschedule-${line.id}`}
+                                      aria-label="Modifier créneau"
+                                      title="Modifier créneau"
+                                      draggable={false}
+                                      onPointerDown={(event) => event.stopPropagation()}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openRescheduleModal(dossier, line);
+                                      }}
+                                      className="relative z-40 flex h-4 w-4 items-center justify-center rounded bg-white/90 text-slate-700 shadow-sm hover:bg-white"
+                                    >
+                                      <Settings className="h-2.5 w-2.5" />
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     data-testid={`gantt-task-sheet-${line.id}`}
+                                    aria-label="Fiche tâche technicien"
+                                    draggable={false}
+                                    onPointerDown={(event) => event.stopPropagation()}
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       handlePrintTaskSheet(dossier, line);
                                     }}
-                                    className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700 relative z-30 hover:bg-white"
+                                    className="relative z-40 flex h-4 w-4 items-center justify-center rounded bg-white/90 text-slate-700 shadow-sm hover:bg-white"
                                     title="Fiche tâche technicien"
                                   >
                                     <FileText className="inline h-2.5 w-2.5" />
@@ -2211,19 +2454,23 @@ export default function WorkshopPlanning({
                           data-start={s.toISOString()}
                           data-end={e.toISOString()}
                           onClick={() => onSelectDossier(dossier.id)}
-                          draggable
+                          draggable={activeRole === UserRole.CHEF_ATELIER}
                           onDragStart={(event) => {
+                            if (activeRole !== UserRole.CHEF_ATELIER) {
+                              event.preventDefault();
+                              return;
+                            }
                             event.dataTransfer.effectAllowed = "move";
                             setDraggingTask({ dossierId: dossier.id, lineId: line.id });
                           }}
-                          className={`absolute top-1 bottom-1 ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs flex flex-col justify-center px-2 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
+                          className={`absolute top-1 bottom-1 ${statusVisual.className} border text-[9px] font-black rounded-lg shadow-xs px-2 py-1 cursor-pointer overflow-hidden transition select-none z-20 ${isPast ? "opacity-65" : ""}`}
                           style={{
                             left: `${leftPct}%`,
                             width: `${widthPct}%`
                           }}
                           title={`${dossier.id} - ${line.designation} (${dossier.vehiculeMarque} ${dossier.vehiculeModele})`}
                         >
-                          <div className="flex items-center justify-between gap-1 overflow-hidden">
+                          <div className="pointer-events-none flex items-center justify-between gap-1 overflow-hidden pr-9">
                             <span className="truncate block leading-tight font-extrabold">{dossier.id}</span>
                             <span
                               data-testid={statusVisual.testId}
@@ -2232,32 +2479,41 @@ export default function WorkshopPlanning({
                               {statusVisual.label}
                             </span>
                           </div>
-                          <span className="truncate block text-[7px] opacity-80 leading-none">
+                          <span className="pointer-events-none truncate block text-[7px] opacity-80 leading-none pr-9">
                             {line.designation}
                             {(line.complaintBadge || line.sourceComplaintId) && (
                               <span data-testid={`gantt-bay-complaint-badge-${line.id}`} className="ml-1 rounded bg-red-600 px-1 py-0.2 text-white">REC</span>
                             )}
                           </span>
-                          <div className="mt-0.5 flex gap-1">
-                            <button
-                              type="button"
-                              data-testid={`gantt-bay-reschedule-${line.id}`}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openRescheduleModal(dossier, line);
-                              }}
-                              className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
-                            >
-                              Modifier créneau
-                            </button>
+                          <div className="absolute bottom-1 right-1 z-40 flex gap-1">
+                            {activeRole === UserRole.CHEF_ATELIER && (
+                              <button
+                                type="button"
+                                data-testid={`gantt-bay-reschedule-${line.id}`}
+                                aria-label="Modifier créneau"
+                                title="Modifier créneau"
+                                draggable={false}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openRescheduleModal(dossier, line);
+                                }}
+                                className="relative z-40 flex h-4 w-4 items-center justify-center rounded bg-white/90 text-slate-700 shadow-sm hover:bg-white"
+                              >
+                                <Settings className="h-2.5 w-2.5" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               data-testid={`gantt-bay-task-sheet-${line.id}`}
+                              aria-label="Fiche tâche technicien"
+                              draggable={false}
+                              onPointerDown={(event) => event.stopPropagation()}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 handlePrintTaskSheet(dossier, line);
                               }}
-                              className="rounded bg-white/80 px-1 py-0.5 text-[7px] font-black text-slate-700"
+                              className="relative z-40 flex h-4 w-4 items-center justify-center rounded bg-white/90 text-slate-700 shadow-sm hover:bg-white"
                               title="Fiche tâche technicien"
                             >
                               <FileText className="inline h-2.5 w-2.5" />

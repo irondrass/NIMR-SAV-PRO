@@ -46,6 +46,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
   [UserRole.RECEPTIONNAIRE]: [
     "reception-rapide",
     "dossiers-liste",
+    "atelier-planning",
     "reclamations",
     "rendements-sav",
     "livraison",

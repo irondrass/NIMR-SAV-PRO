@@ -22,7 +22,8 @@ import {
   UserRole,
   TaskBlockFollowUpOwner,
   PHOTO_CATEGORIES,
-  PhotoCategory
+  PhotoCategory,
+  WorkshopReservation
 } from "../types";
 import * as perm from "../permissions";
 import {
@@ -40,7 +41,10 @@ import {
   removePhotoFromDossier,
   reopenRepairOrder,
   startRepairOrder,
-  submitQualityControl
+  submitQualityControl,
+  getVehicleETAInfo,
+  isSameVehicle,
+  isDossierActive
 } from "../sav-core";
 import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
@@ -80,6 +84,7 @@ interface DossierDetailProps {
   onBack: () => void;
   onUpdateDossier: (updated: DossierSAV) => void;
   techniciensList: { id: string; nom: string }[];
+  reservations?: WorkshopReservation[];
 }
 
 function formatRepairOrderDuration(hours: number | undefined): string {
@@ -93,7 +98,8 @@ export default function DossierDetail({
   userRole,
   onBack,
   onUpdateDossier,
-  techniciensList
+  techniciensList,
+  reservations
 }: DossierDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("resume");
   const [printType, setPrintType] = useState<"reception" | "or" | "qc" | "delivery" | "task" | null>(null);
@@ -815,6 +821,60 @@ export default function DossierDetail({
                     </span>
                   </div>
                 </div>
+
+                {(() => {
+                  const vehicleETAInfo = getVehicleETAInfo(dossiers, dossier.id, reservations || []);
+                  const otherActiveDossiers = dossiers.filter(d =>
+                    d.id !== dossier.id &&
+                    isDossierActive(d) &&
+                    isSameVehicle(dossier, d)
+                  );
+                  const formattedEta = vehicleETAInfo.etaDateTime
+                    ? new Date(vehicleETAInfo.etaDateTime).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" })
+                    : "Non confirmée";
+                  const reliabilityBadgeColor = vehicleETAInfo.reliability === "Élevée"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                    : vehicleETAInfo.reliability === "Moyenne"
+                      ? "bg-amber-50 text-amber-700 border-amber-100"
+                      : "bg-rose-50 text-rose-700 border-rose-100";
+                  return (
+                    <div data-testid="vehicle-eta-block" className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs mt-4">
+                      <h4 className="font-bold text-slate-800 uppercase tracking-wider">Livraison estimée</h4>
+                      <div className="space-y-2">
+                        {userRole === UserRole.RECEPTIONNAIRE ? (
+                          <p className="font-bold text-slate-900">Livraison estimée sous réserve de validation atelier.</p>
+                        ) : (
+                          <p className="font-bold text-slate-900">Livraison estimée : {formattedEta}</p>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <span data-testid="vehicle-eta-reliability" className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-black uppercase border ${reliabilityBadgeColor}`}>
+                            Fiabilité : {vehicleETAInfo.reliability}
+                          </span>
+                        </div>
+
+                        <p className="text-slate-600 font-medium">{vehicleETAInfo.message}</p>
+
+                        <ul className="space-y-1 text-slate-500 font-semibold list-disc list-inside">
+                          <li>Tâches planifiées : {vehicleETAInfo.plannedTaskCount}</li>
+                          <li>Tâches non réservées : {vehicleETAInfo.unplannedTaskCount}</li>
+                          <li>Durées à valider : {vehicleETAInfo.unvalidatedDurationCount}</li>
+                        </ul>
+
+                        {otherActiveDossiers.length > 0 && (
+                          <div className="pt-2 border-t border-slate-200 mt-2">
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">Autres dossiers actifs du véhicule :</p>
+                            <ul className="space-y-0.5 mt-1 font-mono text-[10px] text-blue-600">
+                              {otherActiveDossiers.map(d => (
+                                <li key={d.id}>{d.id} ({d.vehiculeModele})</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {dossier.bloqueRaison && (
                   <div className="p-3 bg-red-50  border border-red-200  rounded-lg flex gap-2.5 text-xs text-red-700 ">

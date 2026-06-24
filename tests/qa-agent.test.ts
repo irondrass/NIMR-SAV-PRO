@@ -3025,6 +3025,37 @@ registerCheck("Lot 6I Invariants", "exports et rapports restent opérationnels s
   assert.equal(fs.existsSync(".env"), false);
 });
 
+registerCheck("Lot 6K-B-A Invariants", "collision véhicule et ETA utilisent tous les dossiers actifs", () => {
+  const coreContent = fs.readFileSync("src/sav-core.ts", "utf8");
+  assert.ok(coreContent.includes('"planning-collision-vehicle"'), "Le code bloquant collision véhicule doit être déclaré");
+  assert.ok(coreContent.includes("normalizeVehicleIdentity"), "L'identité véhicule doit être normalisée");
+  assert.ok(coreContent.includes("getActiveVehicleDossiers"), "Les dossiers actifs du véhicule doivent être regroupés");
+  assert.ok(coreContent.includes("getVehicleETAInfo"), "L'ETA véhicule doit être calculée dans le cœur métier");
+  assert.ok(coreContent.includes("reservedTaskIds"), "L'ETA doit compter les réservations tâche par tâche");
+});
+
+registerCheck("Lot 6K-B-A Invariants", "réservation automatique atomique et séquentielle", () => {
+  const coreContent = fs.readFileSync("src/sav-core.ts", "utf8");
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  assert.ok(coreContent.includes("buildVehicleAutoReservationPlan"), "Le plan automatique doit être un helper métier testable");
+  assert.ok(coreContent.includes("temporaryReservations"), "Le calcul doit utiliser un état temporaire avant sauvegarde");
+  assert.ok(coreContent.includes("createdReservations"), "Le résultat doit exposer les réservations créées atomiquement");
+  assert.ok(planningContent.includes("onUpdateReservations(result.reservations)"), "L'UI doit persister le lot de réservations en une seule mise à jour");
+  assert.ok(coreContent.includes("Durée à valider avant réservation automatique."), "La durée non validée doit bloquer l'opération");
+});
+
+registerCheck("Lot 6K-B-A Invariants", "planning modifiable uniquement par le Chef Atelier", () => {
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const rolesContent = fs.readFileSync("src/roles.ts", "utf8");
+  assert.ok(planningContent.includes("activeRole !== UserRole.CHEF_ATELIER"), "Les handlers planning doivent vérifier le rôle actif");
+  assert.ok(planningContent.includes('draggable={activeRole === UserRole.CHEF_ATELIER}'), "Le Gantt ne doit être déplaçable que par le Chef Atelier");
+  assert.ok(planningContent.includes("ETA Livraison & Réservation Automatique"), "Le panneau ETA véhicule doit être visible dans le planning");
+  assert.ok(detailContent.includes('data-testid="vehicle-eta-block"'), "Le résumé dossier doit afficher l'ETA véhicule");
+  assert.ok(rolesContent.includes('"atelier-planning"'), "La Réception doit pouvoir consulter le planning");
+  assert.equal(fs.existsSync("e2e/31-auto-reservation.spec.ts"), true);
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -3048,7 +3079,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6I - Remédiations P0/P1 post-audit SAV)
+- **Version** : v1.1.1 (Lot 6K-B-A - Réservation automatique véhicule et ETA livraison)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 
