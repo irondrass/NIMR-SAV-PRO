@@ -35,6 +35,24 @@ assert.ok(source.includes('type: "reception" | "or" | "qc" | "delivery" | "task"
 assert.ok(source.includes('type === "task"'), "PrintDocuments doit rendre la fiche tâche technicien.");
 assert.ok(detailSource.includes("nimr-print-container"), "Conteneur d'impression manquant.");
 assert.ok(detailSource.includes("print-task-sheet"), "Bouton fiche tâche technicien manquant.");
+for (const testId of [
+  "print-reception-sheet",
+  "print-operational-or",
+  "print-technician-sheet",
+  "print-qc-sheet",
+  "print-delivery-pv",
+]) {
+  assert.ok(detailSource.includes(testId) || planningSource.includes(testId), `Alias bouton print manquant: ${testId}`);
+}
+
+for (const testId of [
+  'data-testid="print-document-preview"',
+  'data-testid="print-document-title"',
+  'data-testid="print-document-watermark"',
+  'data-testid="print-document-section"',
+]) {
+  assert.ok(source.includes(testId), `Root ou section print manquant: ${testId}`);
+}
 
 // New tests for TechnicianTaskSheetPrint and containers:
 assert.ok(source.includes("TechnicianTaskSheetPrint"), "Le composant TechnicianTaskSheetPrint doit exister.");
@@ -57,6 +75,10 @@ assert.ok(source.includes('data-testid="technician-task-sheet-print"'), "La fich
 assert.ok(source.includes("getDeliveryReadiness"), "Le bon de restitution doit utiliser le verrou QC/livraison central.");
 assert.ok(source.includes('data-testid="delivery-invalid-watermark"'), "Le bon de restitution doit afficher un watermark si QC non conforme.");
 assert.ok(source.includes("NON VALIDE POUR RESTITUTION"), "Le watermark de restitution non valide doit être présent.");
+assert.ok(source.includes("NON RESTITUABLE - QC NON CONFORME"), "La grille QC non conforme doit afficher un watermark.");
+assert.ok(source.includes("DOCUMENT NON VALIDE - QC NON CONFORME"), "Le PV restitution non conforme doit afficher un watermark.");
+assert.ok(source.includes("Ce document ne vaut pas restitution. Dossier bloqué."), "Le PV doit préciser qu'un dossier bloqué ne vaut pas restitution.");
+assert.ok(source.includes("Restitution interdite sans QC conforme"), "La grille QC doit bloquer explicitement la restitution sans conformité.");
 assert.ok(source.includes("QC conforme"), "Le document de restitution autorisé doit afficher le statut QC conforme.");
 for (const expected of [
   "Dossier ID",
@@ -82,6 +104,8 @@ assert.ok(cssSource.includes("display: block !important"), "Le root fiche tâche
 assert.ok(cssSource.includes("position: absolute !important"), "Le root fiche tâche doit sortir du flux app en print.");
 assert.ok(cssSource.includes("body.printing-task-sheet #technician-task-print-root *"), "Les enfants de la fiche tâche doivent rester visibles en print.");
 assert.equal(/body\.printing-task-sheet\s+#technician-task-print-root[\s\S]{0,200}display:\s*none/i.test(cssSource), false, "Le root fiche tâche ne doit jamais être masqué en print.");
+assert.ok(cssSource.includes(".print-document-section"), "Les sections des documents A4 doivent être protégées des coupures.");
+assert.ok(cssSource.includes("body.printing-standard-document #nimr-print-container *"), "Les enfants des documents standards doivent être visibles en print.");
 
 const lower = source.toLowerCase();
 const blockedPrintDocumentTerms = [

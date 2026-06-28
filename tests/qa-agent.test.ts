@@ -3087,6 +3087,60 @@ registerCheck("Lot 6K-C Invariants", "verrou QC obligatoire avant restitution", 
   assert.ok(printContent.includes('data-testid="delivery-invalid-watermark"'), "Le bon restitution doit afficher le watermark QC non conforme");
 });
 
+registerCheck("Lot 6K-D Invariants", "impressions A4 terrain propres et verrouillées QC", () => {
+  const printContent = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const planningContent = fs.readFileSync("src/components/WorkshopPlanning.tsx", "utf8");
+  const cssContent = fs.readFileSync("src/index.css", "utf8");
+
+  for (const expected of [
+    'data-testid="print-document-preview"',
+    'data-testid="print-document-title"',
+    'data-testid="print-document-watermark"',
+    'data-testid="print-document-section"',
+    "Fiche Réception",
+    "Ordre de Réparation Interne",
+    "Fiche Contrôle Qualité",
+    "Bon de Restitution & Livraison",
+    "Fiche tâche technicien",
+    "NON RESTITUABLE - QC NON CONFORME",
+    "DOCUMENT NON VALIDE - QC NON CONFORME",
+    "Ce document ne vaut pas restitution. Dossier bloqué.",
+    "Restitution interdite sans QC conforme",
+  ]) {
+    assert.ok(printContent.includes(expected), `Invariant impression manquant: ${expected}`);
+  }
+
+  for (const testId of [
+    "print-reception-sheet",
+    "print-operational-or",
+    "print-qc-sheet",
+    "print-delivery-pv",
+  ]) {
+    assert.ok(detailContent.includes(testId), `Alias bouton document manquant: ${testId}`);
+  }
+  assert.ok(detailContent.includes("print-technician-sheet"), "Le détail dossier doit exposer l'alias fiche tâche");
+  assert.ok(planningContent.includes("print-technician-sheet"), "Le Gantt doit exposer l'alias fiche tâche");
+  assert.ok(cssContent.includes(".print-document-section"), "Les sections A4 doivent éviter les coupures");
+  assert.ok(cssContent.includes("body.printing-standard-document #nimr-print-container *"), "Les documents standards doivent être visibles en print");
+  assert.ok(printContent.includes("getDeliveryReadiness(dossier)"), "Le PV doit réutiliser le verrou livraison central");
+
+  const lower = printContent.toLowerCase();
+  const blockedTerms = [
+    ["cai", "sse"],
+    ["paie", "ment"],
+    ["mon", "tant"],
+    ["mar", "ge"],
+    ["pr", "ix"],
+    ["fac", "ture", " ré", "elle"],
+    ["st", "ock", " r", "éel"],
+    ["dis", "ponibilité", " ré", "elle", " pi", "èce"],
+  ].map(parts => parts.join(""));
+  for (const term of blockedTerms) {
+    assert.equal(lower.includes(term), false, `Terme bloqué dans PrintDocuments: ${term}`);
+  }
+});
+
 registerCheck("Lot 6K-B-A Invariants", "collision véhicule et ETA utilisent tous les dossiers actifs", () => {
   const coreContent = fs.readFileSync("src/sav-core.ts", "utf8");
   assert.ok(coreContent.includes('"planning-collision-vehicle"'), "Le code bloquant collision véhicule doit être déclaré");
@@ -3184,7 +3238,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6K-B-C - Interface RDV & Planning dossier par étapes)
+- **Version** : v1.1.1 (Lot 6K-D - Impressions A4 terrain propres et sécurisées)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

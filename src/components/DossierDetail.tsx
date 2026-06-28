@@ -1473,7 +1473,7 @@ export default function DossierDetail({
                         title="Imprimer la fiche tâche technicien"
                       >
                         <Printer className="w-3 h-3" />
-                        Fiche tâche technicien
+                        <span data-testid="print-technician-sheet">Fiche tâche technicien</span>
                       </button>
                       {startBlockedMessage && status !== "in_progress" && status !== "done" && (
                         <span className="text-[10px] text-rose-600  font-bold text-right">
@@ -2173,10 +2173,10 @@ export default function DossierDetail({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
               {[
-                { type: "reception" as const, label: "Fiche réception" },
-                { type: "or" as const, label: "OR interne" },
-                { type: "qc" as const, label: "Fiche QC" },
-                { type: "delivery" as const, label: "Bon restitution" },
+                { type: "reception" as const, label: "Fiche réception", aliasTestId: "print-reception-sheet" },
+                { type: "or" as const, label: "OR interne", aliasTestId: "print-operational-or" },
+                { type: "qc" as const, label: "Fiche QC", aliasTestId: "print-qc-sheet" },
+                { type: "delivery" as const, label: "Bon restitution", aliasTestId: "print-delivery-pv" },
               ].map((doc) => (
                 <button
                   key={doc.type}
@@ -2186,7 +2186,7 @@ export default function DossierDetail({
                   className="flex min-h-20 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-4 text-xs font-extrabold text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
                 >
                   <Printer className="h-4 w-4" />
-                  {doc.label}
+                  <span data-testid={doc.aliasTestId}>{doc.label}</span>
                 </button>
               ))}
             </div>

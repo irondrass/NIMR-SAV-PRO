@@ -2260,6 +2260,7 @@ export default function WorkshopPlanning({
                                     title="Fiche tâche technicien"
                                   >
                                     <FileText className="inline h-2.5 w-2.5" />
+                                    <span data-testid="print-technician-sheet" className="sr-only">Fiche tâche technicien</span>
                                   </button>
                                 </div>
                               </div>

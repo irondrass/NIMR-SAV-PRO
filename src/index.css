@@ -93,4 +93,37 @@
     background: white !important;
     color: black !important;
   }
+
+  body.printing-standard-document #nimr-print-container *,
+  body.printing-standard-document .print-document,
+  body.printing-standard-document .print-document * {
+    visibility: visible !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body.printing-standard-document button,
+  body.printing-standard-document nav,
+  body.printing-standard-document .no-print,
+  body.printing-standard-document .document-screen-only,
+  body.printing-standard-document [role="button"] {
+    display: none !important;
+  }
+
+  .print-document {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    background: white !important;
+    color: black !important;
+    font-size: 11px !important;
+    line-height: 1.45 !important;
+  }
+
+  .print-document-section,
+  .print-document table,
+  .print-document .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
 }
