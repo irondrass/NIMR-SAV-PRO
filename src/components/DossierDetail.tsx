@@ -2358,7 +2358,7 @@ export default function DossierDetail({
                 </span>
               </div>
               {!deliveryGate.allowed && (
-                <div className="mt-2 space-y-1">
+                <div data-testid="delivery-blocking-reasons" className="mt-2 space-y-1">
                   <p data-testid="delivery-blocked-message" className="whitespace-pre-line font-medium">
                     {deliveryGate.reasons.map(reason => `- ${reason}`).join("\n")}
                   </p>

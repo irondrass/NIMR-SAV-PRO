@@ -406,7 +406,7 @@ export default function LivraisonView({
                   {selectedReadiness && (
                     <div data-testid="delivery-readiness-block" className={`mb-4 rounded-xl border p-3 text-xs font-bold ${selectedReadiness.canDeliver ? "border-emerald-100 bg-emerald-50 text-emerald-800" : "border-rose-100 bg-rose-50 text-rose-800"}`}>
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-black uppercase">
+                        <span data-testid="dossier-delivery-state" className="font-black uppercase">
                           {selectedReadiness.canDeliver ? "Restitution autorisée" : "Restitution impossible"}
                         </span>
                         <span data-testid="delivery-qc-status" className="rounded-full border border-white/70 bg-white px-2 py-0.5 text-[10px] font-black uppercase">
@@ -414,10 +414,10 @@ export default function LivraisonView({
                         </span>
                       </div>
                       {!selectedReadiness.canDeliver && (
-                        <div className="mt-2 space-y-1">
-                          {selectedReadiness.blockingMessages.map(message => (
-                            <p key={message} data-testid="delivery-blocked-message">- {message}</p>
-                          ))}
+                        <div data-testid="delivery-blocking-reasons" className="mt-2 space-y-1">
+                          <p data-testid="delivery-blocked-message" className="whitespace-pre-line">
+                            {selectedReadiness.blockingMessages.map(message => `- ${message}`).join("\n")}
+                          </p>
                         </div>
                       )}
                     </div>

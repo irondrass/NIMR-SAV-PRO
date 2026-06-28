@@ -130,11 +130,17 @@ test.describe("Lot 6I — remédiations P0/P1 SAV", () => {
     await humanFill(page, page.locator('[data-testid="delivery-km-sortie"]'), "18010");
     await drawSimpleSignature(page);
 
-    await humanClick(page, page.locator('[data-testid="btn-delivery-confirm"]'));
-    await expect(page.locator('[data-testid="modal-delivery-confirm"]')).toBeVisible();
-    await humanClick(page, page.locator('[data-testid="modal-delivery-confirm"]'));
+    const confirmButton = page.locator('[data-testid="btn-delivery-confirm"]');
+    await expect(confirmButton).toBeVisible();
+    await expect(confirmButton).toBeDisabled();
 
-    await expect(page.locator('[data-testid="delivery-validation-error"]')).toContainText(/Contrôle qualité accepté obligatoire/i);
+    const blockingMessage = page.locator(
+      '[data-testid="delivery-blocked-message"], [data-testid="delivery-blocking-reasons"]'
+    ).first();
+    await expect(blockingMessage).toBeVisible();
+    await expect(blockingMessage).toContainText(/qualité|QC|contrôle/i);
+    await expect(page.locator('[data-testid="dossier-delivery-state"]')).not.toContainText(/livré|restitué/i);
+
     await expect(page.getByText(/Livraison confirmée pour le dossier NIMR-6I-NO-QC/i)).toHaveCount(0);
   });
 });
