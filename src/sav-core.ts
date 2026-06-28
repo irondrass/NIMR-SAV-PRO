@@ -9,6 +9,8 @@ import {
   CameraPhoto,
   ChecklistQualite,
   DeliveryProtocole,
+  DossierOperationalTrace,
+  DossierOperationalTraceType,
   DossierPriority,
   DossierSAV,
   DossierStatus,
@@ -243,7 +245,45 @@ export type SuggestedSlotReservationResult =
 export interface DossierDeliveryGate {
   allowed: boolean;
   reasons: string[];
+  blockingCodes?: DeliveryBlockingCode[];
+  qcStatus?: DossierQCStatus;
+  readiness?: DeliveryReadiness;
 }
+
+export type DossierQCStatusCode = "missing" | "pending" | "conforme" | "refused" | "to_recheck";
+
+export interface DossierQCStatus {
+  status: DossierQCStatusCode;
+  lastQCAt?: string;
+  lastQCBy?: string;
+  refusalReasons?: string[];
+}
+
+export type DeliveryBlockingCode =
+  | "delivery-qc-missing"
+  | "delivery-qc-refused"
+  | "delivery-qc-to-recheck"
+  | "delivery-workshop-open-tasks"
+  | "delivery-dossier-cancelled"
+  | "delivery-dossier-already-delivered";
+
+export interface DeliveryReadiness {
+  canDeliver: boolean;
+  canCloseOperationally: boolean;
+  qcStatus: DossierQCStatus;
+  blockingCodes: DeliveryBlockingCode[];
+  blockingMessages: string[];
+  reasons: string[];
+}
+
+export const DELIVERY_BLOCKING_MESSAGES: Record<DeliveryBlockingCode, string> = {
+  "delivery-qc-missing": "Livraison bloquée : contrôle qualité obligatoire.",
+  "delivery-qc-refused": "Livraison bloquée : contrôle qualité refusé.",
+  "delivery-qc-to-recheck": "Livraison bloquée : contrôle qualité à refaire après modification atelier.",
+  "delivery-workshop-open-tasks": "Livraison bloquée : travaux atelier non terminés.",
+  "delivery-dossier-cancelled": "Dossier annulé.",
+  "delivery-dossier-already-delivered": "Dossier déjà livré.",
+};
 
 export type TaskMutationResult =
   | { ok: true; dossiers: DossierSAV[]; dossier: DossierSAV; line: RepairOrderLine }
@@ -480,6 +520,7 @@ export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
     bloqueResolutionEta: dossier.bloqueResolutionEta ?? "",
     warrantyAttachments: dossier.warrantyAttachments ?? [],
     historiqueLogs: dossier.historiqueLogs ?? [],
+    operationalTraces: dossier.operationalTraces ?? [],
   };
 }
 
@@ -561,6 +602,8 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
         prochaineActionRecommended: "Terminer la tâche en cours avant d'en démarrer une autre",
       },
       dossierLog: `Tâche "${line.designation}" ${status === "paused" ? "reprise" : "démarrée"}`,
+      invalidateQcReason: `Tâche "${line.designation}" repassée en cours après QC.`,
+      invalidateQcRole: "Atelier",
     };
   });
 }
@@ -598,6 +641,8 @@ export function releaseRepairOrderBlock(
         prochaineActionRecommended: "Reprendre la tâche après levée du blocage",
       },
       dossierLog: `Levée de blocage tâche ${line.designation}: ${reason.trim()}`,
+      invalidateQcReason: `Blocage levé sur la tâche "${line.designation}" après QC.`,
+      invalidateQcRole: userRole,
     };
   });
 }
@@ -615,6 +660,8 @@ export function pauseRepairOrder(dossiers: DossierSAV[], dossierId: string, line
         prochaineActionRecommended: "Reprendre la tâche suspendue ou affecter une autre intervention",
       },
       dossierLog: `Tâche "${line.designation}" suspendue`,
+      invalidateQcReason: `Tâche "${line.designation}" suspendue après QC.`,
+      invalidateQcRole: "Atelier",
     };
   });
 }
@@ -676,6 +723,8 @@ export function blockRepairOrder(
         prochaineActionRecommended: `Lever le blocage atelier: ${safeReason}`,
       },
       dossierLog: `[${userRole}] - Blocage Tâche "${line.designation}" - Motif: ${safeReason} - Suivi: ${followUpOwner}`,
+      invalidateQcReason: `Tâche "${line.designation}" bloquée après QC.`,
+      invalidateQcRole: userRole,
     };
   });
 }
@@ -719,6 +768,8 @@ export function finishRepairOrder(
           : "Continuer les ordres de réparation restants",
       },
       dossierLog: `Tâche "${line.designation}" terminée - Diagnostic: ${diagnostic}`,
+      invalidateQcReason: `Tâche "${line.designation}" modifiée après QC.`,
+      invalidateQcRole: "Atelier",
     };
   });
 }
@@ -750,6 +801,8 @@ export function reopenRepairOrder(
         prochaineActionRecommended: "Replanifier la tâche réouverte avant reprise",
       },
       dossierLog: `Réouverture de tâche ${line.designation}: ${reason.trim()}`,
+      invalidateQcReason: `Tâche "${line.designation}" réouverte après QC. Motif: ${reason.trim()}`,
+      invalidateQcRole: userRole,
     };
   });
 }
@@ -1319,6 +1372,235 @@ export function finishWorksForQuality(dossier: DossierSAV, now = new Date()): Do
   };
 }
 
+function hasAnyQualityChecklistSignal(checklist: ChecklistQualite | undefined): boolean {
+  if (!checklist) return false;
+  return Boolean(
+    checklist.essaiEffectue ||
+    checklist.defautRepare ||
+    checklist.aucunVoyantAllume ||
+    checklist.niveauxVerifies ||
+    checklist.serrageSecurite ||
+    checklist.propreteVehicule ||
+    checklist.documentsPrets ||
+    checklist.photosApresOk ||
+    checklist.commentaireRefus ||
+    checklist.dateValidation ||
+    checklist.validePar ||
+    checklist.qcInvalidatedAt
+  );
+}
+
+function uniqueDeliveryCodes(codes: DeliveryBlockingCode[]): DeliveryBlockingCode[] {
+  return Array.from(new Set(codes));
+}
+
+function appendDossierOperationalTrace(
+  dossier: DossierSAV,
+  type: DossierOperationalTraceType,
+  role: UserRole | string,
+  message: string,
+  now = new Date()
+): DossierSAV {
+  const timestamp = now.toISOString();
+  const trace: DossierOperationalTrace = {
+    type,
+    dateTime: timestamp,
+    role,
+    message,
+    dossierId: dossier.id,
+  };
+  return {
+    ...dossier,
+    operationalTraces: [trace, ...(dossier.operationalTraces ?? [])],
+    historiqueLogs: [
+      `${timestamp} - [${role}] - ${message}`,
+      ...(dossier.historiqueLogs ?? []),
+    ],
+  };
+}
+
+export function normalizeQCStatus(value: string | undefined | null): DossierQCStatusCode {
+  if (!value) return "missing";
+  const val = value.toLowerCase().trim();
+  if (["conforme", "accepted", "ok", "valide"].includes(val)) {
+    return "conforme";
+  }
+  if (["refused", "refuse", "refusé"].includes(val)) {
+    return "refused";
+  }
+  if (["to_recheck", "a_refaire", "à_refaire"].includes(val)) {
+    return "to_recheck";
+  }
+  if (val === "pending" || val === "en_attente") {
+    return "pending";
+  }
+  return "missing";
+}
+
+export function getQCStatusDisplayLabel(status: string | undefined | null): string {
+  const norm = normalizeQCStatus(status);
+  if (norm === "conforme") return "Conforme";
+  if (norm === "refused") return "Refusé";
+  if (norm === "to_recheck") return "À refaire";
+  if (norm === "pending") return "En attente";
+  return "Non réalisé";
+}
+
+export function getDossierQCStatus(dossier: DossierSAV): DossierQCStatus {
+  const checklist = dossier.checklistQC;
+  if (!checklist) {
+    return { status: "missing" };
+  }
+
+  const base = {
+    lastQCAt: checklist.dateValidation,
+    lastQCBy: checklist.validePar,
+  };
+
+  const status = normalizeQCStatus(checklist.validationGlobale);
+
+  if (status === "conforme") {
+    return { status: "conforme", ...base };
+  }
+
+  if (status === "refused") {
+    return {
+      status: "refused",
+      ...base,
+      refusalReasons: checklist.commentaireRefus ? [checklist.commentaireRefus] : [],
+    };
+  }
+
+  if (status === "to_recheck") {
+    return {
+      status: "to_recheck",
+      ...base,
+      refusalReasons: checklist.qcInvalidatedReason ? [checklist.qcInvalidatedReason] : [],
+    };
+  }
+
+  return {
+    status: hasAnyQualityChecklistSignal(checklist) ? "pending" : "missing",
+    ...base,
+  };
+}
+
+export function getDeliveryReadiness(dossier: DossierSAV): DeliveryReadiness {
+  const qcStatus = getDossierQCStatus(dossier);
+  const blockingCodes: DeliveryBlockingCode[] = [];
+
+  if (dossier.statut === DossierStatus.ANNULE) {
+    blockingCodes.push("delivery-dossier-cancelled");
+  }
+
+  if ([DossierStatus.LIVRE, DossierStatus.PRET_FACTURATION, DossierStatus.CLOTURE].includes(dossier.statut)) {
+    blockingCodes.push("delivery-dossier-already-delivered");
+  }
+
+  if (qcStatus.status === "missing" || qcStatus.status === "pending") {
+    blockingCodes.push("delivery-qc-missing");
+  } else if (qcStatus.status === "refused") {
+    blockingCodes.push("delivery-qc-refused");
+  } else if (qcStatus.status === "to_recheck") {
+    blockingCodes.push("delivery-qc-to-recheck");
+  }
+
+  const hasOpenWorkshopTasks = !dossier.ordresReparation.every(isRepairOrderDone);
+  if (hasOpenWorkshopTasks || dossier.statut === DossierStatus.BLOQUE || Boolean(dossier.bloqueRaison?.trim())) {
+    blockingCodes.push("delivery-workshop-open-tasks");
+  }
+
+  const uniqueCodes = uniqueDeliveryCodes(blockingCodes);
+  const blockingMessages = uniqueCodes.map(code => DELIVERY_BLOCKING_MESSAGES[code]);
+
+  const reasons: string[] = [];
+
+  // QC conditions
+  if (qcStatus.status === "missing" || qcStatus.status === "pending") {
+    reasons.push("Livraison bloquée : contrôle qualité obligatoire.");
+    reasons.push("Contrôle qualité accepté obligatoire");
+  } else if (qcStatus.status === "refused") {
+    reasons.push("Livraison bloquée : contrôle qualité refusé.");
+    reasons.push("Contrôle qualité refusé");
+  } else if (qcStatus.status === "to_recheck") {
+    reasons.push("Livraison bloquée : contrôle qualité à refaire après modification atelier.");
+    reasons.push("Contrôle qualité accepté obligatoire");
+  }
+
+  // Task conditions
+  const normalizedStatuses = dossier.ordresReparation.map(line => normalizeRepairOrderStatus(line.status));
+  const hasOpen = normalizedStatuses.some(s => s === "in_progress" || s === "pending" || s === "paused" || s === "reopened");
+  const hasBlocked = normalizedStatuses.some(s => s === "blocked");
+
+  if (hasOpenWorkshopTasks || dossier.statut === DossierStatus.BLOQUE || Boolean(dossier.bloqueRaison?.trim())) {
+    reasons.push("Livraison bloquée : travaux atelier non terminés.");
+    if (hasOpen) {
+      reasons.push("Une tâche atelier est encore en cours");
+    }
+    if (hasBlocked) {
+      reasons.push("Une tâche atelier est bloquée");
+    }
+  }
+
+  // Cancelled or delivered
+  if (dossier.statut === DossierStatus.ANNULE) {
+    reasons.push("Dossier annulé.");
+  }
+  if ([DossierStatus.LIVRE, DossierStatus.PRET_FACTURATION, DossierStatus.CLOTURE].includes(dossier.statut)) {
+    reasons.push("Dossier déjà livré.");
+  }
+
+  return {
+    canDeliver: uniqueCodes.length === 0,
+    canCloseOperationally: uniqueCodes.length === 0,
+    qcStatus,
+    blockingCodes: uniqueCodes,
+    blockingMessages,
+    reasons: [...new Set(reasons)],
+  };
+}
+
+export function invalidateQCAfterWorkshopChange(
+  dossier: DossierSAV,
+  reason: string,
+  role: UserRole | string = UserRole.CHEF_ATELIER,
+  now = new Date()
+): DossierSAV {
+  const qcStatus = getDossierQCStatus(dossier);
+  if (qcStatus.status !== "conforme") {
+    return dossier;
+  }
+
+  const safeReason = sanitizeFreeText(reason) || "Modification atelier après contrôle qualité conforme.";
+  const timestamp = now.toISOString();
+  const invalidated: DossierSAV = {
+    ...dossier,
+    checklistQC: {
+      ...dossier.checklistQC,
+      validationGlobale: "a_refaire",
+      qcInvalidatedAt: timestamp,
+      qcInvalidatedReason: safeReason,
+    },
+    livraison: {
+      ...dossier.livraison,
+      controleQualiteOk: false,
+      confirmationReceptionClient: false,
+      clotureInterne: false,
+    },
+    retourQualite: true,
+    prochaineActionRecommended: "Refaire le contrôle qualité avant restitution client.",
+    dateDernierStatut: timestamp,
+  };
+
+  return appendDossierOperationalTrace(
+    invalidated,
+    "qc_to_recheck",
+    role,
+    `QC à refaire après modification atelier: ${safeReason}`,
+    now
+  );
+}
+
 export function submitQualityControl(
   dossier: DossierSAV,
   userRole: UserRole,
@@ -1333,13 +1615,15 @@ export function submitQualityControl(
   const updatedQC: ChecklistQualite = {
     ...dossier.checklistQC,
     validationGlobale,
-    commentaireRefus: safeComment || undefined,
+    commentaireRefus: validationGlobale === "refuse" ? safeComment || undefined : undefined,
     dateValidation: now.toISOString(),
     validePar: userRole,
+    qcInvalidatedAt: undefined,
+    qcInvalidatedReason: undefined,
   };
 
   if (validationGlobale === "valide") {
-    return {
+    const validated: DossierSAV = {
       ...dossier,
       checklistQC: updatedQC,
       statut: DossierStatus.PRET_A_LIVRER,
@@ -1348,9 +1632,10 @@ export function submitQualityControl(
       bloqueRaison: "",
       dateDernierStatut: now.toISOString(),
     };
+    return appendDossierOperationalTrace(validated, "qc_validated", userRole, "QC validé conforme.", now);
   }
 
-  return {
+  const refused: DossierSAV = {
     ...dossier,
     checklistQC: updatedQC,
     statut: DossierStatus.EN_TRAVAUX,
@@ -1359,50 +1644,52 @@ export function submitQualityControl(
     bloqueRaison: "",
     dateDernierStatut: now.toISOString(),
   };
+  const withRefusalTrace = appendDossierOperationalTrace(refused, "qc_refused", userRole, `QC refusé: ${safeComment}`, now);
+  return appendDossierOperationalTrace(
+    withRefusalTrace,
+    "workshop_return_after_qc_refusal",
+    userRole,
+    `Retour atelier après refus QC: ${safeComment}`,
+    now
+  );
 }
 
 export function canDeliverDossier(dossier: DossierSAV): DossierDeliveryGate {
-  const reasons: string[] = [];
-  const repairStatuses = dossier.ordresReparation.map(line => normalizeRepairOrderStatus(line.status));
-
-  if (dossier.statut === DossierStatus.LIVRE || dossier.statut === DossierStatus.PRET_FACTURATION || dossier.statut === DossierStatus.CLOTURE) {
-    reasons.push("Le dossier est déjà livré ou clôturé.");
-  }
-  if (![DossierStatus.PRET_A_LIVRER, DossierStatus.NON_RETIRE].includes(dossier.statut)) {
-    reasons.push("Le statut doit être Prêt à livrer.");
-  }
-  if (dossier.checklistQC.validationGlobale !== "valide") {
-    reasons.push("Contrôle qualité accepté obligatoire.");
-  }
-  if (dossier.checklistQC.validationGlobale === "refuse") {
-    reasons.push("Contrôle qualité refusé : retour atelier requis.");
-  }
-  if (repairStatuses.some(status => status === "in_progress")) {
-    reasons.push("Une tâche atelier est encore en cours.");
-  }
-  if (repairStatuses.some(status => status === "blocked")) {
-    reasons.push("Une tâche atelier est bloquée.");
-  }
-  if (!dossier.ordresReparation.every(isRepairOrderDone)) {
-    reasons.push("Toutes les tâches obligatoires doivent être terminées.");
-  }
-  if (dossier.statut === DossierStatus.BLOQUE || Boolean(dossier.bloqueRaison?.trim())) {
-    reasons.push("Le dossier est bloqué.");
-  }
-
+  const readiness = getDeliveryReadiness(dossier);
   return {
-    allowed: reasons.length === 0,
-    reasons: Array.from(new Set(reasons)),
+    allowed: readiness.canDeliver,
+    reasons: readiness.reasons,
+    blockingCodes: readiness.blockingCodes,
+    qcStatus: readiness.qcStatus,
+    readiness,
   };
 }
 
-export function confirmDelivery(dossier: DossierSAV, now = new Date(), restitutionStatus = "Livré sans réserve"): DossierSAV {
-  if (!canDeliverDossier(dossier).allowed) {
-    return dossier;
+export function confirmDelivery(
+  dossier: DossierSAV,
+  now = new Date(),
+  restitutionStatus = "Livré sans réserve",
+  actor: UserRole | string = UserRole.LIVRAISON
+): DossierSAV {
+  const readiness = getDeliveryReadiness(dossier);
+  if (!readiness.canDeliver) {
+    return appendDossierOperationalTrace(
+      dossier,
+      "delivery_blocked",
+      actor,
+      readiness.blockingMessages.join(" "),
+      now
+    );
   }
   const statusValidation = validateDeliveryRestitutionStatus(restitutionStatus, dossier.livraison.remarquesLivraison);
   if (!statusValidation.valid) {
-    return dossier;
+    return appendDossierOperationalTrace(
+      dossier,
+      "delivery_blocked",
+      actor,
+      statusValidation.reason || "Livraison bloquée : statut restitution invalide.",
+      now
+    );
   }
 
   const livraison: DeliveryProtocole = {
@@ -1416,15 +1703,16 @@ export function confirmDelivery(dossier: DossierSAV, now = new Date(), restituti
   };
   const isNonWithdrawn = restitutionStatus === "Client absent" || restitutionStatus === "Livraison reportée";
 
-  return {
+  const delivered: DossierSAV = {
     ...dossier,
     livraison,
     statut: isNonWithdrawn ? DossierStatus.NON_RETIRE : DossierStatus.LIVRE,
     dateDernierStatut: now.toISOString(),
     prochaineActionRecommended: isNonWithdrawn
       ? "Replanifier la restitution client et suivre le véhicule non retiré"
-      : "Clôturer le dossier opérationnellement pour facturation ERP",
+      : "Clôturer et archiver le dossier opérationnellement",
   };
+  return appendDossierOperationalTrace(delivered, "delivery_validated", actor, "Livraison validée.", now);
 }
 
 export function archiveDeliveredDossier(dossier: DossierSAV, actor = UserRole.DIRECTEUR_SAV, now = new Date()): DossierSAV {
@@ -1800,6 +2088,8 @@ type RepairOrderMutation =
       line: RepairOrderLine;
       dossierChanges: Partial<DossierSAV>;
       dossierLog?: string;
+      invalidateQcReason?: string;
+      invalidateQcRole?: UserRole | string;
     }
   | { ok: false; error: string };
 
@@ -1827,7 +2117,7 @@ function mutateRepairOrder(
     ? [`${timestamp} - ${result.dossierLog}`, ...(dossier.historiqueLogs ?? [])]
     : dossier.historiqueLogs;
 
-  const nextDossier: DossierSAV = {
+  const nextDossierBeforeQcCheck: DossierSAV = {
     ...dossier,
     ...result.dossierChanges,
     ordresReparation: nextLines,
@@ -1835,6 +2125,14 @@ function mutateRepairOrder(
     dateDernierStatut: timestamp,
     historiqueLogs: nextLogs,
   };
+  const nextDossier = result.invalidateQcReason
+    ? invalidateQCAfterWorkshopChange(
+      nextDossierBeforeQcCheck,
+      result.invalidateQcReason,
+      result.invalidateQcRole ?? "Atelier",
+      now
+    )
+    : nextDossierBeforeQcCheck;
 
   const nextDossiers = normalizedDossiers.map(current => current.id === dossierId ? nextDossier : current);
   return { ok: true, dossiers: nextDossiers, dossier: nextDossier, line: result.line };

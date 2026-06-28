@@ -54,6 +54,10 @@ assert.ok(detailSource.includes('id="nimr-print-container"'), "DossierDetail doi
 // Verifying that task printing does not render inside nimr-print-container
 assert.ok(detailSource.includes('printType !== "task"'), "DossierDetail ne doit pas rendre le type task dans nimr-print-container.");
 assert.ok(source.includes('data-testid="technician-task-sheet-print"'), "La fiche tâche doit exposer un DOM imprimable testable.");
+assert.ok(source.includes("getDeliveryReadiness"), "Le bon de restitution doit utiliser le verrou QC/livraison central.");
+assert.ok(source.includes('data-testid="delivery-invalid-watermark"'), "Le bon de restitution doit afficher un watermark si QC non conforme.");
+assert.ok(source.includes("NON VALIDE POUR RESTITUTION"), "Le watermark de restitution non valide doit être présent.");
+assert.ok(source.includes("QC conforme"), "Le document de restitution autorisé doit afficher le statut QC conforme.");
 for (const expected of [
   "Dossier ID",
   "Client",

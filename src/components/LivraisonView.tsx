@@ -5,7 +5,7 @@
 
 import React, { useState, useRef } from "react";
 import { DELIVERY_RESTITUTION_STATUSES, DeliveryRestitutionStatus, DossierSAV, UserRole, DossierStatus } from "../types";
-import { archiveDeliveredDossier, canDeliverDossier, confirmDelivery } from "../sav-core";
+import { archiveDeliveredDossier, canDeliverDossier, confirmDelivery, getDeliveryReadiness } from "../sav-core";
 import { 
   CheckCircle, 
   AlertTriangle, 
@@ -156,6 +156,16 @@ export default function LivraisonView({
       const dateB = b.livraison.dateLivraisonReelle ? new Date(b.livraison.dateLivraisonReelle).getTime() : 0;
       return dateB - dateA;
     });
+  const selectedReadiness = selectedDossier ? getDeliveryReadiness(selectedDossier) : null;
+  const selectedQcLabel = selectedReadiness
+    ? ({
+      missing: "Non réalisé",
+      pending: "En attente",
+      conforme: "Conforme",
+      refused: "Refusé",
+      to_recheck: "À refaire",
+    }[selectedReadiness.qcStatus.status])
+    : "Non réalisé";
 
   const handleConfirmDelivery = () => {
     if (!canConfirmDelivery(currentUser.role)) {
@@ -169,6 +179,14 @@ export default function LivraisonView({
     setValidationError(null);
     setSuccessMsg(null);
     if (!selectedDossier) {
+      setIsConfirmingDelivery(false);
+      deliveryConfirmRef.current = false;
+      return;
+    }
+
+    const initialReadiness = getDeliveryReadiness(selectedDossier);
+    if (!initialReadiness.canDeliver) {
+      setValidationError(initialReadiness.blockingMessages.join(" "));
       setIsConfirmingDelivery(false);
       deliveryConfirmRef.current = false;
       return;
@@ -235,8 +253,8 @@ export default function LivraisonView({
       return;
     }
 
-    const delivered = confirmDelivery(withDeliveryInfo, new Date(), restitutionStatus);
-    if (delivered === withDeliveryInfo) {
+    const delivered = confirmDelivery(withDeliveryInfo, new Date(), restitutionStatus, currentUser.role);
+    if (![DossierStatus.LIVRE, DossierStatus.NON_RETIRE].includes(delivered.statut)) {
       setValidationError("Livraison refusée : prérequis opérationnels incomplets.");
       setIsConfirmingDelivery(false);
       deliveryConfirmRef.current = false;
@@ -382,6 +400,26 @@ export default function LivraisonView({
                     <div data-testid="delivery-validation-error" className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
                       <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
                       <span>{validationError}</span>
+                    </div>
+                  )}
+
+                  {selectedReadiness && (
+                    <div data-testid="delivery-readiness-block" className={`mb-4 rounded-xl border p-3 text-xs font-bold ${selectedReadiness.canDeliver ? "border-emerald-100 bg-emerald-50 text-emerald-800" : "border-rose-100 bg-rose-50 text-rose-800"}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-black uppercase">
+                          {selectedReadiness.canDeliver ? "Restitution autorisée" : "Restitution impossible"}
+                        </span>
+                        <span data-testid="delivery-qc-status" className="rounded-full border border-white/70 bg-white px-2 py-0.5 text-[10px] font-black uppercase">
+                          QC {selectedQcLabel}
+                        </span>
+                      </div>
+                      {!selectedReadiness.canDeliver && (
+                        <div className="mt-2 space-y-1">
+                          {selectedReadiness.blockingMessages.map(message => (
+                            <p key={message} data-testid="delivery-blocked-message">- {message}</p>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -552,9 +590,14 @@ export default function LivraisonView({
                 {/* Confirm delivery button */}
                 <button
                   data-testid="btn-delivery-confirm"
+                  disabled={!selectedReadiness?.canDeliver}
                   onClick={() => {
                     setValidationError(null);
                     setSuccessMsg(null);
+                    if (selectedReadiness && !selectedReadiness.canDeliver) {
+                      setValidationError(selectedReadiness.blockingMessages.join(" "));
+                      return;
+                    }
 
                     if (!qcOk || !clientInformed || !clientReceptionConfirmed) {
                       setValidationError("Toutes les étapes de la checklist de restitution doivent être cochées pour confirmer la livraison.");
@@ -586,11 +629,16 @@ export default function LivraisonView({
 
                     setShowConfirmModal(true);
                   }}
-                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer flex items-center justify-center gap-1.5"
+                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle className="w-4.5 h-4.5" />
-                  Valider et Confirmer la Livraison
+                  {selectedReadiness?.canDeliver ? "Valider restitution client" : "Livraison bloquée"}
                 </button>
+                <button
+                  data-testid="delivery-submit"
+                  disabled={!selectedReadiness?.canDeliver}
+                  className="hidden"
+                />
               </div>
             </div>
 

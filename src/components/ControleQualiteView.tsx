@@ -6,7 +6,7 @@
 import React, { useRef, useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
 import { DossierSAV, UserRole, DossierStatus } from "../types";
-import { submitQualityControl } from "../sav-core";
+import { getDossierQCStatus, submitQualityControl } from "../sav-core";
 import { sanitizeFreeText } from "../field-validations";
 import { 
   CheckCircle, 
@@ -100,9 +100,9 @@ export default function ControleQualiteView({
   const ftrLabel = ftrRate === null ? "Non mesurable" : `${ftrRate}%`;
 
   // 2. Filter Dossiers
-  const pendingDossiers = dossiers.filter(d => d.statut === DossierStatus.CONTROLE_QUALITE);
+  const pendingDossiers = dossiers.filter(d => d.statut === DossierStatus.CONTROLE_QUALITE || getDossierQCStatus(d).status === "to_recheck");
   const historyDossiers = dossiers
-    .filter(d => d.checklistQC.validationGlobale === "valide" || d.checklistQC.validationGlobale === "refuse")
+    .filter(d => d.checklistQC.validationGlobale === "valide" || d.checklistQC.validationGlobale === "refuse" || d.checklistQC.validationGlobale === "a_refaire")
     .sort((a, b) => {
       const dateA = a.checklistQC.dateValidation ? new Date(a.checklistQC.dateValidation).getTime() : 0;
       const dateB = b.checklistQC.dateValidation ? new Date(b.checklistQC.dateValidation).getTime() : 0;
@@ -301,6 +301,21 @@ export default function ControleQualiteView({
         <div className="lg:col-span-7">
           {selectedDossier ? (
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+              {(() => {
+                const qcStatus = getDossierQCStatus(selectedDossier);
+                const qcLabel = {
+                  missing: "Non réalisé",
+                  pending: "En cours",
+                  conforme: "Conforme",
+                  refused: "Refusé",
+                  to_recheck: "À refaire",
+                }[qcStatus.status];
+                return (
+                  <div className={`border-b px-4 py-2 text-xs font-black uppercase ${qcStatus.status === "conforme" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : qcStatus.status === "refused" || qcStatus.status === "to_recheck" ? "border-rose-100 bg-rose-50 text-rose-700" : "border-amber-100 bg-amber-50 text-amber-700"}`}>
+                    <span data-testid="qc-status-badge">QC {qcLabel}</span>
+                  </div>
+                );
+              })()}
               {/* Selected vehicle summary header */}
               <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-start gap-4">
                 <div>
@@ -391,6 +406,7 @@ export default function ControleQualiteView({
                     disabled={isSubmittingQC}
                     className="flex-1 py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
+                    <span data-testid="qc-refuse-button" className="sr-only">Refuser QC</span>
                     <XCircle className="w-4 h-4" />
                     Refuser & Retour Atelier
                   </button>
@@ -400,6 +416,7 @@ export default function ControleQualiteView({
                     disabled={isSubmittingQC}
                     className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
+                    <span data-testid="qc-approve-button" className="sr-only">Valider QC conforme</span>
                     <CheckCircle className="w-4 h-4" />
                     Valider le Contrôle Qualité
                   </button>
@@ -519,6 +536,11 @@ export default function ControleQualiteView({
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
                             <Check className="w-3 h-3" />
                             Accepté
+                          </span>
+                        ) : result === "a_refaire" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                            <AlertTriangle className="w-3 h-3" />
+                            À refaire
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-50 text-rose-700 font-bold border border-rose-200">

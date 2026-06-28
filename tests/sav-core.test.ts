@@ -30,8 +30,11 @@ import {
   createBackupPayload,
   createReceptionDossier,
   finishRepairOrder,
+  getDeliveryReadiness,
   getDossierOperationalBucket,
+  getDossierQCStatus,
   getVisibleTechnicianTasks,
+  invalidateQCAfterWorkshopChange,
   isArchivedOrErpReadyDossier,
   isDossierSAV,
   isOperationalActiveDossier,
@@ -229,6 +232,78 @@ function testDeliveryGuards() {
   const notWithdrawn = confirmDelivery(baseReady, fixedNow, "Client absent");
   assert.equal(notWithdrawn.statut, DossierStatus.NON_RETIRE);
   assert.equal(canDeliverDossier(notWithdrawn).allowed, true);
+}
+
+function testLot6KCDeliveryReadinessAndQcInvalidation() {
+  const ready = createReadyForDeliveryFixture();
+  const readyGate = getDeliveryReadiness(ready);
+  assert.equal(readyGate.canDeliver, true);
+  assert.equal(readyGate.canCloseOperationally, true);
+  assert.equal(getDossierQCStatus(ready).status, "conforme");
+
+  const missingQc = {
+    ...ready,
+    checklistQC: {
+      ...ready.checklistQC,
+      essaiEffectue: false,
+      defautRepare: false,
+      aucunVoyantAllume: false,
+      niveauxVerifies: false,
+      serrageSecurite: false,
+      propreteVehicule: false,
+      documentsPrets: false,
+      photosApresOk: false,
+      validationGlobale: "en_attente" as const,
+      dateValidation: undefined,
+      validePar: undefined,
+    },
+  };
+  assert.equal(getDossierQCStatus(missingQc).status, "missing");
+  assert.ok(getDeliveryReadiness(missingQc).blockingCodes.includes("delivery-qc-missing"));
+
+  const pendingQc = {
+    ...missingQc,
+    checklistQC: { ...missingQc.checklistQC, essaiEffectue: true },
+  };
+  assert.equal(getDossierQCStatus(pendingQc).status, "pending");
+  assert.ok(getDeliveryReadiness(pendingQc).blockingCodes.includes("delivery-qc-missing"));
+
+  const refusedQc = {
+    ...ready,
+    statut: DossierStatus.EN_TRAVAUX,
+    checklistQC: { ...ready.checklistQC, validationGlobale: "refuse" as const, commentaireRefus: "Essai routier non conforme." },
+  };
+  assert.equal(getDossierQCStatus(refusedQc).status, "refused");
+  assert.ok(getDeliveryReadiness(refusedQc).blockingCodes.includes("delivery-qc-refused"));
+
+  const invalidated = invalidateQCAfterWorkshopChange(ready, "Réouverture contrôle bruit train avant.", UserRole.CHEF_ATELIER, fixedNow);
+  assert.equal(invalidated.checklistQC.validationGlobale, "a_refaire");
+  assert.equal(invalidated.checklistQC.dateValidation, ready.checklistQC.dateValidation);
+  assert.equal(invalidated.checklistQC.validePar, ready.checklistQC.validePar);
+  assert.equal(getDossierQCStatus(invalidated).status, "to_recheck");
+  assert.ok(getDeliveryReadiness(invalidated).blockingCodes.includes("delivery-qc-to-recheck"));
+  assert.ok(invalidated.operationalTraces?.some(trace => trace.type === "qc_to_recheck"));
+
+  const openTask = {
+    ...ready,
+    ordresReparation: ready.ordresReparation.map((line, index) => index === 0 ? { ...line, status: "reopened" as const } : line),
+  };
+  assert.ok(getDeliveryReadiness(openTask).blockingCodes.includes("delivery-workshop-open-tasks"));
+
+  const cancelled = { ...ready, statut: DossierStatus.ANNULE };
+  assert.deepEqual(getDeliveryReadiness(cancelled).blockingCodes, ["delivery-dossier-cancelled"]);
+
+  const delivered = confirmDelivery(ready, fixedNow);
+  assert.ok(getDeliveryReadiness(delivered).blockingCodes.includes("delivery-dossier-already-delivered"));
+
+  const refusedStaysRefused = invalidateQCAfterWorkshopChange(refusedQc, "Réouverture après refus.", UserRole.CHEF_ATELIER, fixedNow);
+  assert.equal(refusedStaysRefused.checklistQC.validationGlobale, "refuse");
+  const pendingStaysPending = invalidateQCAfterWorkshopChange(pendingQc, "Modification avant QC.", UserRole.CHEF_ATELIER, fixedNow);
+  assert.equal(pendingStaysPending.checklistQC.validationGlobale, "en_attente");
+
+  const blockedDeliveryAttempt = confirmDelivery(invalidated, fixedNow);
+  assert.equal(blockedDeliveryAttempt.statut, invalidated.statut);
+  assert.ok(blockedDeliveryAttempt.operationalTraces?.some(trace => trace.type === "delivery_blocked"));
 }
 
 function testLot6IPostRcSafeguards() {
@@ -1447,6 +1522,7 @@ testTechnicianAssignment();
 testQualityControl();
 testDeliveryAndBilling();
 testDeliveryGuards();
+testLot6KCDeliveryReadinessAndQcInvalidation();
 testLot6IPostRcSafeguards();
 testImportExportValidation();
 testPhotoMutationsAndImportExport();

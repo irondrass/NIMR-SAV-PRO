@@ -49,7 +49,10 @@ import {
   isDossierActive,
   suggestWorkshopSlot,
   reserveSuggestedWorkshopSlot,
-  WorkshopSlotSuggestion
+  WorkshopSlotSuggestion,
+  getQCStatusDisplayLabel,
+  normalizeQCStatus,
+  getDossierQCStatus
 } from "../sav-core";
 import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
@@ -776,6 +779,8 @@ export default function DossierDetail({
     ? dossier.ordresReparation.find(line => line.id === durationValidationLineId)
     : undefined;
   const deliveryGate = canDeliverDossier(dossier);
+  const dossierQcStatus = getDossierQCStatus(dossier);
+  const canShowDeliveryButton = canDeliverVehicle || userRole === UserRole.CHEF_ATELIER;
   const linkedComplaints = reclamations
     .map(normalizeComplaint)
     .filter(reclamation => reclamation.dossierId === dossier.id);
@@ -922,7 +927,21 @@ export default function DossierDetail({
 
           <div className="flex flex-col md:items-end justify-center space-y-2">
             <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Statut Actuel Opérationnel</span>
-            <StatusBadge status={dossier.statut} />
+            <div className="flex items-center gap-2">
+              <StatusBadge status={dossier.statut} />
+              {deliveryGate.allowed ? (
+                <span data-testid="dossier-delivery-state" className="rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 text-xs font-bold font-display uppercase tracking-wider">
+                  Prêt restitution
+                </span>
+              ) : (
+                <span data-testid="dossier-delivery-state" className="hidden">
+                  Restitution impossible
+                </span>
+              )}
+              <span data-testid="delivery-qc-status" className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-800">
+                QC {getQCStatusDisplayLabel(dossierQcStatus.status)}
+              </span>
+            </div>
 
             {/* Progress indicator */}
             <div className="mt-1 flex items-center gap-2">
@@ -2177,9 +2196,16 @@ export default function DossierDetail({
         {/* Tab 6: Contrôle qualité */}
         {activeTab === "quality-control" && (
           <div className="space-y-6">
-            <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Contrôle de Qualité Obligatoire</h3>
-              <p className="text-slate-400 text-xs">Checklist de sécurité opérationnelle à valider obligatoirement par l'essayeur contrôleur technique</p>
+            <div className="border-b pb-2 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 ">Protocole de Contrôle de Qualité Obligatoire</h3>
+                <p className="text-slate-400 text-xs">Checklist de sécurité opérationnelle à valider obligatoirement par l'essayeur contrôleur technique</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span data-testid="qc-status-badge" className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-800">
+                  QC {getQCStatusDisplayLabel(dossierQcStatus.status)}
+                </span>
+              </div>
             </div>
 
             {qcError && (
@@ -2314,42 +2340,61 @@ export default function DossierDetail({
                   </span>
                 </div>
               </div>
+            </div>
+
+            {/* Delivery Readiness Block */}
+            <div
+              data-testid="delivery-readiness-block"
+              className={`p-4 border rounded-xl space-y-3 text-xs ${
+                deliveryGate.allowed ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-black uppercase">
+                  {deliveryGate.allowed ? "Restitution autorisée" : "Restitution impossible"}
+                </span>
+                <span data-testid="delivery-qc-status" className="rounded-full border border-white/70 bg-white px-2 py-0.5 text-[10px] font-black uppercase text-slate-800">
+                  {getQCStatusDisplayLabel(dossierQcStatus.status)}
+                </span>
+              </div>
               {!deliveryGate.allowed && (
-                <div data-testid="delivery-blocking-reasons" className="mt-3 p-3 bg-red-50 border border-red-100 rounded-lg text-red-700 font-bold space-y-1">
-                  {deliveryGate.reasons.map(reason => (
-                    <p key={reason}>- {reason}</p>
-                  ))}
+                <div className="mt-2 space-y-1">
+                  <p data-testid="delivery-blocked-message" className="whitespace-pre-line font-medium">
+                    {deliveryGate.reasons.map(reason => `- ${reason}`).join("\n")}
+                  </p>
                 </div>
               )}
             </div>
 
             {/* Complete Handover section */}
-            {dossier.statut === DossierStatus.PRET_A_LIVRER && canDeliverVehicle ? (
+            {dossier.statut === DossierStatus.PRET_A_LIVRER && canShowDeliveryButton ? (
               <div className="space-y-4">
-                <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
-                  <span className="font-bold text-blue-800  block uppercase font-display">Acceptation / signature simple client lors de la remise des clés :</span>
+                {dossier.statut === DossierStatus.PRET_A_LIVRER && canDeliverVehicle && (
+                  <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
+                    <span className="font-bold text-blue-800  block uppercase font-display">Acceptation / signature simple client lors de la remise des clés :</span>
 
-                  {/* Visual Signature Mock */}
-                  <div
-                    data-testid="delivery-signature"
-                    className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer"
-                    onClick={() => setSignatureCaptured(true)}
-                  >
-                    {signatureCaptured ? "[ Acceptation simple client capturée ]" : "[ Cliquer ici pour simuler l'acceptation/signature simple du client ]"}
+                    {/* Visual Signature Mock */}
+                    <div
+                      data-testid="delivery-signature"
+                      className="bg-white  border border-dashed border-zinc-300  h-28 rounded-lg flex items-center justify-center text-zinc-400 font-mono italic cursor-pointer"
+                      onClick={() => setSignatureCaptured(true)}
+                    >
+                      {signatureCaptured ? "[ Acceptation simple client capturée ]" : "[ Cliquer ici pour simuler l'acceptation/signature simple du client ]"}
+                    </div>
+
+                    <p data-testid="detail-simple-signature-notice" className="text-[10px] text-zinc-500">{PILOT_SIGNATURE_NOTICE}</p>
                   </div>
-
-                  <p data-testid="detail-simple-signature-notice" className="text-[10px] text-zinc-500">{PILOT_SIGNATURE_NOTICE}</p>
-                </div>
+                )}
 
                 <div className="flex gap-2">
                   <button
                     onClick={handleDeliveryConfirm}
                     data-testid="delivery-submit"
-                    disabled={!deliveryGate.allowed}
+                    disabled={!deliveryGate.allowed || !canDeliverVehicle}
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:hover:bg-gray-300 disabled:text-gray-500 text-white font-bold rounded text-xs transition duration-200 cursor-pointer disabled:cursor-not-allowed"
                     title={deliveryGate.allowed ? "Restituer le véhicule" : deliveryGate.reasons.join(" ")}
                   >
-                    Restituer le Véhicule au client
+                    {deliveryGate.allowed && canDeliverVehicle ? "Valider restitution client" : "Livraison bloquée"}
                   </button>
                 </div>
               </div>
@@ -2426,11 +2471,7 @@ export default function DossierDetail({
                   )}
                 </div>
               </div>
-            ) : (
-              <p className="text-xs text-zinc-400 italic">
-                La remise des clés n'est autorisée qu'après validation complète du contrôle routier de qualité.
-              </p>
-            )}
+            ) : null}
 
           </div>
         )}

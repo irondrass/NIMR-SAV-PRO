@@ -247,6 +247,24 @@ export interface SatisfactionFeedback {
   internalPilotOnly: true;
 }
 
+export type ChecklistValidationState = "en_attente" | "valide" | "refuse" | "a_refaire";
+
+export type DossierOperationalTraceType =
+  | "qc_validated"
+  | "qc_refused"
+  | "qc_to_recheck"
+  | "delivery_blocked"
+  | "delivery_validated"
+  | "workshop_return_after_qc_refusal";
+
+export interface DossierOperationalTrace {
+  type: DossierOperationalTraceType;
+  dateTime: string;
+  role: UserRole | string;
+  message: string;
+  dossierId: string;
+}
+
 export interface ChecklistQualite {
   essaiEffectue: boolean;
   defautRepare: boolean;
@@ -256,10 +274,12 @@ export interface ChecklistQualite {
   propreteVehicule: boolean;
   documentsPrets: boolean;
   photosApresOk: boolean;
-  validationGlobale: "en_attente" | "valide" | "refuse";
+  validationGlobale: ChecklistValidationState;
   commentaireRefus?: string;
   dateValidation?: string;
   validePar?: string;
+  qcInvalidatedAt?: string;
+  qcInvalidatedReason?: string;
 }
 
 export interface DeliveryProtocole {
@@ -423,6 +443,7 @@ export interface DossierSAV {
   datePlanningDebut?: string;
   datePlanningFin?: string;
   historiqueLogs?: string[];
+  operationalTraces?: DossierOperationalTrace[];
 }
 
 export type WorkshopReservationStatus =

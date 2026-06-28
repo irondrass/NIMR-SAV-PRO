@@ -7,6 +7,7 @@ import React from "react";
 import { DossierSAV, ReclammationClient, RepairOrderLine } from "../types";
 import { getTaskStatusVisual } from "../task-status-visual";
 import { CLIENT_SIDE_SECURITY_NOTICE, PILOT_SIGNATURE_NOTICE } from "../rc-notices";
+import { getDeliveryReadiness, getDossierQCStatus } from "../sav-core";
 
 function formatPrintDuration(hours: number | undefined): string {
   return hours && hours > 0 ? `${hours} h` : "À estimer";
@@ -222,6 +223,14 @@ export default function PrintDocuments({
 
   if (type === "qc") {
     const qc = dossier.checklistQC;
+    const qcStatus = getDossierQCStatus(dossier);
+    const qcPrintLabel = qcStatus.status === "conforme"
+      ? "ACCEPTÉ"
+      : qcStatus.status === "to_recheck"
+        ? "À REFAIRE"
+        : qcStatus.status === "missing" || qcStatus.status === "pending"
+          ? "NON RÉALISÉ"
+          : "REFUSÉ";
     return (
       <div className="p-4 bg-white text-slate-900 max-w-4xl mx-auto">
         {renderHeader("Fiche Contrôle Qualité")}
@@ -269,8 +278,11 @@ export default function PrintDocuments({
 
           <div className="border border-slate-200 p-4 rounded-lg space-y-1">
             <h3 className="font-bold text-slate-800 uppercase tracking-wider mb-2 text-[10px] border-b pb-1">Décision Qualité</h3>
-            <p><span className="font-bold text-slate-700">Statut Qualité :</span> <span className="font-extrabold uppercase text-green-700">{qc.validationGlobale === "valide" ? "ACCEPTÉ" : "REFUSÉ"}</span></p>
+            <p><span className="font-bold text-slate-700">Statut Qualité :</span> <span className="font-extrabold uppercase text-green-700">{qcPrintLabel}</span></p>
             <p><span className="font-bold text-slate-700">Validé par :</span> {qc.validePar || "Validateur Qualité"}</p>
+            {qc.dateValidation && (
+              <p><span className="font-bold text-slate-700">Date QC :</span> {new Date(qc.dateValidation).toLocaleString("fr-FR")}</p>
+            )}
             {qc.commentaireRefus && (
               <p className="mt-1 font-semibold text-rose-700"><span className="font-bold">Commentaires de Refus :</span> {qc.commentaireRefus}</p>
             )}
@@ -295,11 +307,24 @@ export default function PrintDocuments({
 
   if (type === "delivery") {
     const del = dossier.livraison;
+    const deliveryReadiness = getDeliveryReadiness(dossier);
+    const qcStatus = deliveryReadiness.qcStatus;
     return (
       <div className="p-4 bg-white text-slate-900 max-w-4xl mx-auto">
         {renderHeader("Bon de Restitution & Livraison")}
         {renderDossierInfo()}
         {renderVehicleInfo()}
+
+        {!deliveryReadiness.canDeliver && (
+          <div data-testid="delivery-invalid-watermark" className="mb-6 border-2 border-rose-700 bg-rose-50 p-4 text-center text-sm font-black uppercase tracking-wider text-rose-800">
+            NON VALIDE POUR RESTITUTION — QC NON CONFORME
+          </div>
+        )}
+        {qcStatus.status === "conforme" && (
+          <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800">
+            QC conforme{qcStatus.lastQCAt ? ` le ${new Date(qcStatus.lastQCAt).toLocaleString("fr-FR")}` : ""}{qcStatus.lastQCBy ? ` — Contrôleur QC: ${qcStatus.lastQCBy}` : ""}
+          </div>
+        )}
 
         <div className="space-y-4 text-xs mb-8">
           <div className="border border-slate-200 p-4 rounded-lg">

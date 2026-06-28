@@ -11,8 +11,11 @@ import {
   canDeliverDossier,
   confirmDelivery,
   finishRepairOrder,
+  getDeliveryReadiness,
+  getDossierQCStatus,
   getDossierOperationalBucket,
   getVisibleTechnicianTasks,
+  invalidateQCAfterWorkshopChange,
   isOperationalActiveDossier,
   markDossierImmobilized,
   recordSatisfactionFeedback,
@@ -3030,6 +3033,58 @@ registerCheck("Lot 6I Invariants", "exports et rapports restent opérationnels s
   assert.equal(fs.existsSync("Liste Vehicule.csv"), false);
   assert.equal(fs.existsSync("Liste Vehicule.xlsx"), false);
   assert.equal(fs.existsSync(".env"), false);
+});
+
+registerCheck("Lot 6K-C Invariants", "verrou QC obligatoire avant restitution", () => {
+  const base = getMockDossier({
+    statut: DossierStatus.PRET_A_LIVRER,
+    ordresReparation: [
+      { id: "task_done", designation: "Contrôle final", tempsEstime: 1, tempsPasse: 1, status: "done" },
+    ],
+    checklistQC: {
+      essaiEffectue: true,
+      defautRepare: true,
+      aucunVoyantAllume: true,
+      niveauxVerifies: true,
+      serrageSecurite: true,
+      propreteVehicule: true,
+      documentsPrets: true,
+      photosApresOk: true,
+      validationGlobale: "valide",
+      dateValidation: "2026-06-24T09:00:00.000Z",
+      validePar: UserRole.CONTROLE_QUALITE,
+    },
+  });
+
+  assert.equal(getDossierQCStatus(base).status, "conforme");
+  assert.equal(getDeliveryReadiness(base).canDeliver, true);
+  const invalidated = invalidateQCAfterWorkshopChange(base, "Réouverture atelier après QC.", UserRole.CHEF_ATELIER);
+  assert.equal(getDossierQCStatus(invalidated).status, "to_recheck");
+  assert.equal(getDeliveryReadiness(invalidated).canDeliver, false);
+  assert.ok(getDeliveryReadiness(invalidated).blockingCodes.includes("delivery-qc-to-recheck"));
+
+  const refused = {
+    ...base,
+    statut: DossierStatus.EN_TRAVAUX,
+    checklistQC: { ...base.checklistQC, validationGlobale: "refuse" as const, commentaireRefus: "Essai routier à reprendre." },
+  };
+  assert.ok(getDeliveryReadiness(refused).blockingCodes.includes("delivery-qc-refused"));
+  const blockedAttempt = confirmDelivery(invalidated);
+  assert.ok(blockedAttempt.operationalTraces?.some(trace => trace.type === "delivery_blocked"));
+
+  const coreContent = fs.readFileSync("src/sav-core.ts", "utf8");
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  const qcContent = fs.readFileSync("src/components/ControleQualiteView.tsx", "utf8");
+  const printContent = fs.readFileSync("src/components/PrintDocuments.tsx", "utf8");
+
+  assert.ok(coreContent.includes("getDeliveryReadiness"), "Le verrou livraison doit être dans le cœur SAV");
+  assert.ok(coreContent.includes("invalidateQCAfterWorkshopChange"), "Le cœur SAV doit invalider QC après modification atelier");
+  assert.ok(detailContent.includes('data-testid="dossier-delivery-state"'), "DossierDetail doit afficher l'état livraison");
+  assert.ok(detailContent.includes('data-testid="delivery-readiness-block"'), "DossierDetail doit afficher les blocages restitution");
+  assert.ok(deliveryContent.includes("getDeliveryReadiness(selectedDossier)"), "LivraisonView doit lire la readiness centrale");
+  assert.ok(qcContent.includes('data-testid="qc-status-badge"'), "Le module QC doit afficher un badge statut");
+  assert.ok(printContent.includes('data-testid="delivery-invalid-watermark"'), "Le bon restitution doit afficher le watermark QC non conforme");
 });
 
 registerCheck("Lot 6K-B-A Invariants", "collision véhicule et ETA utilisent tous les dossiers actifs", () => {
