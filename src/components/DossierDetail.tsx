@@ -23,7 +23,9 @@ import {
   TaskBlockFollowUpOwner,
   PHOTO_CATEGORIES,
   PhotoCategory,
-  WorkshopReservation
+  WorkshopReservation,
+  TechnicienResource,
+  WorkshopAvailabilityConfig
 } from "../types";
 import * as perm from "../permissions";
 import {
@@ -44,13 +46,23 @@ import {
   submitQualityControl,
   getVehicleETAInfo,
   isSameVehicle,
-  isDossierActive
+  isDossierActive,
+  suggestWorkshopSlot,
+  reserveSuggestedWorkshopSlot,
+  WorkshopSlotSuggestion
 } from "../sav-core";
 import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { getTaskStatusVisual } from "../task-status-visual";
 import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
+import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
+import {
+  buildDossierPlanningOverview,
+  getRepairLinePlanningSegments,
+  PlanningStepId,
+  releasePlanningStepReservation,
+} from "../workshop-planning-steps";
 import {
   ArrowLeft,
   FileText,
@@ -85,6 +97,9 @@ interface DossierDetailProps {
   onUpdateDossier: (updated: DossierSAV) => void;
   techniciensList: { id: string; nom: string }[];
   reservations?: WorkshopReservation[];
+  onUpdateReservations: (updated: WorkshopReservation[]) => void;
+  techniciens: TechnicienResource[];
+  availabilityConfig: WorkshopAvailabilityConfig;
 }
 
 function formatRepairOrderDuration(hours: number | undefined): string {
@@ -99,7 +114,10 @@ export default function DossierDetail({
   onBack,
   onUpdateDossier,
   techniciensList,
-  reservations
+  reservations,
+  onUpdateReservations,
+  techniciens,
+  availabilityConfig
 }: DossierDetailProps) {
   const [activeTab, setActiveTab] = useState<string>("resume");
   const [printType, setPrintType] = useState<"reception" | "or" | "qc" | "delivery" | "task" | null>(null);
@@ -147,6 +165,35 @@ export default function DossierDetail({
   // Modal states for Lot 1
   const [modalActive, setModalActive] = useState<"qc-refuse" | "task-reopen" | "task-block" | "task-unblock" | "task-finish" | null>(null);
   const [modalTargetLineId, setModalTargetLineId] = useState<string | null>(null);
+  const [planningStepSuggestion, setPlanningStepSuggestion] = useState<{
+    stepId: PlanningStepId;
+    lineId: string;
+    suggestion: WorkshopSlotSuggestion;
+  } | null>(null);
+  const [planningStepFeedback, setPlanningStepFeedback] = useState("");
+  const [planningStepError, setPlanningStepError] = useState("");
+
+  const planningOverview = buildDossierPlanningOverview(dossier, reservations || []);
+  const canEditDossierPlanning = userRole === UserRole.CHEF_ATELIER;
+  const planningEtaInfo = getVehicleETAInfo(dossiers, dossier.id, reservations || []);
+  const planningValidatedRows = planningOverview.steps.flatMap(step =>
+    step.lines
+      .filter(item => item.isPlanned)
+      .map(item => {
+        const segments = getRepairLinePlanningSegments(item.line);
+        const firstSegment = segments[0];
+        const lastSegment = segments[segments.length - 1];
+        return {
+          step,
+          item,
+          start: firstSegment?.start || item.reservation?.startTime,
+          end: lastSegment?.end || item.reservation?.endTime,
+          technicianId: item.line.plannedTechnicianId || item.reservation?.technicianId,
+          bayId: item.line.plannedBayId || item.reservation?.bayId,
+          duration: item.reservedHours || item.reservation?.totalHours || 0,
+        };
+      })
+  );
 
   const handlePrintDocument = (type: "reception" | "or" | "qc" | "delivery") => {
     setPrintTask(null);
@@ -200,6 +247,154 @@ export default function DossierDetail({
       dateDernierStatut: new Date().toISOString()
     };
     onUpdateDossier(updated);
+  };
+
+  const getTechnicianName = (id?: string) =>
+    techniciens.find(technician => technician.id === id)?.nom ||
+    techniciensList.find(technician => technician.id === id)?.nom ||
+    id ||
+    "Non affecté";
+
+  const getBayName = (id?: string) =>
+    DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === id)?.name || id || "Non affecté";
+
+  const formatPlanningHours = (hours: number) => `${Number(hours.toFixed(2)).toLocaleString("fr-FR")} h`;
+
+  const formatPlanningDate = (value?: string) => {
+    if (!value) return "Non définie";
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime())
+      ? parsed.toLocaleDateString("fr-FR")
+      : "Non définie";
+  };
+
+  const formatPlanningTimeRange = (start?: string, end?: string) => {
+    if (!start || !end) return "Non réservé";
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return "Non réservé";
+    return `${startDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - ${endDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const resetPlanningStepMessages = () => {
+    setPlanningStepError("");
+    setPlanningStepFeedback("");
+  };
+
+  const findPlanningStepLine = (stepId: PlanningStepId, mode: "reserve" | "reschedule") => {
+    const step = planningOverview.steps.find(item => item.stepId === stepId);
+    if (!step) return null;
+    return mode === "reschedule"
+      ? step.reschedulableLine || step.nextReservableLine || null
+      : step.nextReservableLine || step.reschedulableLine || null;
+  };
+
+  const handleSuggestPlanningStep = (stepId: PlanningStepId, mode: "reserve" | "reschedule" = "reserve") => {
+    resetPlanningStepMessages();
+    if (!canEditDossierPlanning) {
+      setPlanningStepError("Consultation uniquement : action réservée au Chef Atelier.");
+      return;
+    }
+    const line = findPlanningStepLine(stepId, mode);
+    if (!line) {
+      const step = planningOverview.steps.find(item => item.stepId === stepId);
+      setPlanningStepError(
+        step?.unvalidatedDurationCount
+          ? "Durée à valider par Chef Atelier avant planification."
+          : "Aucune tâche active à réserver sur cette étape."
+      );
+      setPlanningStepSuggestion(null);
+      return;
+    }
+    if (!line.tempsEstime || line.tempsEstime <= 0 || !line.isEstimatedDurationValidated) {
+      setPlanningStepError("Durée à valider par Chef Atelier avant planification.");
+      setPlanningStepSuggestion(null);
+      return;
+    }
+
+    try {
+      const suggestion = suggestWorkshopSlot({
+        dossiers,
+        technicians: techniciens,
+        workshopBays: DEFAULT_WORKSHOP_BAYS,
+        estimatedHours: line.tempsEstime,
+        desiredDate: new Date(),
+        dossierId: dossier.id,
+        reservations: reservations || [],
+        availabilityConfig,
+      }, new Date());
+      setPlanningStepSuggestion({ stepId, lineId: line.id, suggestion });
+      setPlanningStepFeedback(
+        mode === "reschedule"
+          ? "Nouveau créneau proposé pour replanification."
+          : "Meilleur créneau disponible pour cette étape."
+      );
+    } catch (error: any) {
+      setPlanningStepSuggestion(null);
+      setPlanningStepError(error.message || "Aucun créneau disponible dans la période sélectionnée.");
+    }
+  };
+
+  const handleApplyPlanningStepSuggestion = () => {
+    resetPlanningStepMessages();
+    if (!canEditDossierPlanning) {
+      setPlanningStepError("Consultation uniquement : action réservée au Chef Atelier.");
+      return;
+    }
+    if (!planningStepSuggestion) {
+      setPlanningStepError("Aucun créneau proposé à réserver.");
+      return;
+    }
+
+    const result = reserveSuggestedWorkshopSlot({
+      role: userRole,
+      dossiers,
+      reservations: reservations || [],
+      dossierId: dossier.id,
+      lineId: planningStepSuggestion.lineId,
+      suggestion: planningStepSuggestion.suggestion,
+      technicians: techniciens,
+      workshopBays: DEFAULT_WORKSHOP_BAYS,
+      availabilityConfig,
+    }, new Date());
+
+    if (result.ok === false) {
+      setPlanningStepError(result.error || "Le créneau proposé n'est plus disponible.");
+      return;
+    }
+
+    onUpdateDossier(result.dossier);
+    onUpdateReservations(result.reservations);
+    setPlanningStepFeedback("Créneau réservé avec succès.");
+    setPlanningStepSuggestion(null);
+  };
+
+  const handleReleasePlanningStep = (stepId: PlanningStepId) => {
+    resetPlanningStepMessages();
+    if (!canEditDossierPlanning) {
+      setPlanningStepError("Consultation uniquement : action réservée au Chef Atelier.");
+      return;
+    }
+    const result = releasePlanningStepReservation(dossier, reservations || [], stepId, new Date());
+    if (result.releasedTaskIds.length === 0) {
+      setPlanningStepError("Aucun créneau réservé à libérer pour cette étape.");
+      return;
+    }
+    onUpdateDossier(result.dossier);
+    onUpdateReservations(result.reservations);
+    setPlanningStepSuggestion(null);
+    setPlanningStepFeedback("Étape libérée du planning atelier.");
+  };
+
+  const handleViewStepOnGantt = (stepId: PlanningStepId) => {
+    const step = planningOverview.steps.find(item => item.stepId === stepId);
+    const firstPlanned = step?.lines.find(item => item.isPlanned);
+    setPlanningStepError("");
+    setPlanningStepFeedback(
+      firstPlanned
+        ? `Étape ${step?.label} visible dans le Gantt Planning Atelier à la date ${formatPlanningDate(firstPlanned.line.planningStart || firstPlanned.reservation?.startTime)}.`
+        : `Étape ${step?.label || stepId} non réservée : aucun bloc Gantt à afficher.`
+    );
   };
 
   // 1. Repair Order functions
@@ -746,6 +941,7 @@ export default function DossierDetail({
           { key: "resume", label: "Résumé Action", icon: FileText },
           { key: "client", label: "Client & Véhicule", icon: User },
           { key: "repair-orders", label: "Ordres Travaux", icon: Wrench },
+          { key: "rdv-planning", label: "RDV & Planning", icon: Clock },
           { key: "photos", label: "Dossier Photos", icon: Camera },
           { key: "complements", label: "Compléments & Accords", icon: ThumbsUp },
           { key: "documents", label: "Documents", icon: Printer },
@@ -1394,6 +1590,327 @@ export default function DossierDetail({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Tab 4: RDV & Planning */}
+        {activeTab === "rdv-planning" && (
+          <div data-testid="dossier-planning-tab" className="space-y-5">
+            <div className="flex flex-col gap-2 border-b pb-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h3 className="font-display text-sm font-black uppercase tracking-tight text-slate-900">RDV & Planning atelier</h3>
+                <p className="text-xs font-semibold text-slate-400">Vue terrain par étapes, réservations unitaires et ETA véhicule.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                {planningOverview.planningComplete ? (
+                  <span data-testid="planning-complete-badge" className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-emerald-700">
+                    Planning complet
+                  </span>
+                ) : (
+                  <span data-testid="planning-incomplete-warning" className="rounded-full border border-amber-100 bg-amber-50 px-2.5 py-1 text-amber-700">
+                    Planning incomplet
+                  </span>
+                )}
+                {!canEditDossierPlanning && (
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                    Consultation uniquement
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {(planningStepFeedback || planningStepError) && (
+              <div
+                data-testid="planning-suggest-feedback"
+                className={`rounded-lg border px-3 py-2 text-xs font-bold ${
+                  planningStepError
+                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                {planningStepError || planningStepFeedback}
+              </div>
+            )}
+
+            <section className="grid grid-cols-1 gap-3 xl:grid-cols-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs">
+                <span className="block text-[10px] font-black uppercase text-slate-400">Total atelier</span>
+                <strong data-testid="planning-total-estimated" className="mt-1 block text-2xl font-black text-slate-900">
+                  {formatPlanningHours(planningOverview.totalEstimatedHours)}
+                </strong>
+                <p className="mt-2 font-semibold text-slate-500">{planningOverview.unvalidatedDurationCount} durée(s) à valider</p>
+              </div>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-xs">
+                <span className="block text-[10px] font-black uppercase text-blue-400">Total réservé</span>
+                <strong data-testid="planning-total-reserved" className="mt-1 block text-2xl font-black text-blue-900">
+                  {formatPlanningHours(planningOverview.totalReservedHours)}
+                </strong>
+                <p className="mt-2 font-semibold text-blue-700">{planningOverview.reservedStepCount}/{planningOverview.activeStepCount} étape(s) réservée(s)</p>
+              </div>
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-xs">
+                <span className="block text-[10px] font-black uppercase text-indigo-400">Marge atelier</span>
+                <strong data-testid="planning-workshop-margin" className="mt-1 block text-2xl font-black text-indigo-900">
+                  {formatPlanningHours(planningOverview.workshopMarginHours)}
+                </strong>
+                <p className="mt-2 font-semibold text-indigo-700">Reste à réserver sur durées validées</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-xs">
+                <span className="block text-[10px] font-black uppercase text-slate-400">Synthèse étapes</span>
+                <strong className="mt-1 block text-2xl font-black text-slate-900">{planningOverview.activeStepCount}</strong>
+                <p className="mt-2 font-semibold text-slate-500">{planningOverview.unreservedStepCount} étape(s) encore à réserver</p>
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Étapes à modifier</h4>
+                <span className="text-[10px] font-bold uppercase text-slate-400">Réservation unitaire par tâche atelier</span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+                {planningOverview.steps.map(step => {
+                  const activeSuggestion = planningStepSuggestion?.stepId === step.stepId ? planningStepSuggestion.suggestion : null;
+                  const primaryLine = step.nextReservableLine || step.reschedulableLine || step.lines[0]?.line;
+                  const plannedLine = step.lines.find(item => item.isPlanned);
+                  const plannedStart = plannedLine?.line.planningStart || plannedLine?.reservation?.startTime;
+                  const plannedEnd = plannedLine?.line.planningEnd || plannedLine?.reservation?.endTime;
+                  const technicianId = plannedLine?.line.plannedTechnicianId || plannedLine?.reservation?.technicianId;
+                  const bayId = plannedLine?.line.plannedBayId || plannedLine?.reservation?.bayId;
+
+                  return (
+                    <article
+                      key={step.stepId}
+                      data-testid={`planning-step-card-${step.stepId}`}
+                      className={`rounded-lg border p-4 text-xs shadow-sm ${
+                        step.active ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h5 className="font-black text-slate-900">{step.label}</h5>
+                          <p className="mt-1 font-semibold text-slate-400">{step.serviceType}</p>
+                        </div>
+                        {step.active ? (
+                          <span data-testid="planning-step-active" className="rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-700">
+                            Étape active
+                          </span>
+                        ) : (
+                          <span data-testid="planning-step-unused" className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[9px] font-black uppercase text-slate-500">
+                            Non utilisée
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] font-semibold text-slate-500">
+                        <div>
+                          <span className="block text-slate-400">Temps atelier réservé</span>
+                          <strong className="text-slate-800">{formatPlanningHours(step.reservedHours)}</strong>
+                        </div>
+                        <div>
+                          <span className="block text-slate-400">Durée validée</span>
+                          <strong className="text-slate-800">{formatPlanningHours(step.estimatedHours)}</strong>
+                        </div>
+                        <div>
+                          <span className="block text-slate-400">Technicien affecté</span>
+                          <strong className="text-slate-800">{getTechnicianName(technicianId)}</strong>
+                        </div>
+                        <div>
+                          <span className="block text-slate-400">Pont / matériel</span>
+                          <strong className="text-slate-800">{getBayName(bayId)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {step.isFullyReserved ? (
+                          <span data-testid="planning-step-reserved-status" className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase text-blue-700">
+                            Réservé
+                          </span>
+                        ) : step.active ? (
+                          <span className="rounded-full border border-amber-100 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase text-amber-700">
+                            À réserver
+                          </span>
+                        ) : null}
+                        {step.needsConfirmation && (
+                          <span className="rounded-full border border-purple-100 bg-purple-50 px-2 py-0.5 text-[9px] font-black uppercase text-purple-700">
+                            Étape à confirmer
+                          </span>
+                        )}
+                      </div>
+
+                      {primaryLine && (
+                        <div className="mt-3 rounded-lg bg-slate-50 p-2 text-[11px] font-semibold text-slate-600">
+                          <span className="block font-black text-slate-800">{primaryLine.designation}</span>
+                          <span>{formatPlanningTimeRange(plannedStart, plannedEnd)}</span>
+                        </div>
+                      )}
+
+                      {activeSuggestion && (
+                        <div data-testid="planning-suggest-result" className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-[11px] font-semibold text-blue-900">
+                          <strong className="block">Créneau proposé</strong>
+                          <span className="block">{formatPlanningDate(activeSuggestion.startTime)} · {formatPlanningTimeRange(activeSuggestion.startTime, activeSuggestion.endTime)}</span>
+                          <span className="block">Technicien : {activeSuggestion.technicianName}</span>
+                          <span className="block">Pont : {activeSuggestion.bayName}</span>
+                          <button
+                            type="button"
+                            data-testid="planning-suggest-apply"
+                            onClick={handleApplyPlanningStepSuggestion}
+                            className="mt-2 flex min-h-12 w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700"
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            Réserver ce créneau
+                          </button>
+                        </div>
+                      )}
+
+                      {canEditDossierPlanning && step.active && (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          {!step.isFullyReserved && (
+                            <button
+                              type="button"
+                              data-testid="planning-step-reserve"
+                              onClick={() => handleSuggestPlanningStep(step.stepId, "reserve")}
+                              className="flex min-h-12 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-black text-white transition hover:bg-slate-800"
+                            >
+                              <Clock className="h-3.5 w-3.5" />
+                              Réserver
+                            </button>
+                          )}
+                          {step.reschedulableLine && (
+                            <button
+                              type="button"
+                              data-testid="planning-step-reschedule"
+                              onClick={() => handleSuggestPlanningStep(step.stepId, "reschedule")}
+                              className="flex min-h-12 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-black text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              Réplanifier
+                            </button>
+                          )}
+                          {step.reschedulableLine && (
+                            <button
+                              type="button"
+                              data-testid="planning-step-release"
+                              onClick={() => handleReleasePlanningStep(step.stepId)}
+                              className="flex min-h-12 items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-black text-rose-700 transition hover:bg-rose-100"
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                              Libérer
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            data-testid="planning-step-view-gantt"
+                            onClick={() => handleViewStepOnGantt(step.stepId)}
+                            className="flex min-h-12 items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-black text-blue-700 transition hover:bg-blue-100"
+                          >
+                            <ChevronRight className="h-3.5 w-3.5" />
+                            Voir sur Gantt
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section data-testid="planning-validated-table" className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Planning rendez-vous validé</h4>
+              </div>
+              {planningValidatedRows.length === 0 ? (
+                <div className="p-4 text-xs font-semibold text-slate-400">Aucun créneau réservé pour ce dossier.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400">
+                      <tr>
+                        <th className="px-4 py-2">Étape</th>
+                        <th className="px-4 py-2">Date</th>
+                        <th className="px-4 py-2">Horaire</th>
+                        <th className="px-4 py-2">Technicien</th>
+                        <th className="px-4 py-2">Matériel / Pont</th>
+                        <th className="px-4 py-2">Durée</th>
+                        <th className="px-4 py-2 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {planningValidatedRows.map(row => (
+                        <tr key={`${row.step.stepId}-${row.item.line.id}`} className="bg-white">
+                          <td className="px-4 py-3 font-black text-slate-900">{row.step.label}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-600">{formatPlanningDate(row.start)}</td>
+                          <td className="px-4 py-3 font-mono font-bold text-slate-700">{formatPlanningTimeRange(row.start, row.end)}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-600">{getTechnicianName(row.technicianId)}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-600">{getBayName(row.bayId)}</td>
+                          <td className="px-4 py-3 font-bold text-slate-700">{formatPlanningHours(row.duration)}</td>
+                          <td className="px-4 py-3">
+                            {canEditDossierPlanning ? (
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  data-testid="planning-step-reschedule"
+                                  onClick={() => handleSuggestPlanningStep(row.step.stepId, "reschedule")}
+                                  className="rounded border border-slate-200 px-2 py-1 font-black text-slate-600 hover:bg-slate-50"
+                                >
+                                  Réplanifier
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid="planning-step-release"
+                                  onClick={() => handleReleasePlanningStep(row.step.stepId)}
+                                  className="rounded border border-rose-200 bg-rose-50 px-2 py-1 font-black text-rose-700 hover:bg-rose-100"
+                                >
+                                  Libérer
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewStepOnGantt(row.step.stepId)}
+                                  className="rounded border border-blue-200 bg-blue-50 px-2 py-1 font-black text-blue-700 hover:bg-blue-100"
+                                >
+                                  Voir sur Gantt
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="block text-right font-bold text-slate-400">Consultation</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section data-testid="vehicle-eta-block" className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <span className="block text-[10px] font-black uppercase text-slate-400">Livraison estimée</span>
+                  <strong className="text-slate-900">
+                    {userRole === UserRole.RECEPTIONNAIRE
+                      ? "Sous réserve atelier"
+                      : planningEtaInfo.etaDateTime
+                        ? new Date(planningEtaInfo.etaDateTime).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
+                        : "Non confirmée"}
+                  </strong>
+                </div>
+                <div>
+                  <span className="block text-[10px] font-black uppercase text-slate-400">Fiabilité</span>
+                  <strong className="text-slate-900">{planningEtaInfo.reliability}</strong>
+                </div>
+                <div>
+                  <span className="block text-[10px] font-black uppercase text-slate-400">Tâches réservées</span>
+                  <strong className="text-slate-900">{planningEtaInfo.plannedTaskCount}</strong>
+                </div>
+                <div>
+                  <span className="block text-[10px] font-black uppercase text-slate-400">Non réservées / à valider</span>
+                  <strong className="text-slate-900">{planningEtaInfo.unplannedTaskCount} / {planningEtaInfo.unvalidatedDurationCount}</strong>
+                </div>
+              </div>
+              <div className="mt-3 space-y-1 font-semibold text-slate-600">
+                <p>{userRole === UserRole.RECEPTIONNAIRE ? planningEtaInfo.receptionMessage : planningEtaInfo.message}</p>
+                <p>Message Chef Atelier / Directeur : {planningEtaInfo.message}</p>
+              </div>
+            </section>
           </div>
         )}
 

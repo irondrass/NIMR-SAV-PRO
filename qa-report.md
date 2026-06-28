@@ -1,9 +1,9 @@
 # Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
-- **Date** : 24/06/2026 11:36:01
-- **Version** : v1.1.1 (Lot 6K-B-B - Suggestion et réservation planning restaurées)
-- **Contrôles exécutés** : 151
-- **Résultat global** : **OK** (151 OK / 0 KO)
+- **Date** : 28/06/2026 11:30:42
+- **Version** : v1.1.1 (Lot 6K-B-C - Interface RDV & Planning dossier par étapes)
+- **Contrôles exécutés** : 153
+- **Résultat global** : **OK** (153 OK / 0 KO)
 
 
 ## Anomalies détectées

@@ -146,6 +146,13 @@ function registerCheck(category: string, description: string, runFn: () => void)
   });
 }
 
+function stripOperationalWorkshopMargin(content: string): string {
+  return content
+    .replace(/marge atelier/g, "")
+    .replace(/planning-workshop-margin/g, "")
+    .replace(/workshopmarginhours/g, "");
+}
+
 // -----------------------------------------------------------------
 // Define Test Fixtures
 // -----------------------------------------------------------------
@@ -2400,7 +2407,7 @@ registerCheck("Lot 6F Invariants", "aucune finance ajoutée", () => {
     "src/field-validations.ts",
   ];
   for (const file of files) {
-    const content = fs.readFileSync(file, "utf8").toLowerCase();
+    const content = stripOperationalWorkshopMargin(fs.readFileSync(file, "utf8").toLowerCase());
     for (const word of forbidden) {
       assert.equal(content.includes(word), false, `${file} contient ${word}`);
     }
@@ -2904,7 +2911,7 @@ registerCheck("Lot 6H Invariants", "aucun mojibake, finance, donnée réelle ou 
   for (const file of files) {
     const content = fs.readFileSync(file, "utf8");
     assert.equal(mojibake.test(content), false, `${file} contient un caractère mojibake`);
-    const lower = content.toLowerCase();
+    const lower = stripOperationalWorkshopMargin(content.toLowerCase());
     for (const word of forbiddenFinance) {
       assert.equal(lower.includes(word), false, `${file} contient le mot financier interdit: ${word}`);
     }
@@ -3075,6 +3082,30 @@ registerCheck("Lot 6K-B-B Invariants", "liste réservations et rôles reflètent
   assert.equal(fs.existsSync("e2e/32-planning-suggestion-reservation.spec.ts"), true);
 });
 
+registerCheck("Lot 6K-B-C Invariants", "onglet RDV & Planning dossier expose les étapes terrain", () => {
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const stepsContent = fs.readFileSync("src/workshop-planning-steps.ts", "utf8");
+  assert.ok(stepsContent.includes("mapRepairLineToPlanningStep"), "Le mapping ligne atelier vers étape doit être centralisé");
+  assert.ok(stepsContent.includes("PLANNING_STEP_DEFINITIONS"), "Les étapes planning doivent être centralisées");
+  assert.ok(detailContent.includes('label: "RDV & Planning"'), "La fiche dossier doit exposer l'onglet RDV & Planning");
+  assert.ok(detailContent.includes('data-testid="dossier-planning-tab"'), "L'onglet doit être identifiable en E2E");
+  assert.ok(detailContent.includes("planning-step-card-"), "Les cartes étapes doivent être rendues avec testid stable");
+  assert.ok(detailContent.includes('data-testid="planning-validated-table"'), "Le tableau planning validé doit être présent");
+  assert.ok(detailContent.includes('data-testid="planning-workshop-margin"'), "La marge atelier opérationnelle doit être visible");
+  assert.equal(fs.existsSync("e2e/33-dossier-planning-steps.spec.ts"), true);
+});
+
+registerCheck("Lot 6K-B-C Invariants", "réservation par étape conserve le moteur PRO et les rôles", () => {
+  const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
+  const stepsContent = fs.readFileSync("src/workshop-planning-steps.ts", "utf8");
+  assert.ok(detailContent.includes("suggestWorkshopSlot({"), "Les cartes doivent utiliser le moteur de suggestion PRO");
+  assert.ok(detailContent.includes("reserveSuggestedWorkshopSlot({"), "La réservation par étape doit revalider au clic");
+  assert.ok(detailContent.includes("userRole === UserRole.CHEF_ATELIER"), "Les mutations de l'onglet dossier doivent être Chef Atelier uniquement");
+  assert.ok(stepsContent.includes("releasePlanningStepReservation"), "La libération d'étape doit passer par un helper testé");
+  assert.ok(detailContent.includes("Créneau réservé avec succès."), "La réservation doit produire un feedback immédiat");
+  assert.ok(detailContent.includes("Consultation uniquement"), "Les rôles consultation doivent être explicitement signalés");
+});
+
 // -----------------------------------------------------------------
 // Run Suite & Generate Report
 // -----------------------------------------------------------------
@@ -3098,7 +3129,7 @@ console.log(`QA Terminée. Contrôles: ${totalControls}, OK: ${passCount}, KO: $
 const reportContent = `# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
 
 - **Date** : ${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR")}
-- **Version** : v1.1.1 (Lot 6K-B-B - Suggestion et réservation planning restaurées)
+- **Version** : v1.1.1 (Lot 6K-B-C - Interface RDV & Planning dossier par étapes)
 - **Contrôles exécutés** : ${totalControls}
 - **Résultat global** : **${status}** (${passCount} OK / ${failCount} KO)
 

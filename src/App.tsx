@@ -1152,6 +1152,9 @@ export default function App() {
               onUpdateDossier={handleUpdateDossier}
               techniciensList={techList.map(t => ({ id: t.id, nom: t.nom }))}
               reservations={reservations}
+              onUpdateReservations={handleUpdateReservations}
+              techniciens={techList}
+              availabilityConfig={availabilityConfig}
             />
           ) : (
             /* Render active tabs */

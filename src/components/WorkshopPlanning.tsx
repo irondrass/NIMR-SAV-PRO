@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, WorkshopBay, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -60,6 +60,7 @@ import PrintDocuments from "./PrintDocuments";
 import * as perm from "../permissions";
 import { maskPhoneNumber } from "../field-validations";
 import { TASK_STATUS_VISUAL_ORDER, getTaskStatusVisual } from "../task-status-visual";
+import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
 import {
   findTaskPlanningTarget,
   getCurrentGanttTaskStatus,
@@ -90,14 +91,6 @@ interface WorkshopPlanningProps {
   availabilityConfig?: WorkshopAvailabilityConfig;
   onUpdateAvailabilityConfig?: (updated: WorkshopAvailabilityConfig) => void;
 }
-
-const DEFAULT_WORKSHOP_BAYS: WorkshopBay[] = [
-  { id: "bay_fast_01", name: "Pont rapide 1", zone: AtelierZone.MECANIQUE_RAPIDE },
-  { id: "bay_mech_01", name: "Pont mécanique 1", zone: AtelierZone.GRANDS_TRAVAUX },
-  { id: "bay_diag_01", name: "Pont diagnostic 1", zone: AtelierZone.ELECTRICITE_DIAG },
-  { id: "bay_body_01", name: "Pont carrosserie 1", zone: AtelierZone.CARROSSERIE },
-  { id: "bay_general_01", name: "Pont polyvalent" },
-];
 
 const GANTT_LANE_HEIGHT = 56;
 const GANTT_BLOCK_HEIGHT = 48;
