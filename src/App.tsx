@@ -20,12 +20,6 @@ import {
   WorkshopShiftProfile,
   VehicleMasterRecord
 } from "./types";
-import { 
-  INITIAL_DOSSIERS, 
-  MOCK_TECHNICIENS, 
-  INITIAL_RECLAMATIONS, 
-  INITIAL_ACTIVITE_LOGS
-} from "./data";
 import {
   createUser,
   ensureDefaultUsers,
@@ -341,10 +335,10 @@ export default function App() {
 
   // Load initial states or restore from local storage
   useEffect(() => {
-    setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, INITIAL_DOSSIERS, isDossierSAV).map(normalizeDossierForRuntime));
-    setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, INITIAL_RECLAMATIONS, isReclamationClient));
-    setTechList(loadStoredArray(STORAGE_KEYS.techs, MOCK_TECHNICIENS, isTechnicienResource));
-    setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, INITIAL_ACTIVITE_LOGS, isActiviteLog));
+    setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, [], isDossierSAV).map(normalizeDossierForRuntime));
+    setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, [], isReclamationClient));
+    setTechList(loadStoredArray(STORAGE_KEYS.techs, [], isTechnicienResource));
+    setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, [], isActiviteLog));
     setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
     setVehicleMasterRecords(loadStoredVehicleMaster(STORAGE_KEYS.vehicleMaster));
     setVehicleMasterLastImport(localStorage.getItem(STORAGE_KEYS.vehicleMasterLastImport) || null);
@@ -1309,9 +1303,16 @@ export default function App() {
                       {/* Rendering standard table of dossiers */}
                       <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
                         {filteredDossiers.length === 0 ? (
-                          <div className="text-center py-10 space-y-2 text-xs text-slate-400">
+                          <div data-testid="empty-state-dossiers" className="text-center py-10 space-y-2 text-xs text-slate-400">
                             <Inbox className="w-8 h-8 text-slate-300 mx-auto" />
-                            <span>Aucun dossier ne correspond à vos options de filtres actifs.</span>
+                            <span>
+                              {dossiers.length === 0
+                                ? "Aucune donnée enregistrée. Importez une base véhicules ou créez un dossier."
+                                : "Aucun dossier ne correspond à vos options de filtres actifs."}
+                            </span>
+                            {dossiers.length === 0 && (
+                              <span data-testid="empty-state-clients" className="sr-only">Aucun client enregistré.</span>
+                            )}
                           </div>
                         ) : (
                           <div className="overflow-x-auto min-w-full">

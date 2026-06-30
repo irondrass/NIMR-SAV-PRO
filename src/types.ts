@@ -110,7 +110,7 @@ export interface CameraPhoto {
   sizeBytes?: number;
 }
 
-export type RepairOrderStatus = "pending" | "in_progress" | "paused" | "blocked" | "done" | "reopened";
+export type RepairOrderStatus = "pending" | "in_progress" | "paused" | "blocked" | "done" | "reopened" | "cancelled";
 
 export type QuoteLineType = "labor" | "part" | "paint" | "misc" | "unknown";
 
@@ -188,6 +188,9 @@ export interface RepairOrderLine {
   durationValidationReason?: string;
   durationValidatedAt?: string;
   durationValidatedBy?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancellationReason?: string;
   quoteImportId?: string;
   quoteLineRef?: string;
   operationCode?: string;

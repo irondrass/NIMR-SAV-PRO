@@ -704,7 +704,7 @@ export function findNextAvailableWorkingSlot(input: {
 
       for (const line of dossier.ordresReparation) {
         if (input.ignoreTaskId && line.id === input.ignoreTaskId) continue;
-        if (line.status === "done") continue;
+        if (line.status === "done" || line.status === "cancelled") continue;
 
         const matchTech = line.plannedTechnicianId === input.technicianId;
         const matchBay = line.plannedBayId === input.bayId;

@@ -83,12 +83,6 @@ interface GuidedReceptionProps {
   onSelectDossier?: (id: string) => void;
 }
 
-const PRESET_CLIENTS = [
-  { nom: "Client Démo Flotte 001", tel: "+216 55 111 001" },
-  { nom: "Client Démo Particulier 002", tel: "+216 55 111 002" },
-  { nom: "Société Démo Transport 003", tel: "+216 55 111 003" }
-];
-
 const PRESET_MODELS = [
   { marque: "DFSK", modele: "Glory 500", testId: "preset-model-glory-500" },
   { marque: "DFSK", modele: "Glory 580", testId: "preset-model-glory-580" },
@@ -795,6 +789,15 @@ export default function GuidedReception({
                   )}
                 </div>
 
+                {vehicleMasterRecords.length === 0 && (
+                  <div data-testid="empty-state-vehicles" className="rounded-lg border border-dashed border-blue-200 bg-white/70 p-3 text-xs font-bold text-blue-900">
+                    <span>Aucune base véhicules importée.</span>
+                    <span data-testid="import-vehicles-empty-action" className="mt-1 block text-blue-700">
+                      Importez une base véhicules depuis le panneau de gestion avant une recherche assistée.
+                    </span>
+                  </div>
+                )}
+
                 {hasSearched && searchResults.length === 0 && (
                   <div data-testid="vehicle-master-not-found-alert" className="p-3 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg text-xs font-bold flex items-center gap-1.5">
                     <AlertTriangle className="w-4.5 h-4.5 shrink-0 text-amber-600" />
@@ -883,7 +886,7 @@ export default function GuidedReception({
                   type="text" 
                   data-testid="reception-client-name"
                   className="w-full p-2.5 bg-slate-50  border border-slate-200  rounded-lg text-xs font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 " 
-                  placeholder="EX: Client Démo 001 ou Société Démo"
+                  placeholder="EX: Nom client ou société"
                   value={clientNom}
                   onChange={(e) => updateClientNom(e.target.value)}
                 />
@@ -899,27 +902,6 @@ export default function GuidedReception({
                   value={clientTelephone}
                   onChange={(e) => updateClientTelephone(e.target.value)}
                 />
-              </div>
-            </div>
-
-            {/* Presets Clients Fictifs */}
-            <div className="space-y-1.5 pt-1">
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Saisie rapide client (Presets) :</span>
-              <div className="flex flex-wrap gap-2">
-                {PRESET_CLIENTS.map((client, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    data-testid={`preset-client-${idx}`}
-                    onClick={() => {
-                      updateClientNom(client.nom);
-                      updateClientTelephone(client.tel);
-                    }}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100   text-blue-700  border border-blue-200  text-[10px] font-bold rounded-lg transition active:scale-95 cursor-pointer"
-                  >
-                    {client.nom}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -1006,7 +988,7 @@ export default function GuidedReception({
                   type="text" 
                   data-testid="reception-plate"
                   className="w-full p-2.5 bg-slate-50  border border-slate-200  rounded-lg text-xs font-mono font-bold placeholder-zinc-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 " 
-                  placeholder="Ex: 000 TU 0001"
+                  placeholder="Ex: 123 TU 4567"
                   value={vehiculeImmatriculation}
                   onChange={(e) => setVehiculeImmatriculation(e.target.value)}
                   onBlur={handleImmatriculationBlur}
@@ -1505,7 +1487,7 @@ export default function GuidedReception({
             <div className="p-4 bg-slate-50  border border-slate-200  rounded-xl max-w-sm mx-auto text-left space-y-2 text-xs">
               <div className="flex justify-between font-bold">
                 <span className="text-neutral-500">CLIENT :</span>
-                <span className="text-neutral-800 ">{clientNom || "Client Démo 001"}</span>
+                <span className="text-neutral-800 ">{clientNom || "Client non renseigné"}</span>
               </div>
               <div className="flex justify-between font-semibold">
                 <span className="text-neutral-500">VÉHICULE :</span>
@@ -1513,7 +1495,7 @@ export default function GuidedReception({
               </div>
               <div className="flex justify-between font-bold">
                 <span className="text-neutral-500">IMMATRICULATION :</span>
-                <LicencePlate plate={vehiculeImmatriculation || "000 TU 0001"} />
+                <span className="font-mono text-neutral-800">{vehiculeImmatriculation || "Non renseignée"}</span>
               </div>
               <div className="flex justify-between font-semibold">
                 <span className="text-neutral-500">TYPE DOSSIER :</span>

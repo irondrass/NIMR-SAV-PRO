@@ -54,7 +54,8 @@ import {
   WorkshopSlotSuggestion,
   getQCStatusDisplayLabel,
   normalizeQCStatus,
-  getDossierQCStatus
+  getDossierQCStatus,
+  invalidateQCAfterWorkshopChange
 } from "../sav-core";
 import { COMPLAINT_STATUS_LABELS, normalizeComplaint, normalizeComplaintStatus } from "../complaints-workflow";
 import { fileToCameraPhoto } from "../photo-utils";
@@ -78,6 +79,12 @@ import {
   WorkshopTaskPriority,
 } from "../workshop-task-intake";
 import { convertReservationToPlanning, validateReservationSlot } from "../workshop-reservations";
+import {
+  cancelWorkshopTaskAdministratively,
+  deleteWorkshopTask,
+  getWorkshopTaskDeletionReadiness,
+  releaseWorkshopTaskReservation,
+} from "../core/workshop-tasks";
 import {
   ArrowLeft,
   FileText,
@@ -162,6 +169,11 @@ export default function DossierDetail({
   const [durationValidationHours, setDurationValidationHours] = useState("");
   const [durationValidationReason, setDurationValidationReason] = useState("");
   const [durationValidationError, setDurationValidationError] = useState<string | null>(null);
+  const [deleteTaskTargetId, setDeleteTaskTargetId] = useState<string | null>(null);
+  const [deleteTaskMode, setDeleteTaskMode] = useState<"delete" | "cancel" | null>(null);
+  const [deleteTaskReason, setDeleteTaskReason] = useState("");
+  const [deleteTaskError, setDeleteTaskError] = useState("");
+  const [taskReservationReleasedMessage, setTaskReservationReleasedMessage] = useState("");
 
   // For adding custom logs
   const [newLogText, setNewLogText] = useState("");
@@ -322,11 +334,18 @@ export default function DossierDetail({
   };
 
   const updateDossierState = (changes: Partial<DossierSAV>) => {
-    const updated = {
+    let updated = {
       ...dossier,
       ...changes,
       dateDernierStatut: new Date().toISOString()
     };
+    if (changes.ordresReparation && dossier.checklistQC.validationGlobale === "valide") {
+      updated = invalidateQCAfterWorkshopChange(
+        updated,
+        "Modification atelier après contrôle qualité conforme.",
+        userRole
+      );
+    }
     onUpdateDossier(updated);
   };
 
@@ -680,6 +699,90 @@ export default function DossierDetail({
       summary: "Étape libérée du planning atelier.",
       source: "planning",
     });
+  };
+
+  const closeDeleteTaskModal = () => {
+    setDeleteTaskTargetId(null);
+    setDeleteTaskMode(null);
+    setDeleteTaskReason("");
+    setDeleteTaskError("");
+  };
+
+  const handleOpenDeleteTaskModal = (line: RepairOrderLine, mode: "delete" | "cancel") => {
+    const readiness = getWorkshopTaskDeletionReadiness(dossier, line.id, reservations || []);
+    const allowed = mode === "delete" ? readiness.canDeletePhysically : readiness.canCancelAdministratively;
+    if (!allowed) {
+      const message = readiness.blockReason || "Action impossible sur cette tâche atelier.";
+      setTaskError(message);
+      setDeleteTaskError(message);
+      setBlockedFeedback(message);
+      return;
+    }
+    setTaskError(null);
+    setDeleteTaskTargetId(line.id);
+    setDeleteTaskMode(mode);
+    setDeleteTaskReason("");
+    setDeleteTaskError("");
+  };
+
+  const handleReleaseTaskReservation = (lineId: string) => {
+    if (!canRunGuardedAction(`task-release-reservation:${dossier.id}:${lineId}`)) return;
+    if (!canManageDossier) {
+      const message = "Consultation uniquement : action réservée au Chef Atelier.";
+      setTaskError(message);
+      setBlockedFeedback(message);
+      return;
+    }
+
+    const result = releaseWorkshopTaskReservation(dossier, reservations || [], lineId, new Date());
+    if (result.ok === false) {
+      setTaskError(result.error);
+      setBlockedFeedback(result.error);
+      return;
+    }
+    onUpdateDossier(result.dossier);
+    if (result.reservations) onUpdateReservations(result.reservations);
+    setTaskError(null);
+    setTaskReservationReleasedMessage(result.message);
+    setSuccessFeedback(result.message);
+    recordLocalAudit({
+      action: "liberation_reservation_tache_atelier",
+      summary: result.message,
+      source: "planning",
+    });
+  };
+
+  const handleConfirmDeleteWorkshopTask = () => {
+    if (!deleteTaskTargetId || !deleteTaskMode) return;
+    if (!canRunGuardedAction(`task-delete:${dossier.id}:${deleteTaskTargetId}:${deleteTaskMode}`)) return;
+
+    const result = deleteTaskMode === "delete"
+      ? deleteWorkshopTask(dossier, reservations || [], deleteTaskTargetId, deleteTaskReason, userRole, new Date())
+      : cancelWorkshopTaskAdministratively(dossier, reservations || [], deleteTaskTargetId, deleteTaskReason, userRole, new Date());
+
+    if (result.ok === false) {
+      setDeleteTaskError(result.error);
+      setTaskError(result.error);
+      return;
+    }
+
+    onUpdateDossier(result.dossier);
+    if (result.reservations) onUpdateReservations(result.reservations);
+    recordLocalAudit({
+      action: deleteTaskMode === "delete" ? "suppression_tache_atelier" : "annulation_tache_atelier",
+      summary: result.message,
+      source: "atelier",
+    });
+    if (dossier.checklistQC.validationGlobale === "valide" && result.dossier.checklistQC.validationGlobale === "a_refaire") {
+      recordLocalAudit({
+        action: "invalidation_qc_apres_modification_atelier",
+        summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+        source: "qc",
+      });
+    }
+    setTaskError(null);
+    setSuccessFeedback(result.message);
+    closeDeleteTaskModal();
   };
 
   const handleViewStepOnGantt = (stepId: PlanningStepId) => {
@@ -1170,6 +1273,9 @@ export default function DossierDetail({
   const deliveryGate = canDeliverDossier(dossier);
   const dossierQcStatus = getDossierQCStatus(dossier);
   const canShowDeliveryButton = canDeliverVehicle || userRole === UserRole.CHEF_ATELIER;
+  const deleteTaskTarget = deleteTaskTargetId
+    ? dossier.ordresReparation.find(line => line.id === deleteTaskTargetId)
+    : null;
   const linkedComplaints = reclamations
     .map(normalizeComplaint)
     .filter(reclamation => reclamation.dossierId === dossier.id);
@@ -1187,7 +1293,10 @@ export default function DossierDetail({
     const allowedRoles = [UserRole.RECEPTIONNAIRE, UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV];
     if (!allowedRoles.includes(userRole as any)) return false;
     const hasStartedTask = dossier.ordresReparation.some(
-      line => line.status === "in_progress" || line.status === "done" || line.status === "blocked"
+      line => {
+        const status = normalizeRepairOrderStatus(line.status);
+        return status === "in_progress" || status === "done" || status === "cancelled" || status === "blocked";
+      }
     );
     return !hasStartedTask;
   };
@@ -1774,7 +1883,13 @@ export default function DossierDetail({
 
             {taskError && (
               <div data-testid="task-error-message" className="p-3.5 bg-red-50  border border-red-200  text-red-700  rounded-lg text-xs font-bold">
-                {taskError}
+                <span data-testid="delete-task-blocked-message">{taskError}</span>
+              </div>
+            )}
+
+            {taskReservationReleasedMessage && (
+              <div data-testid="task-reservation-released-message" className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-bold">
+                {taskReservationReleasedMessage}
               </div>
             )}
 
@@ -1802,8 +1917,10 @@ export default function DossierDetail({
                       : activeDossierForTechnician
                         ? "Ce technicien a déjà une tâche en cours."
                         : "";
-                const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
+                const isTerminalLine = status === "done" || status === "cancelled";
+                const canStartLine = !isTerminalLine && status !== "in_progress" && !startBlockedMessage;
                 const statusVisual = getTaskStatusVisual(status);
+                const deletionReadiness = getWorkshopTaskDeletionReadiness(dossier, line.id, reservations || []);
                 const linkedComplaint = line.sourceComplaintId
                   ? linkedComplaints.find(rec => rec.id === line.sourceComplaintId)
                   : undefined;
@@ -1832,7 +1949,7 @@ export default function DossierDetail({
                             Source: {
                               line.estimateSource === "manual" ? "Manuel" :
                               line.estimateSource === "quote-import" ? "Devis" :
-                              line.estimateSource === "preset" ? "Preset" : "Démo"
+                              line.estimateSource === "preset" ? "Preset" : "Historique"
                             }
                           </span>
                         )}
@@ -1897,7 +2014,7 @@ export default function DossierDetail({
                         data-testid={`task-status-${line.id}`}
                         className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${statusVisual.badgeClassName}`}
                       >
-                        {statusVisual.label}
+                        <span data-testid="workshop-task-status">{statusVisual.label}</span>
                       </span>
                       <button
                         type="button"
@@ -1909,20 +2026,57 @@ export default function DossierDetail({
                         <Printer className="w-3 h-3" />
                         <span data-testid="print-technician-sheet">Fiche tâche technicien</span>
                       </button>
-                      {startBlockedMessage && status !== "in_progress" && status !== "done" && (
+                      {startBlockedMessage && status !== "in_progress" && !isTerminalLine && (
                         <span className="text-[10px] text-rose-600  font-bold text-right">
                           {startBlockedMessage}
                         </span>
                       )}
 
+                      {canManageDossier && (
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {deletionReadiness.canReleaseReservation && (
+                            <button
+                              type="button"
+                              data-testid="release-task-reservation-button"
+                              data-task-id={line.id}
+                              onClick={() => handleReleaseTaskReservation(line.id)}
+                              className="p-1 px-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded font-bold text-[10px] hover:bg-blue-100 cursor-pointer"
+                            >
+                              Libérer réservation
+                            </button>
+                          )}
+                          {status === "done" ? (
+                            <button
+                              type="button"
+                              data-testid="cancel-workshop-task-button"
+                              data-task-id={line.id}
+                              onClick={() => handleOpenDeleteTaskModal(line, "cancel")}
+                              className="p-1 px-2.5 bg-slate-700 text-white rounded font-bold text-[10px] hover:bg-slate-800 cursor-pointer"
+                            >
+                              Annuler administrativement
+                            </button>
+                          ) : status !== "cancelled" ? (
+                            <button
+                              type="button"
+                              data-testid="delete-workshop-task-button"
+                              data-task-id={line.id}
+                              onClick={() => handleOpenDeleteTaskModal(line, "delete")}
+                              className="p-1 px-2.5 bg-white text-rose-700 border border-rose-200 rounded font-bold text-[10px] hover:bg-rose-50 cursor-pointer"
+                            >
+                              Supprimer tâche
+                            </button>
+                          ) : null}
+                        </div>
+                      )}
+
                       {/* Technical staff control buttons */}
                       {canUpdateWorkOrders && (
-                        status === "done" ? (
+                        isTerminalLine ? (
                           <div className="flex flex-wrap justify-end gap-1">
                             <span className="p-1 px-2.5 bg-green-50 text-green-700 border border-green-200 rounded font-bold text-[10px] uppercase">
-                              Terminé
+                              {status === "cancelled" ? "Annulée" : "Terminé"}
                             </span>
-                            {canManageDossier && (
+                            {canManageDossier && status === "done" && (
                               <button
                                 onClick={() => handleReopenROLine(line.id)}
                                 data-testid={`task-reopen-${line.id}`}
@@ -3000,6 +3154,63 @@ export default function DossierDetail({
           cancelAliasTestId="modal-delivery-confirm-detail-cancel"
           confirmAliasTestId="modal-delivery-confirm-detail-confirm"
         />
+
+        {deleteTaskMode && deleteTaskTarget && (
+          <div data-testid="delete-task-confirm-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+            <div className="w-full max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <h3 className="font-black uppercase text-slate-900">
+                    {deleteTaskMode === "delete" ? "Supprimer la tâche atelier" : "Annuler administrativement la tâche"}
+                  </h3>
+                  <p className="mt-1 font-semibold text-slate-600">
+                    {deleteTaskTarget.designation}
+                  </p>
+                </div>
+              </div>
+
+              {deleteTaskError && (
+                <div data-testid="delete-task-blocked-message" className="rounded-lg border border-rose-200 bg-rose-50 p-3 font-bold text-rose-700">
+                  {deleteTaskError}
+                </div>
+              )}
+
+              <label className="block space-y-1.5">
+                <span className="font-black text-slate-700">Motif obligatoire</span>
+                <textarea
+                  data-testid="delete-task-reason"
+                  value={deleteTaskReason}
+                  onChange={(e) => {
+                    setDeleteTaskReason(e.target.value);
+                    setDeleteTaskError("");
+                  }}
+                  rows={4}
+                  className="w-full resize-none rounded-lg border border-slate-200 p-2.5 font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-300"
+                  placeholder="Motif opérationnel pour audit atelier..."
+                />
+              </label>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeDeleteTaskModal}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  data-testid="delete-task-confirm"
+                  onClick={handleConfirmDeleteWorkshopTask}
+                  className="rounded-lg bg-slate-900 px-4 py-2 font-bold text-white hover:bg-slate-800"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {modalActive === "task-finish" && (
           <div data-testid="modal-detail-task-finish" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">

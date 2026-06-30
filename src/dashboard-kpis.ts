@@ -337,7 +337,7 @@ function buildWorkshopKpis(
       }
 
       const planningEnd = parseDate(line.planningEnd);
-      if (planningEnd && planningEnd.getTime() < now.getTime() && status !== "done") {
+      if (planningEnd && planningEnd.getTime() < now.getTime() && status !== "done" && status !== "cancelled") {
         lateTasks.push(toTaskRef(dossier, line));
       }
       if (status === "blocked") {
@@ -705,7 +705,10 @@ function buildAlerts(
       });
     }
 
-    if (POST_DELIVERY_STATUSES.has(dossier.statut) && dossier.ordresReparation.some(line => normalizeRepairOrderStatus(line.status) !== "done")) {
+    if (POST_DELIVERY_STATUSES.has(dossier.statut) && dossier.ordresReparation.some(line => {
+      const status = normalizeRepairOrderStatus(line.status);
+      return status !== "done" && status !== "cancelled";
+    })) {
       alerts.push({
         id: `delivered-active-${dossier.id}`,
         severity: "critical",
@@ -727,7 +730,7 @@ function buildAlerts(
         });
       }
       const planningEnd = parseDate(line.planningEnd);
-      if (planningEnd && planningEnd.getTime() < now.getTime() && status !== "done") {
+      if (planningEnd && planningEnd.getTime() < now.getTime() && status !== "done" && status !== "cancelled") {
         alerts.push({
           id: `late-${dossier.id}-${line.id}`,
           severity: "warning",
@@ -896,7 +899,10 @@ function getWorkEndDate(dossier: DossierSAV): Date | null {
   if (historyEnds.length > 0) return maxDate(historyEnds);
 
   const donePlanningEnds = dossier.ordresReparation
-    .filter(line => normalizeRepairOrderStatus(line.status) === "done")
+    .filter(line => {
+      const status = normalizeRepairOrderStatus(line.status);
+      return status === "done" || status === "cancelled";
+    })
     .map(line => parseDate(line.planningEnd))
     .filter((date): date is Date => Boolean(date));
   return donePlanningEnds.length > 0 ? maxDate(donePlanningEnds) : null;

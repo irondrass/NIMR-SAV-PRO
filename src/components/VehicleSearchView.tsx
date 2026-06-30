@@ -179,9 +179,18 @@ export default function VehicleSearchView({ dossiers, onSelectDossier }: Vehicle
 
       {/* Results Container */}
       {filteredGroups.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-10 text-center space-y-2 text-xs text-slate-400 shadow-sm">
+        <div data-testid="empty-state-vehicles" className="bg-white border border-gray-200 rounded-lg p-10 text-center space-y-2 text-xs text-slate-400 shadow-sm">
           <Inbox className="w-8 h-8 text-slate-300 mx-auto" />
-          <span>Aucun véhicule ne correspond aux critères de recherche.</span>
+          <span>
+            {dossiers.length === 0
+              ? "Aucune donnée enregistrée. Importez une base véhicules ou créez un dossier."
+              : "Aucun véhicule ne correspond aux critères de recherche."}
+          </span>
+          {dossiers.length === 0 && (
+            <span data-testid="import-vehicles-empty-action" className="block text-slate-500">
+              Importez une base véhicules depuis la réception.
+            </span>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

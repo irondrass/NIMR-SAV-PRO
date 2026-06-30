@@ -10,13 +10,13 @@ const AUTH_SALT = "nimr-sav-pro-local-auth-v1";
 const DEFAULT_CREATED_AT = "2026-06-11T00:00:00.000Z";
 
 export const DEFAULT_USER_CREDENTIALS = [
-  { id: "user_directeur", username: "directeur", pin: "0000", displayName: "Directeur Démo SAV", role: UserRole.DIRECTEUR_SAV },
-  { id: "user_reception", username: "reception", pin: "1111", displayName: "Réception Démo", role: UserRole.RECEPTIONNAIRE },
-  { id: "user_chefatelier", username: "chefatelier", pin: "2222", displayName: "Chef Atelier Démo", role: UserRole.CHEF_ATELIER },
-  { id: "user_technicien", username: "technicien", pin: "3333", displayName: "Technicien Démo", role: UserRole.TECHNICIEN },
-  { id: "user_qc", username: "qc", pin: "4444", displayName: "Contrôle Qualité Démo", role: UserRole.CONTROLE_QUALITE },
-  { id: "user_livraison", username: "livraison", pin: "5555", displayName: "Livraison Démo", role: UserRole.LIVRAISON },
-  { id: "user_lecture", username: "lecture", pin: "9999", displayName: "Lecture Seule Démo", role: UserRole.LECTURE_SEULE },
+  { id: "user_directeur", username: "directeur", pin: "0000", displayName: "Directeur SAV", role: UserRole.DIRECTEUR_SAV },
+  { id: "user_reception", username: "reception", pin: "1111", displayName: "Réception SAV", role: UserRole.RECEPTIONNAIRE },
+  { id: "user_chefatelier", username: "chefatelier", pin: "2222", displayName: "Chef Atelier", role: UserRole.CHEF_ATELIER },
+  { id: "user_technicien", username: "technicien", pin: "3333", displayName: "Technicien Atelier", role: UserRole.TECHNICIEN },
+  { id: "user_qc", username: "qc", pin: "4444", displayName: "Contrôle Qualité", role: UserRole.CONTROLE_QUALITE },
+  { id: "user_livraison", username: "livraison", pin: "5555", displayName: "Livraison SAV", role: UserRole.LIVRAISON },
+  { id: "user_lecture", username: "lecture", pin: "9999", displayName: "Lecture Seule", role: UserRole.LECTURE_SEULE },
 ] as const;
 
 export type LoginResult =

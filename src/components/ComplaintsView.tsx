@@ -354,7 +354,7 @@ export default function ComplaintsView({
                 data-testid="complaint-client-input"
                 type="text"
                 className="w-full rounded border border-slate-200 bg-slate-50 p-2 font-semibold"
-                placeholder="Ex: Client Démo 001"
+                placeholder="Ex: Nom client ou société"
                 value={form.clientNom}
                 onChange={(e) => updateFormField("clientNom", e.target.value)}
               />
@@ -387,7 +387,7 @@ export default function ComplaintsView({
                 data-testid="complaint-plate-input"
                 type="text"
                 className="w-full rounded border border-slate-200 bg-slate-50 p-2 font-mono font-bold"
-                placeholder="000 TU 0001"
+                placeholder="123 TU 4567"
                 value={form.immatriculation}
                 onChange={(e) => updateFormField("immatriculation", e.target.value)}
               />

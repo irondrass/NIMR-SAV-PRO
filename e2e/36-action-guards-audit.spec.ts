@@ -86,7 +86,8 @@ function planningDossier(overrides: Partial<DossierSAV> = {}): DossierSAV {
 
 async function fillReceptionMinimum(page: Page) {
   await humanClick(page, page.locator('[data-testid="nav-reception"]'));
-  await humanClick(page, page.locator('[data-testid="preset-client-0"]'));
+  await humanFill(page, page.locator('[data-testid="reception-client-name"]'), "Client Atelier Guard");
+  await humanFill(page, page.locator('[data-testid="reception-client-phone"]'), "+216 55 111 001");
   await humanClick(page, page.locator('[data-testid="reception-next"]'));
   await humanClick(page, page.locator('[data-testid="preset-model-glory-500"]'));
   await humanClick(page, page.locator('[data-testid="preset-color-gris"]'));

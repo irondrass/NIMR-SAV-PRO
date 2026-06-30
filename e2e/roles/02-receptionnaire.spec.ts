@@ -33,15 +33,13 @@ test.describe("Rôle : Réceptionnaire", () => {
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
     await expect(page.locator('[data-testid="reception-error-message"]')).toHaveText(/nom/i);
 
-    // Click client preset 0 (Client Démo Flotte 001)
-    const presetClientBtn = page.locator('[data-testid="preset-client-0"]');
-    await expect(presetClientBtn).toBeVisible();
-    await humanClick(page, presetClientBtn);
+    await humanFill(page, page.locator('[data-testid="reception-client-name"]'), "Client Réception Flotte");
+    await humanFill(page, page.locator('[data-testid="reception-client-phone"]'), "+216 55 111 001");
 
     // Verify name and phone are filled
     const nameInput = page.locator('[data-testid="reception-client-name"]');
     const phoneInput = page.locator('[data-testid="reception-client-phone"]');
-    await expect(nameInput).toHaveValue("Client Démo Flotte 001");
+    await expect(nameInput).toHaveValue("Client Réception Flotte");
     await expect(phoneInput).toHaveValue("+216 55 111 001");
 
     // Verify deposant fields are synchronised (since checkbox is checked by default)
@@ -50,7 +48,7 @@ test.describe("Rôle : Réceptionnaire", () => {
     
     const deposantNameInput = page.locator('input[placeholder="Nom du conducteur livreur"]');
     const deposantPhoneInput = page.locator('input[placeholder="Téléphone du livreur"]');
-    await expect(deposantNameInput).toHaveValue("Client Démo Flotte 001");
+    await expect(deposantNameInput).toHaveValue("Client Réception Flotte");
     await expect(deposantPhoneInput).toHaveValue("+216 55 111 001");
 
     // Uncheck sync checkbox, and test different deposant details
@@ -61,7 +59,7 @@ test.describe("Rôle : Réceptionnaire", () => {
     await humanFill(page, deposantPhoneInput, "+216 99 888 777");
     
     // Client details should remain unchanged
-    await expect(nameInput).toHaveValue("Client Démo Flotte 001");
+    await expect(nameInput).toHaveValue("Client Réception Flotte");
     await expect(phoneInput).toHaveValue("+216 55 111 001");
 
     // Move to next step
@@ -143,7 +141,7 @@ test.describe("Rôle : Réceptionnaire", () => {
     // Check that our newly created dossier persists and shows correctly in the table
     const row = page.locator('tr:has-text("999 TU 9999")');
     await expect(row).toBeVisible();
-    await expect(row).toContainText("Client Démo Flotte 001");
+    await expect(row).toContainText("Client Réception Flotte");
     await expect(row).toContainText("DFSK Glory 500");
   });
 });

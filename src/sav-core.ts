@@ -410,7 +410,7 @@ export function normalizeRepairOrderStatus(status: string): RepairOrderStatus {
   };
 
   if (legacyStatuses[status]) return legacyStatuses[status];
-  if (["pending", "in_progress", "paused", "blocked", "done", "reopened"].includes(status)) {
+  if (["pending", "in_progress", "paused", "blocked", "done", "reopened", "cancelled"].includes(status)) {
     return status as RepairOrderStatus;
   }
   return "pending";
@@ -424,12 +424,14 @@ export function getRepairOrderStatusLabel(status: string): string {
     blocked: "bloquée",
     done: "terminée",
     reopened: "réouverte",
+    cancelled: "annulée",
   };
   return labels[normalizeRepairOrderStatus(status)];
 }
 
 export function isRepairOrderDone(line: RepairOrderLine): boolean {
-  return normalizeRepairOrderStatus(line.status) === "done";
+  const status = normalizeRepairOrderStatus(line.status);
+  return status === "done" || status === "cancelled";
 }
 
 export type DossierOperationalBucket = "active" | "ready_for_billing" | "delivered" | "closed";
@@ -542,7 +544,7 @@ export function removePhotoFromDossier(dossier: DossierSAV, photoId: string, now
 export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, lineId: string, now = new Date()): TaskMutationResult {
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ dossier, line, normalizedDossiers }) => {
     const status = normalizeRepairOrderStatus(line.status);
-    if (status === "done") {
+    if (isRepairOrderDone(line)) {
       return { ok: false, error: "Une tâche terminée doit être réouverte avant reprise." };
     }
     if (status === "blocked") {
@@ -721,7 +723,7 @@ export function finishRepairOrder(
   const now = diagnosticOrNow instanceof Date ? diagnosticOrNow : nowArg;
 
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ dossier, line }) => {
-    if (normalizeRepairOrderStatus(line.status) === "done") {
+    if (isRepairOrderDone(line)) {
       return { ok: false, error: "Cette tâche est déjà terminée." };
     }
     if (normalizeRepairOrderStatus(line.status) !== "in_progress") {
@@ -2514,7 +2516,7 @@ export function detectTechnicianCollision(
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
-      if (normalizeRepairOrderStatus(line.status) === "done") continue;
+      if (isRepairOrderDone(line)) continue;
       if (line.plannedTechnicianId === techId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
           return true;
@@ -2539,7 +2541,7 @@ export function detectBayCollision(
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
-      if (normalizeRepairOrderStatus(line.status) === "done") continue;
+      if (isRepairOrderDone(line)) continue;
       if (line.plannedBayId === bayId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
           return true;
@@ -2567,7 +2569,7 @@ export function calculateTechnicianDailyLoad(
       if (assignedTechId !== techId) continue;
       
       const status = normalizeRepairOrderStatus(line.status);
-      if (status === "done") continue;
+      if (status === "done" || status === "cancelled") continue;
       
       const segments = getLinePlanningSegments(line);
       if (segments.length > 0) {
@@ -2616,7 +2618,7 @@ export function calculateBayDailyLoad(
       if (assignedBayId !== bayId) continue;
       
       const status = normalizeRepairOrderStatus(line.status);
-      if (status === "done") continue;
+      if (status === "done" || status === "cancelled") continue;
       
       const segments = getLinePlanningSegments(line);
       if (segments.length > 0) {
@@ -2805,7 +2807,7 @@ export function detectVehicleCollision(
   for (const dossier of activeVehicleDossiers) {
     for (const line of dossier.ordresReparation) {
       if (ignoreTaskId && line.id === ignoreTaskId) continue;
-      if (normalizeRepairOrderStatus(line.status) === "done") continue;
+      if (isRepairOrderDone(line)) continue;
       if (line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
           return true;
@@ -2949,7 +2951,7 @@ export function getVehicleETAInfo(
 
   const allActiveTasks = activeVehicleDossiers
     .flatMap(dossier => dossier.ordresReparation)
-    .filter(task => normalizeRepairOrderStatus(task.status) !== "done");
+    .filter(task => !isRepairOrderDone(task));
   const activeReservations = getActiveVehicleReservations(reservations, vehicleDossierIdSet);
   const reservedTaskIds = new Set(activeReservations.flatMap(reservation => reservation.taskIds));
   const plannedTasks = allActiveTasks.filter(task =>
@@ -3264,7 +3266,7 @@ export function buildVehicleAutoReservationPlan(
   const taskEntries = activeVehicleDossiers.flatMap(dossier =>
     dossier.ordresReparation
       .map((task, orderIndex) => ({ dossier, task, orderIndex }))
-      .filter(entry => normalizeRepairOrderStatus(entry.task.status) !== "done")
+      .filter(entry => !isRepairOrderDone(entry.task))
   );
   if (taskEntries.some(({ task }) =>
     !task.tempsEstime || task.tempsEstime <= 0 || !task.isEstimatedDurationValidated

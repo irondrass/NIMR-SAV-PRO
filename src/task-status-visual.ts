@@ -24,6 +24,7 @@ export const TASK_STATUS_VISUAL_ORDER: RepairOrderStatus[] = [
   "paused",
   "pending",
   "done",
+  "cancelled",
 ];
 
 const TASK_STATUS_VISUALS: Record<RepairOrderStatus, Omit<TaskStatusVisual, "status">> = {
@@ -80,6 +81,15 @@ const TASK_STATUS_VISUALS: Record<RepairOrderStatus, Omit<TaskStatusVisual, "sta
     dotClassName: "bg-purple-500",
     priority: 80,
     testId: "gantt-task-status-reopened",
+  },
+  cancelled: {
+    label: "Annulée",
+    className: "bg-slate-50/95 border-slate-400 text-slate-700",
+    badgeClassName: "bg-slate-100 text-slate-700 border-slate-200",
+    borderClassName: "border-slate-400",
+    dotClassName: "bg-slate-400",
+    priority: 5,
+    testId: "gantt-task-status-cancelled",
   },
 };
 

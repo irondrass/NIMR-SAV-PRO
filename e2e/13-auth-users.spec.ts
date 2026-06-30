@@ -38,7 +38,7 @@ test.describe("Lot 5B - Connexion et gestion utilisateurs", () => {
   test("Directeur gère les utilisateurs, le refresh conserve la session et logout protège l'application", async ({ page }) => {
     await changeUserRole(page, "role-option-directeur");
     await expect(page.locator('[data-testid="director-dashboard"]')).toBeVisible();
-    await expect(page.locator('[data-testid="current-user"]')).toHaveText("Directeur Démo SAV");
+    await expect(page.locator('[data-testid="current-user"]')).toHaveText("Directeur SAV");
     await expect(page.locator('[data-testid="nav-users"]')).toBeVisible();
 
     await page.reload();

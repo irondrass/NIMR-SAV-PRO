@@ -1229,7 +1229,7 @@ async function testLocalUsersAndSessions() {
   const directorLogin = await loginUser(users, "directeur", "0000", now);
   assert.equal(directorLogin.ok, true);
   if (!directorLogin.ok) throw new Error("Director login should succeed");
-  assert.equal(directorLogin.user.displayName, "Directeur Démo SAV");
+  assert.equal(directorLogin.user.displayName, "Directeur SAV");
   assert.equal(directorLogin.session.role, UserRole.DIRECTEUR_SAV);
   assert.equal(isSessionValid(directorLogin.session, directorLogin.users, now), true);
 

@@ -30,6 +30,7 @@ import {
   BlockingReport,
   OperationalKpiReport
 } from "./types";
+import { normalizeRepairOrderStatus } from "./sav-core";
 
 /**
  * Clean phone numbers and mask them for unauthorized roles.
@@ -411,7 +412,8 @@ export function buildWorkshopReport(
     paused: 0,
     blocked: 0,
     done: 0,
-    reopened: 0
+    reopened: 0,
+    cancelled: 0
   };
 
   let totalLaborHoursEstimated = 0;
@@ -423,13 +425,14 @@ export function buildWorkshopReport(
 
   filtered.forEach(d => {
     d.ordresReparation.forEach(task => {
-      tasksByStatus[task.status] = (tasksByStatus[task.status] || 0) + 1;
+      const taskStatus = normalizeRepairOrderStatus(task.status);
+      tasksByStatus[taskStatus] = (tasksByStatus[taskStatus] || 0) + 1;
 
       totalLaborHoursEstimated += task.tempsEstime || 0;
       if (task.planningStart) {
         totalLaborHoursPlanned += task.tempsEstime || 0;
       }
-      if (task.status === "done") {
+      if (taskStatus === "done") {
         totalLaborHoursSpent += task.tempsPasse || task.tempsEstime || 0;
       }
 

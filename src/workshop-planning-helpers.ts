@@ -4,7 +4,7 @@
  */
 
 import { DossierSAV, DossierStatus, RepairOrderLine, RepairOrderStatus } from "./types";
-import { normalizeRepairOrderStatus } from "./sav-core";
+import { isRepairOrderDone, normalizeRepairOrderStatus } from "./sav-core";
 
 export interface TaskPlanningTarget {
   key: string;
@@ -17,7 +17,7 @@ export function isRepairOrderPlanned(line: RepairOrderLine): boolean {
 }
 
 export function isRepairOrderPlanifiable(line: RepairOrderLine): boolean {
-  return normalizeRepairOrderStatus(line.status) !== "done";
+  return !isRepairOrderDone(line);
 }
 
 export function getUnplannedRepairOrderTargets(dossiers: DossierSAV[]): TaskPlanningTarget[] {
@@ -95,7 +95,7 @@ export function isActivePlannedTask(task: RepairOrderLine, dossier: DossierSAV, 
   const hasSchedule = getRepairOrderPlanningSegments(task).length > 0;
   if (!hasSchedule) return false;
 
-  if (normalizeRepairOrderStatus(task.status) === "done") return false;
+  if (isRepairOrderDone(task)) return false;
   if (isTerminalPlanningDossier(dossier)) return false;
   if (dateStr && getRepairOrderPlanningSegmentsForDate(task, dateStr).length === 0) return false;
   return true;

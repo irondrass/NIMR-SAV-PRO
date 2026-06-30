@@ -215,7 +215,7 @@ type ReservationFeedback = {
 
 function hasValidatedReservationDuration(dossier: DossierSAV): boolean {
   return dossier.ordresReparation.some(line => {
-    const isDone = normalizeRepairOrderStatus(line.status) === "done";
+    const isDone = normalizeRepairOrderStatus(line.status) === "done" || normalizeRepairOrderStatus(line.status) === "cancelled";
     return !isDone && line.tempsEstime > 0 && line.isEstimatedDurationValidated === true;
   });
 }
@@ -383,7 +383,10 @@ export default function WorkshopPlanning({
   const targetDossiers = dossiers.filter(dossier =>
     dossier.statut !== DossierStatus.LIVRE &&
     dossier.statut !== DossierStatus.CLOTURE &&
-    dossier.ordresReparation.some(line => normalizeRepairOrderStatus(line.status) !== "done")
+    dossier.ordresReparation.some(line => {
+      const status = normalizeRepairOrderStatus(line.status);
+      return status !== "done" && status !== "cancelled";
+    })
   );
 
   const taskPlanningTargets = getUnplannedRepairOrderTargets(dossiers);
@@ -394,7 +397,10 @@ export default function WorkshopPlanning({
   const activeManualLine = activeManualDossier?.ordresReparation.find(l => l.id === manualTaskId);
   const pendingManualTasks = useMemo(() => {
     return activeManualDossier
-      ? activeManualDossier.ordresReparation.filter(line => normalizeRepairOrderStatus(line.status) !== "done")
+      ? activeManualDossier.ordresReparation.filter(line => {
+        const status = normalizeRepairOrderStatus(line.status);
+        return status !== "done" && status !== "cancelled";
+      })
       : [];
   }, [activeManualDossier?.id, activeManualDossier ? activeManualDossier.ordresReparation.map(t => `${t.id}-${t.status}`).join(",") : ""]);
 

@@ -27,6 +27,7 @@ import {
   chooseWorkshopBay,
   nextWorkingDay,
   normalizeRepairOrderStatus,
+  isRepairOrderDone,
   getWorkingWindowsForDate
 } from "./sav-core";
 import { 
@@ -130,7 +131,7 @@ export function calculateReservationDuration(dossier: DossierSAV): number {
   }
   
   return dossier.ordresReparation.reduce((sum, line) => {
-    const isDone = normalizeRepairOrderStatus(line.status) === "done";
+    const isDone = isRepairOrderDone(line);
     const isValidated = line.isEstimatedDurationValidated === true;
     const isPositive = line.tempsEstime > 0;
     
@@ -149,7 +150,7 @@ export function createReservationNeed(dossier: DossierSAV, now: Date = new Date(
   
   const taskIds = dossier.ordresReparation
     .filter(line => {
-      const isDone = normalizeRepairOrderStatus(line.status) === "done";
+      const isDone = isRepairOrderDone(line);
       const isValidated = line.isEstimatedDurationValidated === true;
       const isPositive = line.tempsEstime > 0;
       return !isDone && isValidated && isPositive;

@@ -465,7 +465,8 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                               : activeDossierForTechnician
                                 ? "Ce technicien a déjà une tâche en cours."
                                 : "";
-                          const canStartLine = status !== "done" && status !== "in_progress" && !startBlockedMessage;
+                          const isTerminalLine = status === "done" || status === "cancelled";
+                          const canStartLine = !isTerminalLine && status !== "in_progress" && !startBlockedMessage;
 
                           return (
                             <div key={line.id} className="p-3 bg-white  border border-blue-100  rounded-xl space-y-3 shadow-xs">
@@ -480,7 +481,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                                   {statusVisual.label}
                                 </span>
                               </div>
-                              {startBlockedMessage && status !== "done" && status !== "in_progress" && (
+                              {startBlockedMessage && !isTerminalLine && status !== "in_progress" && (
                                 <div className="space-y-1.5 mt-1">
                                   <div 
                                     data-testid="technician-task-locked-message"
@@ -491,10 +492,10 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                                   </div>
                                 </div>
                               )}
-                              {status === "done" ? (
+                              {isTerminalLine ? (
                                 <div className="py-1.5 text-green-700  font-black text-[11px] uppercase flex items-center gap-1">
                                   <CheckCircle className="w-4 h-4" />
-                                  Statut terminé
+                                  {status === "cancelled" ? "Statut annulé" : "Statut terminé"}
                                 </div>
                               ) : (
                                 <div className="mt-2">

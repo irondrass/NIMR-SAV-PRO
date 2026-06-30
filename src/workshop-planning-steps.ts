@@ -4,7 +4,7 @@
  */
 
 import { DossierSAV, DossierStatus, RepairOrderLine, WorkshopReservation } from "./types";
-import { normalizeRepairOrderStatus } from "./sav-core";
+import { isRepairOrderDone } from "./sav-core";
 
 export type PlanningStepId =
   | "body-disassembly"
@@ -211,7 +211,7 @@ function findLineReservation(
 }
 
 function isLineActiveForPlanning(line: RepairOrderLine): boolean {
-  return normalizeRepairOrderStatus(line.status) !== "done";
+  return !isRepairOrderDone(line);
 }
 
 export function buildDossierPlanningOverview(
