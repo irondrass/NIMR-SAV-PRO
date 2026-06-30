@@ -80,6 +80,9 @@ test.describe("Rôle : Chef d'Atelier", () => {
     // Apply slot suggestion
     await humanClick(page, applyBtn);
 
+    // Wait for slot suggestion feedback to ensure save completes
+    await expect(page.locator('[data-testid="planning-suggest-feedback"]')).toContainText("Créneau réservé avec succès");
+
     // Navigate to dossiers list and verify status of planned dossier
     await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await humanClick(page, page.locator(`text=${testDossier.id}`));

@@ -1,14 +1,6 @@
-# Rapport de l'Agent QA Fonctionnel NIMR SAV PRO
+# Rapport de Défauts Automatiques QA - NIMR SAV PRO v1.1.1
 
-- **Date** : 30/06/2026 10:26:47
-- **Version** : v1.1.1 (Lot 6K-D - Impressions A4 terrain propres et sécurisées)
-- **Contrôles exécutés** : 155
-- **Résultat global** : **OK** (155 OK / 0 KO)
+Ce rapport répertorie tous les défauts fonctionnels et techniques détectés lors des tests d'intégration E2E.
 
-
-## Anomalies détectées
-- Aucune anomalie détectée. Les invariants fonctionnels sont tous respectés.
-
-## Recommandations
-1. Conserver le moteur de planification strict pour éviter toute réapparition de créneaux passés.
-2. Exécuter ce script `npm run qa:agent` avant toute nouvelle mise en production.
+| Date / Heure | Scénario / Test | Rôle | Gravité | Statut | Détails |
+| :--- | :--- | :--- | :--- | :--- | :--- |
