@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { changeUserRole, humanClick } from "../helpers/human-actions";
-import { createMockDossier } from "../helpers/test-data-creator";
+import { createMockDossier, createWorkshopTechnicians } from "../helpers/test-data-creator";
 import { STORAGE_KEYS } from "../../src/storage-keys";
 import { DossierStatus } from "../../src/types";
 
@@ -39,12 +39,15 @@ test.describe("Rôle : Technicien", () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.evaluate(({ keyDossiers, valDossiers }) => {
+    await page.evaluate(({ keyDossiers, valDossiers, keyTechs, valTechs }) => {
       localStorage.clear();
       localStorage.setItem(keyDossiers, JSON.stringify(valDossiers));
+      localStorage.setItem(keyTechs, JSON.stringify(valTechs));
     }, {
       keyDossiers: STORAGE_KEYS.dossiers,
-      valDossiers: [dossierAssigned, dossierUnassigned]
+      valDossiers: [dossierAssigned, dossierUnassigned],
+      keyTechs: STORAGE_KEYS.techs,
+      valTechs: createWorkshopTechnicians(),
     });
     await page.reload();
     await changeUserRole(page, "role-option-technicien");

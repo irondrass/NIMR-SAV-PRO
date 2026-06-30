@@ -1,6 +1,6 @@
 import { test, expect, Page } from "@playwright/test";
 import { changeUserRole, humanClick, humanFill, humanSelect } from "./helpers/human-actions";
-import { createMockDossier } from "./helpers/test-data-creator";
+import { createMockDossier, createWorkshopTechnicians } from "./helpers/test-data-creator";
 import { STORAGE_KEYS } from "../src/storage-keys";
 import { DossierStatus, InterventionType } from "../src/types";
 
@@ -37,14 +37,17 @@ function closedAvailabilityConfig() {
 
 async function seedStorage(page: Page, payload: {
   dossiers?: unknown[];
+  technicians?: unknown[];
   vehicleMaster?: unknown[];
   reservations?: unknown[];
   availability?: unknown;
 }) {
+  const fullPayload = { technicians: createWorkshopTechnicians(), ...payload };
   await page.goto("/");
   await page.evaluate(({ keys, payload }) => {
     localStorage.clear();
     localStorage.setItem(keys.dossiers, JSON.stringify(payload.dossiers ?? []));
+    localStorage.setItem(keys.techs, JSON.stringify(payload.technicians ?? []));
     localStorage.setItem(keys.reservations, JSON.stringify(payload.reservations ?? []));
     if (payload.vehicleMaster) {
       localStorage.setItem(keys.vehicleMaster, JSON.stringify(payload.vehicleMaster));
@@ -53,7 +56,7 @@ async function seedStorage(page: Page, payload: {
     if (payload.availability) {
       localStorage.setItem(keys.availability, JSON.stringify(payload.availability));
     }
-  }, { keys: STORAGE_KEYS, payload });
+  }, { keys: STORAGE_KEYS, payload: fullPayload });
   await page.reload();
 }
 

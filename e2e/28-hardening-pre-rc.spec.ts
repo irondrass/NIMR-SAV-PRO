@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { changeUserRole, humanClick, humanFill } from "./helpers/human-actions";
-import { createMockDossier } from "./helpers/test-data-creator";
+import { createMockDossier, createWorkshopTechnicians } from "./helpers/test-data-creator";
 import { STORAGE_KEYS } from "../src/storage-keys";
 import { DossierStatus } from "../src/types";
 
@@ -50,10 +50,16 @@ test.describe("Lot 6E — Hardening métier pré-RC", () => {
     });
 
     await page.goto("/");
-    await page.evaluate(({ key, value }) => {
+    await page.evaluate(({ dossierKey, dossierValue, techKey, techValue }) => {
       localStorage.clear();
-      localStorage.setItem(key, JSON.stringify(value));
-    }, { key: STORAGE_KEYS.dossiers, value: [dossier] });
+      localStorage.setItem(dossierKey, JSON.stringify(dossierValue));
+      localStorage.setItem(techKey, JSON.stringify(techValue));
+    }, {
+      dossierKey: STORAGE_KEYS.dossiers,
+      dossierValue: [dossier],
+      techKey: STORAGE_KEYS.techs,
+      techValue: createWorkshopTechnicians(),
+    });
     await changeUserRole(page, "role-option-technicien");
     await humanClick(page, page.locator('[data-testid="nav-technician"]'));
 

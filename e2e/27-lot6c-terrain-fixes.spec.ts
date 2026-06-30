@@ -5,7 +5,7 @@
 
 import { test, expect } from "@playwright/test";
 import { changeUserRole, humanClick } from "./helpers/human-actions";
-import { createMockDossier } from "./helpers/test-data-creator";
+import { createWorkshopTechnicians, createMockDossier } from "./helpers/test-data-creator";
 import { STORAGE_KEYS } from "../src/storage-keys";
 import { DossierStatus, UserRole } from "../src/types";
 
@@ -34,10 +34,16 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
     });
 
     await page.goto("/");
-    await page.evaluate(({ key, value }) => {
+    await page.evaluate(({ dossierKey, dossierValue, techKey, techValue }) => {
       localStorage.clear();
-      localStorage.setItem(key, JSON.stringify(value));
-    }, { key: STORAGE_KEYS.dossiers, value: [testDossier] });
+      localStorage.setItem(dossierKey, JSON.stringify(dossierValue));
+      localStorage.setItem(techKey, JSON.stringify(techValue));
+    }, {
+      dossierKey: STORAGE_KEYS.dossiers,
+      dossierValue: [testDossier],
+      techKey: STORAGE_KEYS.techs,
+      techValue: createWorkshopTechnicians(),
+    });
 
     await page.reload();
 
@@ -100,10 +106,16 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
     });
 
     await page.goto("/");
-    await page.evaluate(({ key, value }) => {
+    await page.evaluate(({ dossierKey, dossierValue, techKey, techValue }) => {
       localStorage.clear();
-      localStorage.setItem(key, JSON.stringify(value));
-    }, { key: STORAGE_KEYS.dossiers, value: [testDossier] });
+      localStorage.setItem(dossierKey, JSON.stringify(dossierValue));
+      localStorage.setItem(techKey, JSON.stringify(techValue));
+    }, {
+      dossierKey: STORAGE_KEYS.dossiers,
+      dossierValue: [testDossier],
+      techKey: STORAGE_KEYS.techs,
+      techValue: createWorkshopTechnicians(),
+    });
 
     await page.reload();
 
@@ -193,7 +205,7 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
     const mockUser = {
       id: "user_technicien_01",
       username: "tech_01_user",
-      displayName: "Technicien Démo 001", // Matches the mock technician name in data.ts
+      displayName: "Technicien Atelier",
       role: UserRole.TECHNICIEN,
       active: true,
       createdAt: new Date().toISOString(),
@@ -202,25 +214,28 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
 
     const mockSession = {
       userId: "user_technicien_01",
-      displayName: "Technicien Démo 001",
+      displayName: "Technicien Atelier",
       role: UserRole.TECHNICIEN,
       loginAt: new Date().toISOString(),
       lastActivityAt: new Date().toISOString()
     };
 
     await page.goto("/");
-    await page.evaluate(({ dossiersKey, dossiersVal, usersKey, usersVal, sessionKey, sessionVal }) => {
+    await page.evaluate(({ dossiersKey, dossiersVal, usersKey, usersVal, sessionKey, sessionVal, techKey, techVal }) => {
       localStorage.clear();
       localStorage.setItem(dossiersKey, JSON.stringify(dossiersVal));
       localStorage.setItem(usersKey, JSON.stringify(usersVal));
       localStorage.setItem(sessionKey, JSON.stringify(sessionVal));
+      localStorage.setItem(techKey, JSON.stringify(techVal));
     }, {
       dossiersKey: STORAGE_KEYS.dossiers,
       dossiersVal: [testDossier],
       usersKey: STORAGE_KEYS.users,
       usersVal: [mockUser],
       sessionKey: STORAGE_KEYS.session,
-      sessionVal: mockSession
+      sessionVal: mockSession,
+      techKey: STORAGE_KEYS.techs,
+      techVal: createWorkshopTechnicians(),
     });
 
     await page.reload();
@@ -249,7 +264,7 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
     const mockUser = {
       id: "user_technicien_01",
       username: "tech_01_user",
-      displayName: "Technicien Démo 001", // Matches the mock technician name in data.ts
+      displayName: "Technicien Atelier",
       role: UserRole.TECHNICIEN,
       active: true,
       createdAt: new Date().toISOString(),
@@ -258,25 +273,28 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
 
     const mockSession = {
       userId: "user_technicien_01",
-      displayName: "Technicien Démo 001",
+      displayName: "Technicien Atelier",
       role: UserRole.TECHNICIEN,
       loginAt: new Date().toISOString(),
       lastActivityAt: new Date().toISOString()
     };
 
     await page.goto("/");
-    await page.evaluate(({ dossiersKey, dossiersVal, usersKey, usersVal, sessionKey, sessionVal }) => {
+    await page.evaluate(({ dossiersKey, dossiersVal, usersKey, usersVal, sessionKey, sessionVal, techKey, techVal }) => {
       localStorage.clear();
       localStorage.setItem(dossiersKey, JSON.stringify(dossiersVal));
       localStorage.setItem(usersKey, JSON.stringify(usersVal));
       localStorage.setItem(sessionKey, JSON.stringify(sessionVal));
+      localStorage.setItem(techKey, JSON.stringify(techVal));
     }, {
       dossiersKey: STORAGE_KEYS.dossiers,
       dossiersVal: [testDossier],
       usersKey: STORAGE_KEYS.users,
       usersVal: [mockUser],
       sessionKey: STORAGE_KEYS.session,
-      sessionVal: mockSession
+      sessionVal: mockSession,
+      techKey: STORAGE_KEYS.techs,
+      techVal: createWorkshopTechnicians(),
     });
 
     await page.reload();

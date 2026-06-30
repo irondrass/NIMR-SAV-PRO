@@ -6,7 +6,7 @@ import { DossierStatus } from "../src/types";
 
 test.describe("Lot 5F-1 - Nettoyage opérationnel atelier", () => {
   const techs = [
-    createMockTech({ id: "tech_01", nom: "Technicien Démo" }),
+    createMockTech({ id: "tech_01", nom: "Technicien Atelier" }),
   ];
 
   const dossiers = [

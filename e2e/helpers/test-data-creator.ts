@@ -73,3 +73,28 @@ export function createMockTech(overrides: Partial<TechnicienResource>): Technici
     ...overrides
   };
 }
+
+export function createWorkshopTechnicians(): TechnicienResource[] {
+  return [
+    createMockTech({
+      id: "tech_01",
+      nom: "Technicien Atelier",
+      specialite: "Mécanique générale / Diagnostic",
+      disponibilite: "disponible",
+      compétences: ["Entretien standard", "Diagnostic atelier"],
+      zoneAffectee: AtelierZone.MECANIQUE_RAPIDE,
+      capaciteJournaliere: 8,
+      chargeActuelle: 0,
+    }),
+    createMockTech({
+      id: "tech_02",
+      nom: "Technicien Atelier 2",
+      specialite: "Électricité / Diagnostic",
+      disponibilite: "disponible",
+      compétences: ["Diagnostic OBD", "Électricité véhicule"],
+      zoneAffectee: AtelierZone.ELECTRICITE_DIAG,
+      capaciteJournaliere: 8,
+      chargeActuelle: 0,
+    }),
+  ];
+}
