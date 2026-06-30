@@ -22,6 +22,8 @@ import { maskPhoneNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, v
 import { canArchiveDeliveredDossier, canConfirmDelivery, canViewVehicleSensitiveFields } from "../permissions";
 import { canRunGuardedAction } from "../action-guard";
 import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
+import { logAuditEvent } from "../audit-trail";
+import ConfirmModal from "./ConfirmModal";
 
 interface LivraisonViewProps {
   dossiers: DossierSAV[];
@@ -61,6 +63,35 @@ export default function LivraisonView({
   const deliveryConfirmRef = useRef(false);
 
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId);
+
+  const recordDeliveryAudit = (
+    action: string,
+    summary: string,
+    result: "success" | "blocked" | "failed" = "success",
+    blockReason?: string
+  ) => {
+    if (!selectedDossier) return;
+    logAuditEvent({
+      user: currentUser.displayName,
+      role: currentUser.role,
+      module: "livraison",
+      action,
+      dossierId: selectedDossier.id,
+      dossierLabel: `${selectedDossier.vehiculeMarque} ${selectedDossier.vehiculeModele}`,
+      summary,
+      commentaire: summary,
+      result,
+      blockReason,
+      source: "livraison",
+    });
+  };
+
+  const blockDelivery = (message: string) => {
+    setValidationError(message);
+    recordDeliveryAudit("tentative_livraison_bloquee", message, "blocked", message);
+    setIsConfirmingDelivery(false);
+    deliveryConfirmRef.current = false;
+  };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -145,6 +176,24 @@ export default function LivraisonView({
     // Reset signature canvas
     setSignatureUri(dossier.livraison.signatureClientUri || "");
     setHasSigned(!!dossier.livraison.signatureClientUri);
+
+    const readiness = getDeliveryReadiness(dossier);
+    if (!readiness.canDeliver) {
+      const message = readiness.blockingMessages.join(" ") || "Action impossible : contrôle qualité conforme obligatoire.";
+      logAuditEvent({
+        user: currentUser.displayName,
+        role: currentUser.role,
+        module: "livraison",
+        action: "tentative_livraison_bloquee",
+        dossierId: dossier.id,
+        dossierLabel: `${dossier.vehiculeMarque} ${dossier.vehiculeModele}`,
+        summary: message,
+        commentaire: message,
+        result: "blocked",
+        blockReason: message,
+        source: "livraison",
+      });
+    }
   };
 
   // 1. Filter dossiers
@@ -169,7 +218,7 @@ export default function LivraisonView({
 
   const handleConfirmDelivery = () => {
     if (!canConfirmDelivery(currentUser.role)) {
-      setValidationError("Rôle non autorisé pour confirmer une livraison.");
+      blockDelivery("Action refusée : votre rôle ne permet pas cette opération.");
       return;
     }
     if (!selectedDossier || !canRunGuardedAction(`delivery-confirm:${selectedDossier.id}`)) return;
@@ -186,47 +235,35 @@ export default function LivraisonView({
 
     const initialReadiness = getDeliveryReadiness(selectedDossier);
     if (!initialReadiness.canDeliver) {
-      setValidationError(initialReadiness.blockingMessages.join(" "));
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery(initialReadiness.blockingMessages.join(" ") || "Action impossible : contrôle qualité conforme obligatoire.");
       return;
     }
 
     if (!qcOk || !clientInformed || !clientReceptionConfirmed) {
-      setValidationError("Toutes les étapes de la checklist de restitution doivent être cochées pour confirmer la livraison.");
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery("Toutes les étapes de la checklist de restitution doivent être cochées pour confirmer la livraison.");
       return;
     }
 
     const parsedExitKm = parseInt(exitKm, 10);
     const mileageCheck = validateMileage(parsedExitKm);
     if (isNaN(parsedExitKm) || !mileageCheck.valid) {
-      setValidationError(mileageCheck.reason || "Le kilométrage de sortie est obligatoire et doit être un nombre valide.");
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery(mileageCheck.reason || "Le kilométrage de sortie est obligatoire et doit être un nombre valide.");
       return;
     }
 
     if (parsedExitKm < selectedDossier.vehiculeKilometrage) {
-      setValidationError(`Le kilométrage de sortie (${parsedExitKm} km) ne peut pas être inférieur au kilométrage d'entrée (${selectedDossier.vehiculeKilometrage} km).`);
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery(`Le kilométrage de sortie (${parsedExitKm} km) ne peut pas être inférieur au kilométrage d'entrée (${selectedDossier.vehiculeKilometrage} km).`);
       return;
     }
 
     const statusCheck = validateDeliveryRestitutionStatus(restitutionStatus, remarks);
     if (!statusCheck.valid) {
-      setValidationError(statusCheck.reason || "Statut de restitution invalide.");
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery(statusCheck.reason || "Statut de restitution invalide.");
       return;
     }
 
     if (!hasSigned) {
-      setValidationError("L'acceptation/signature simple client est obligatoire.");
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery("L'acceptation/signature simple client est obligatoire.");
       return;
     }
     const safeRemarks = sanitizeFreeText(remarks);
@@ -247,17 +284,13 @@ export default function LivraisonView({
 
     const deliveryGate = canDeliverDossier(withDeliveryInfo);
     if (!deliveryGate.allowed) {
-      setValidationError(deliveryGate.reasons.join(" "));
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery(deliveryGate.reasons.join(" ") || "Action impossible : contrôle qualité conforme obligatoire.");
       return;
     }
 
     const delivered = confirmDelivery(withDeliveryInfo, new Date(), restitutionStatus, currentUser.role);
     if (![DossierStatus.LIVRE, DossierStatus.NON_RETIRE].includes(delivered.statut)) {
-      setValidationError("Livraison refusée : prérequis opérationnels incomplets.");
-      setIsConfirmingDelivery(false);
-      deliveryConfirmRef.current = false;
+      blockDelivery("Livraison refusée : prérequis opérationnels incomplets.");
       return;
     }
 
@@ -267,6 +300,7 @@ export default function LivraisonView({
     delivered.historiqueLogs = [formattedLog, ...(delivered.historiqueLogs || [])];
 
     onUpdateDossier(delivered);
+    recordDeliveryAudit("livraison_reussie", `Livraison réussie pour le dossier ${selectedDossier.id}.`);
     setSuccessMsg(`Livraison confirmée pour le dossier ${selectedDossier.id} ! Le véhicule est maintenant marqué comme livré.`);
     setSelectedDossierId(null);
     setShowConfirmModal(false);
@@ -397,9 +431,10 @@ export default function LivraisonView({
                   </h3>
 
                   {validationError && (
-                    <div data-testid="delivery-validation-error" className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
+                    <div data-testid="action-feedback" className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
                       <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                      <span>{validationError}</span>
+                      <span data-testid="action-error-message">{validationError}</span>
+                      <span data-testid="delivery-validation-error" className="sr-only">{validationError}</span>
                     </div>
                   )}
 
@@ -642,42 +677,16 @@ export default function LivraisonView({
               </div>
             </div>
 
-            {/* Generic Confirm Modal Overlay */}
-            {showConfirmModal && (
-              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-                <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
-                    <div>
-                      <h3 className="font-extrabold text-slate-800 text-sm">Confirmer livraison</h3>
-                      <p className="text-slate-500 text-xs mt-1">
-                        Êtes-vous sûr de vouloir confirmer la livraison de ce véhicule et la clôture opérationnelle de son dossier ?
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmModal(false)}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="modal-delivery-confirm"
-                      onClick={handleConfirmDelivery}
-                      disabled={isConfirmingDelivery}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      {isConfirmingDelivery ? (
-                        <span className="flex items-center gap-2"><svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Action en cours...</span>
-                      ) : "Confirmer la livraison"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+            <ConfirmModal
+              isOpen={showConfirmModal}
+              onClose={() => setShowConfirmModal(false)}
+              onConfirm={handleConfirmDelivery}
+              title="Confirmer livraison"
+              message="Confirmer la livraison de ce véhicule et la clôture opérationnelle de son dossier ?"
+              confirmText="Confirmer la livraison"
+              isPending={isConfirmingDelivery}
+              confirmAliasTestId="modal-delivery-confirm"
+            />
             </>
           ) : (
             <div className="bg-slate-50/50 rounded-2xl border border-slate-100 border-dashed p-8 text-center text-slate-400 text-xs flex flex-col items-center justify-center min-h-[300px]">

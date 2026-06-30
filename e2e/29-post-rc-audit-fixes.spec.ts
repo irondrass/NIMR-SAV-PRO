@@ -186,7 +186,7 @@ test.describe("Lot 6F — Correctifs post-RC audit terrain", () => {
     await humanFill(page, page.locator('[data-testid="delivery-km-sortie"]'), "42100");
     await humanClick(page, page.locator('[data-testid="delivery-status-reserve-client"]'));
     await humanClick(page, page.locator('[data-testid="btn-delivery-confirm"]'));
-    await expect(page.getByText(/commentaire obligatoire/i)).toBeVisible();
+    await expect(page.locator('[data-testid="action-error-message"]')).toContainText(/commentaire obligatoire/i);
 
     await humanFill(page, page.locator('[data-testid="delivery-comment"]'), "Client signale une réserve sur un bruit à surveiller lors de la reprise.");
     await humanClick(page, page.locator('[data-testid="btn-delivery-confirm"]'));

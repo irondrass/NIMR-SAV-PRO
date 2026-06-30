@@ -8,6 +8,10 @@ import StandardReasonModal from "./StandardReasonModal";
 import { DossierSAV, UserRole, DossierStatus } from "../types";
 import { getDossierQCStatus, submitQualityControl } from "../sav-core";
 import { sanitizeFreeText } from "../field-validations";
+import { canAcceptQC, canRefuseQC } from "../permissions";
+import { logAuditEvent } from "../audit-trail";
+import ConfirmModal from "./ConfirmModal";
+import { canRunGuardedAction } from "../action-guard";
 import { 
   CheckCircle, 
   XCircle, 
@@ -57,6 +61,23 @@ export default function ControleQualiteView({
 
   // Sync selected dossier
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId);
+
+  const recordQCAudit = (action: string, summary: string, result: "success" | "blocked" | "failed" = "success", blockReason?: string) => {
+    if (!selectedDossier) return;
+    logAuditEvent({
+      user: currentUser.displayName,
+      role: currentUser.role,
+      module: "controle-qualite",
+      action,
+      dossierId: selectedDossier.id,
+      dossierLabel: `${selectedDossier.vehiculeMarque} ${selectedDossier.vehiculeModele}`,
+      summary,
+      commentaire: summary,
+      result,
+      blockReason,
+      source: "qc",
+    });
+  };
 
   const handleSelectDossier = (dossier: DossierSAV) => {
     setSelectedDossierId(dossier.id);
@@ -113,6 +134,12 @@ export default function ControleQualiteView({
     setValidationError(null);
     setSuccessMsg(null);
     if (!selectedDossier) return;
+    if (!canAcceptQC(currentUser.role)) {
+      const message = "Action refusée : votre rôle ne permet pas cette opération.";
+      setValidationError(message);
+      recordQCAudit("validation_qc_refusee", message, "blocked", message);
+      return;
+    }
 
     const allChecked = 
       essaiEffectue && 
@@ -134,6 +161,13 @@ export default function ControleQualiteView({
 
   const confirmValidateQC = () => {
     if (qcSubmitRef.current || !selectedDossier) return;
+    if (!canRunGuardedAction(`qc-dedicated:${selectedDossier.id}:valide`)) return;
+    if (!canAcceptQC(currentUser.role)) {
+      const message = "Action refusée : votre rôle ne permet pas cette opération.";
+      setValidationError(message);
+      recordQCAudit("validation_qc_refusee", message, "blocked", message);
+      return;
+    }
     qcSubmitRef.current = true;
     setIsSubmittingQC(true);
 
@@ -160,6 +194,7 @@ export default function ControleQualiteView({
     validated.historiqueLogs = [formattedLog, ...(validated.historiqueLogs || [])];
     
     onUpdateDossier(validated);
+    recordQCAudit("validation_qc", `Contrôle qualité validé pour le dossier ${selectedDossier.id}.`);
     setSuccessMsg(`Contrôle qualité validé pour le dossier ${selectedDossier.id} ! Le véhicule est prêt à être livré.`);
     setSelectedDossierId(null);
     setShowValidateConfirm(false);
@@ -171,11 +206,24 @@ export default function ControleQualiteView({
     setValidationError(null);
     setSuccessMsg(null);
     if (!selectedDossier) return;
+    if (!canRefuseQC(currentUser.role)) {
+      const message = "Action refusée : votre rôle ne permet pas cette opération.";
+      setValidationError(message);
+      recordQCAudit("refus_qc_refuse", message, "blocked", message);
+      return;
+    }
     setShowRefuseConfirm(true);
   };
 
   const confirmRefuseQC = (reason: string, details: string) => {
     if (qcSubmitRef.current || !selectedDossier) return;
+    if (!canRunGuardedAction(`qc-dedicated:${selectedDossier.id}:refuse`)) return;
+    if (!canRefuseQC(currentUser.role)) {
+      const message = "Action refusée : votre rôle ne permet pas cette opération.";
+      setValidationError(message);
+      recordQCAudit("refus_qc_refuse", message, "blocked", message);
+      return;
+    }
     qcSubmitRef.current = true;
     setIsSubmittingQC(true);
     const fullReason = sanitizeFreeText(`${reason} : ${details}`);
@@ -203,6 +251,7 @@ export default function ControleQualiteView({
     refused.historiqueLogs = [formattedLog, ...(refused.historiqueLogs || [])];
 
     onUpdateDossier(refused);
+    recordQCAudit("refus_qc", `Contrôle qualité refusé pour le dossier ${selectedDossier.id}.`);
     setSuccessMsg(`Contrôle qualité refusé pour le dossier ${selectedDossier.id}. Le véhicule est retourné en atelier.`);
     setSelectedDossierId(null);
     setRefusalComment("");
@@ -345,9 +394,9 @@ export default function ControleQualiteView({
                   </h3>
 
                   {validationError && (
-                    <div className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
+                    <div data-testid="action-feedback" className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5">
                       <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                      <span>{validationError}</span>
+                      <span data-testid="action-error-message">{validationError}</span>
                     </div>
                   )}
 
@@ -432,42 +481,18 @@ export default function ControleQualiteView({
         </div>
       </div>
 
-      {showValidateConfirm && selectedDossier && (
-        <div data-testid="modal-qc-validate" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="h-6 w-6 shrink-0 text-amber-600" />
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Valider le contrôle qualité</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Confirmez-vous la validation QC du dossier {selectedDossier.id} et son passage en prêt à livrer ?
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 text-xs">
-              <button
-                type="button"
-                data-testid="modal-qc-validate-cancel"
-                onClick={() => setShowValidateConfirm(false)}
-                className="rounded-lg bg-slate-100 px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-200"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                data-testid="modal-qc-validate-confirm"
-                disabled={isSubmittingQC}
-                onClick={confirmValidateQC}
-                className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500"
-              >
-                {isSubmittingQC ? (
-                  <span className="flex items-center gap-2"><svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Action en cours...</span>
-                ) : "Confirmer"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={showValidateConfirm && !!selectedDossier}
+        onClose={() => setShowValidateConfirm(false)}
+        onConfirm={confirmValidateQC}
+        title="Valider le contrôle qualité"
+        message={selectedDossier ? `Confirmer la validation QC du dossier ${selectedDossier.id} et son passage en prêt à livrer ?` : ""}
+        confirmText="Confirmer"
+        isPending={isSubmittingQC}
+        modalAliasTestId="modal-qc-validate"
+        cancelAliasTestId="modal-qc-validate-cancel"
+        confirmAliasTestId="modal-qc-validate-confirm"
+      />
 
       <StandardReasonModal
         isOpen={showRefuseConfirm && !!selectedDossier}

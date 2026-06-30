@@ -50,7 +50,9 @@ test.describe("BUG-005 — Module Livraison dédié", () => {
 
     // Try to confirm without checking checklist boxes -> should fail
     await humanClick(page, page.locator('[data-testid="btn-delivery-confirm"]'));
-    await expect(page.locator("text=Toutes les étapes de la checklist de restitution doivent être cochées")).toBeVisible();
+    await expect(page.locator('[data-testid="action-error-message"]')).toContainText(
+      "Toutes les étapes de la checklist de restitution doivent être cochées"
+    );
 
     // Check checklist items
     await page.locator('[data-testid="delivery-check-qc"] input[type="checkbox"]').check();
@@ -60,7 +62,9 @@ test.describe("BUG-005 — Module Livraison dédié", () => {
     // Enter invalid mileage (smaller than entry km of 15000)
     await humanFill(page, page.locator('[data-testid="delivery-km-sortie"]'), "14990");
     await humanClick(page, page.locator('[data-testid="btn-delivery-confirm"]'));
-    await expect(page.locator("text=ne peut pas être inférieur au kilométrage d'entrée")).toBeVisible();
+    await expect(page.locator('[data-testid="action-error-message"]')).toContainText(
+      "ne peut pas être inférieur au kilométrage d'entrée"
+    );
 
     // Enter valid exit km
     await humanFill(page, page.locator('[data-testid="delivery-km-sortie"]'), "15015");

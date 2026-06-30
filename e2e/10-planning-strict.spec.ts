@@ -530,10 +530,6 @@ test.describe("NIMR SAV PRO Lot 4A - Planning Chef Atelier avancé", () => {
   });
 
   test("ouvre le modal modifier créneau et déplace une tâche planifiée", async ({ page }) => {
-    await page.evaluate(() => {
-      window.confirm = () => true;
-    });
-
     await humanClick(page, page.locator('[data-testid="gantt-reschedule-ro_morning"]').first());
     await expect(page.locator('[data-testid="planning-reschedule-modal"]')).toBeVisible();
     await page.locator('[data-testid="planning-reschedule-tech"]').selectOption(techFree.id);

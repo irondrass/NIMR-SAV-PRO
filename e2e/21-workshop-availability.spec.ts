@@ -3,6 +3,7 @@ import { changeUserRole, humanClick } from "./helpers/human-actions";
 import { createMockDossier, createMockTech } from "./helpers/test-data-creator";
 import { STORAGE_KEYS } from "../src/storage-keys";
 import { AtelierZone, DossierStatus } from "../src/types";
+import { GLOBAL_ACTION_GUARD_MS } from "../src/action-guard";
 
 const PLANNING_DATE = "2026-06-15"; // Lundi
 
@@ -132,6 +133,7 @@ test.describe("Workshop Availability and Absence Management", () => {
     await expect(page.locator('[data-testid="technician-absent-badge"]')).toHaveCount(0);
 
     // Tenter suggestion à nouveau : doit maintenant proposer sur le 15
+    await page.waitForTimeout(GLOBAL_ACTION_GUARD_MS + 100);
     await humanClick(page, suggestBtn);
     const proposedBlockOn15 = page.locator('[data-testid="gantt-reservation-proposed"]').first();
     await expect(proposedBlockOn15).toBeVisible();
@@ -154,6 +156,7 @@ test.describe("Workshop Availability and Absence Management", () => {
     await expect(bayUnavBadge).toContainText("Indisponible");
 
     // 13. Tenter suggestion : doit éviter ce pont
+    await page.waitForTimeout(GLOBAL_ACTION_GUARD_MS + 100);
     await humanClick(page, suggestBtn);
     const newProposedBlock = page.locator('[data-testid="gantt-reservation-proposed"]').first();
     await expect(newProposedBlock).toBeVisible();

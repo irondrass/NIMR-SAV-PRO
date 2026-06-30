@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { clearAuditTrail, getAuditTrail, logAuditEvent } from "../src/audit-trail";
+import { AUDIT_TRAIL_STORAGE_KEY, MAX_AUDIT_TRAIL_ENTRIES, clearAuditTrail, getAuditTrail, logAuditEvent } from "../src/audit-trail";
 import { createReceptionDossier, finishRepairOrder, blockRepairOrder } from "../src/sav-core";
 import { DossierPriority, DossierStatus, InterventionType, UserRole } from "../src/types";
 
@@ -14,24 +14,51 @@ const entry = logAuditEvent({
   module: "controle-qualite",
   action: "validation_qc",
   dossierId: "NIMR<script>alert(1)</script>-001",
+  dossierLabel: "<b>Dongfeng</b> Shine",
   ancienStatut: DossierStatus.CONTROLE_QUALITE,
   nouveauStatut: DossierStatus.PRET_A_LIVRER,
   commentaire: "<script>alert(1)</script>Checklist complète",
-  source: "local-ui",
+  result: "success",
+  source: "qc",
 });
 
 assert.match(entry.id, /^audit_/);
 assert.ok(!Number.isNaN(Date.parse(entry.timestamp)));
+assert.ok(!Number.isNaN(Date.parse(entry.date)));
 assert.equal(entry.user, "Chef Atelier");
 assert.equal(entry.dossierId, "NIMR-001");
+assert.equal(entry.dossierLabel, "Dongfeng Shine");
 assert.equal(entry.commentaire, "Checklist complète");
+assert.equal(entry.summary, "Checklist complète");
 assert.equal(entry.ancienStatut, DossierStatus.CONTROLE_QUALITE);
 assert.equal(entry.nouveauStatut, DossierStatus.PRET_A_LIVRER);
-assert.equal(entry.source, "local-ui");
+assert.equal(entry.result, "success");
+assert.equal(entry.source, "qc");
+assert.equal(AUDIT_TRAIL_STORAGE_KEY, "nimr-sav-pro-audit-log-v1");
 
 const logs = getAuditTrail();
 assert.equal(logs.length, 1);
 assert.equal(logs[0].id, entry.id);
+
+clearAuditTrail();
+assert.equal(getAuditTrail().length, 0);
+
+for (let index = 0; index < MAX_AUDIT_TRAIL_ENTRIES + 5; index += 1) {
+  logAuditEvent({
+    user: "QA",
+    role: UserRole.DIRECTEUR_SAV,
+    module: "livraison",
+    action: "tentative_livraison_bloquee",
+    dossierId: `NIMR-AUDIT-${index}`,
+    summary: "Livraison bloquée : une tâche atelier est encore ouverte.",
+    result: "blocked",
+    blockReason: "Livraison bloquée : une tâche atelier est encore ouverte.",
+    source: "livraison",
+  });
+}
+assert.equal(getAuditTrail().length, MAX_AUDIT_TRAIL_ENTRIES);
+assert.equal(getAuditTrail()[0].result, "blocked");
+assert.equal(getAuditTrail()[0].source, "livraison");
 
 clearAuditTrail();
 assert.equal(getAuditTrail().length, 0);

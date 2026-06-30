@@ -100,7 +100,7 @@ import {
 } from "../src/types";
 import { INITIAL_DOSSIERS } from "../src/data";
 import { buildDirectorDashboardKpis, extractDossierTiming } from "../src/dashboard-kpis";
-import { clearAuditTrail, getAuditTrail, logAuditEvent } from "../src/audit-trail";
+import { AUDIT_TRAIL_STORAGE_KEY, MAX_AUDIT_TRAIL_ENTRIES, clearAuditTrail, getAuditTrail, logAuditEvent } from "../src/audit-trail";
 import {
   maskPhoneNumber,
   sanitizeFreeText,
@@ -557,6 +557,9 @@ registerCheck("Qualité Code", "Aucun prompt() ou alert()", () => {
     }
     if (content.includes("prompt(") && !file.includes("qa-agent")) {
       throw new Error(`prompt() trouvé dans le fichier : ${file}`);
+    }
+    if ((content.includes("window.confirm") || content.includes("window['confirm']") || /(^|[^A-Za-z0-9_])confirm\s*\(/.test(content)) && !file.includes("ConfirmModal")) {
+      throw new Error(`confirm natif trouvé dans le fichier : ${file}`);
     }
   }
 });
@@ -2226,11 +2229,31 @@ registerCheck("Lot 6E Invariants", "audit trail horodaté pour actions sensibles
     ancienStatut: DossierStatus.CONTROLE_QUALITE,
     nouveauStatut: DossierStatus.PRET_A_LIVRER,
     commentaire: "<b>validation</b>",
-    source: "qa-agent",
+    result: "success",
+    source: "qc",
   });
   assert.ok(!Number.isNaN(Date.parse(entry.timestamp)));
+  assert.ok(!Number.isNaN(Date.parse(entry.date)));
   assert.equal(entry.commentaire, "validation");
+  assert.equal(entry.summary, "validation");
+  assert.equal(entry.result, "success");
+  assert.equal(entry.source, "qc");
+  assert.equal(AUDIT_TRAIL_STORAGE_KEY, "nimr-sav-pro-audit-log-v1");
   assert.equal(getAuditTrail()[0].id, entry.id);
+  for (let index = 0; index < MAX_AUDIT_TRAIL_ENTRIES + 2; index += 1) {
+    logAuditEvent({
+      user: "QA",
+      role: UserRole.LIVRAISON,
+      module: "livraison",
+      action: "tentative_livraison_bloquee",
+      dossierId: `NIMR-QA-BLOCK-${index}`,
+      summary: "Action impossible : contrôle qualité conforme obligatoire.",
+      result: "blocked",
+      blockReason: "Action impossible : contrôle qualité conforme obligatoire.",
+      source: "livraison",
+    });
+  }
+  assert.equal(getAuditTrail().length, MAX_AUDIT_TRAIL_ENTRIES);
   clearAuditTrail();
 });
 
@@ -2260,12 +2283,18 @@ registerCheck("Lot 6E Invariants", "confirmations obligatoires QC et livraison",
   const qcContent = fs.readFileSync("src/components/ControleQualiteView.tsx", "utf8");
   const detailContent = fs.readFileSync("src/components/DossierDetail.tsx", "utf8");
   const deliveryContent = fs.readFileSync("src/components/LivraisonView.tsx", "utf8");
+  const modalContent = fs.readFileSync("src/components/ConfirmModal.tsx", "utf8");
+  const auditViewContent = fs.readFileSync("src/components/AuditTrailView.tsx", "utf8");
   assert.ok(qcContent.includes("modal-qc-validate"), "Le module QC doit confirmer une validation complète");
   assert.ok(qcContent.includes("modal-qc-refuse"), "Le module QC doit confirmer un refus avec motif");
   assert.ok(detailContent.includes("modal-qc-validate-detail"), "Le détail dossier doit confirmer une validation QC");
   assert.ok(detailContent.includes("modal-delivery-confirm-detail"), "Le détail dossier doit confirmer une restitution");
   assert.ok(deliveryContent.includes("showConfirmModal"), "Le module livraison doit demander une confirmation finale");
   assert.ok(deliveryContent.includes("hasSigned"), "La livraison doit exiger une signature ou confirmation client");
+  assert.ok(modalContent.includes('data-testid="confirm-modal"'), "ConfirmModal doit exposer un testid stable");
+  assert.ok(modalContent.includes("action-pending-indicator"), "ConfirmModal doit afficher l'état pending");
+  assert.ok(detailContent.includes("AuditTrailView"), "Le détail dossier doit afficher l'audit trail local autorisé");
+  assert.ok(auditViewContent.includes('data-testid="audit-trail-panel"'), "AuditTrailView doit exposer un testid stable");
 });
 
 registerCheck("Lot 6E Invariants", "documents imprimables internes et sans finance réelle", () => {

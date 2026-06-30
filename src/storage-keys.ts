@@ -20,6 +20,7 @@ export const STORAGE_KEYS = {
   availability: "nimr-sav-pro-availability-v1",
   vehicleMaster: "nimr-sav-pro-vehicle-master-v1",
   vehicleMasterLastImport: "nimr-sav-pro-vehicle-master-last-import",
+  auditLog: "nimr-sav-pro-audit-log-v1",
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

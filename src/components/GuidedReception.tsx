@@ -68,6 +68,7 @@ import {
   maskPhoneNumber
 } from "../field-validations";
 import { buildAgingAlerts, filterAgingAlerts } from "../aging-alerts";
+import ConfirmModal from "./ConfirmModal";
 
 interface GuidedReceptionProps {
   dossiers: DossierSAV[];
@@ -1937,43 +1938,18 @@ export default function GuidedReception({
         </div>
       )}
 
-      {/* Submit Confirmation Modal */}
-      {showSubmitConfirmModal && (
-        <div data-testid="reception-submit-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-sm w-full shadow-xl space-y-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-6 h-6 text-green-600 shrink-0" />
-              <div>
-                <h3 className="font-extrabold text-slate-800 text-sm">Créer le dossier</h3>
-                <p className="text-slate-500 text-xs mt-1">
-                  Confirmez-vous la création de ce dossier SAV ?
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 text-xs">
-              <button
-                type="button"
-                data-testid="reception-submit-cancel"
-                onClick={() => setShowSubmitConfirmModal(false)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition cursor-pointer"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                data-testid="reception-submit-confirm"
-                onClick={() => handleFormSubmit()}
-                disabled={isSubmittingReception}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
-              >
-                {isSubmittingReception ? (
-                  <span className="flex items-center gap-2"><svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Action en cours...</span>
-                ) : "Confirmer"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={showSubmitConfirmModal}
+        onClose={() => setShowSubmitConfirmModal(false)}
+        onConfirm={handleFormSubmit}
+        title="Créer le dossier"
+        message="Confirmez-vous la création de ce dossier SAV ?"
+        confirmText="Confirmer"
+        isPending={isSubmittingReception}
+        modalAliasTestId="reception-submit-modal"
+        cancelAliasTestId="reception-submit-cancel"
+        confirmAliasTestId="reception-submit-confirm"
+      />
     </div>
   );
 }

@@ -57,10 +57,12 @@ import {
 } from "lucide-react";
 import { LicencePlate, StatusBadge } from "./UIParts";
 import PrintDocuments from "./PrintDocuments";
+import ConfirmModal from "./ConfirmModal";
 import * as perm from "../permissions";
 import { maskPhoneNumber } from "../field-validations";
 import { TASK_STATUS_VISUAL_ORDER, getTaskStatusVisual } from "../task-status-visual";
 import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
+import { canRunGuardedAction } from "../action-guard";
 import {
   findTaskPlanningTarget,
   getCurrentGanttTaskStatus,
@@ -206,6 +208,32 @@ function formatWorkshopDuration(hours: number | undefined): string {
   return hours && hours > 0 ? `${hours}H` : "À estimer";
 }
 
+type ReservationFeedback = {
+  type: "success" | "error";
+  message: string;
+};
+
+function hasValidatedReservationDuration(dossier: DossierSAV): boolean {
+  return dossier.ordresReparation.some(line => {
+    const isDone = normalizeRepairOrderStatus(line.status) === "done";
+    return !isDone && line.tempsEstime > 0 && line.isEstimatedDurationValidated === true;
+  });
+}
+
+function formatReservationFailure(codes: string[] = [], fallback = ""): string {
+  const normalizedFallback = fallback.toLowerCase();
+  if (codes.includes("planning-role-forbidden")) {
+    return "Action refusée : votre rôle ne permet pas cette opération.";
+  }
+  if (codes.includes("planning-duration-not-validated") || normalizedFallback.includes("durée")) {
+    return "Réservation impossible : durée non validée.";
+  }
+  if (codes.includes("planning-collision-tech") || normalizedFallback.includes("technicien est déjà")) {
+    return "Réservation impossible : technicien déjà occupé.";
+  }
+  return "Réservation impossible : aucun créneau disponible.";
+}
+
 export default function WorkshopPlanning({
   techniciens,
   dossiers,
@@ -255,6 +283,9 @@ export default function WorkshopPlanning({
   const [autoPlanningSuccess, setAutoPlanningSuccess] = useState("");
   const [selectedVehicleDossierId, setSelectedVehicleDossierId] = useState("");
   const [autoPlanningWarning, setAutoPlanningWarning] = useState("");
+  const [showShiftResetConfirm, setShowShiftResetConfirm] = useState(false);
+  const [planningActionError, setPlanningActionError] = useState("");
+  const [reservationFeedback, setReservationFeedback] = useState<Record<string, ReservationFeedback>>({});
 
   // Shift profile editing (Part 3)
   const [editingProfile, setEditingProfile] = useState<WorkshopShiftProfile | null>(null);
@@ -532,6 +563,7 @@ export default function WorkshopPlanning({
   const handleApplySuggestion = (selectedSuggestion = suggestion) => {
     if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!selectedTargetForSuggest || !selectedSuggestion) return;
+    if (!canRunGuardedAction(`planning-apply-suggestion:${selectedTargetForSuggest.dossier.id}:${selectedTargetForSuggest.line.id}`)) return;
 
     const result = reserveSuggestedWorkshopSlot({
       role: activeRole,
@@ -635,6 +667,7 @@ export default function WorkshopPlanning({
   const handleSaveManualPlanning = () => {
     if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!activeManualDossier || !manualTaskId || !manualTechId || !manualBayId) return;
+    if (!canRunGuardedAction(`planning-manual-save:${activeManualDossier.id}:${manualTaskId}`)) return;
 
     const { start, end } = getManualInterval();
     const validation = validatePlanningAssignment({
@@ -689,6 +722,7 @@ export default function WorkshopPlanning({
 
   const handleAutoReserve = (vehicleDossierId: string) => {
     if (activeRole !== UserRole.CHEF_ATELIER || !vehicleDossierId) return;
+    if (!canRunGuardedAction(`planning-auto-reserve:${vehicleDossierId}`)) return;
 
     setAutoPlanningError("");
     setAutoPlanningSuccess("");
@@ -838,19 +872,23 @@ export default function WorkshopPlanning({
 
   // Construct reservation needs
   const reservationNeeds = dossiers
-    .filter(dossier => calculateReservationDuration(dossier) > 0)
     .map(dossier => {
       const duration = calculateReservationDuration(dossier);
       const res = reservations
         .filter(r => r.dossierId === dossier.id)
         .sort((a, b) => reservations.indexOf(b) - reservations.indexOf(a))[0];
+      const activeReservation = res && res.status !== "ANNULEE" ? res : null;
       
       return {
         dossier,
         duration,
-        reservation: res || null
+        reservation: activeReservation
       };
     })
+    .filter(item =>
+      item.duration > 0 ||
+      Boolean(item.reservation)
+    )
     .filter(item =>
       !item.reservation ||
       item.reservation.status !== "TRANSFORMEE_PLANNING" ||
@@ -858,12 +896,38 @@ export default function WorkshopPlanning({
     );
 
   const handleSuggestReservation = (dossier: DossierSAV, existingRes: WorkshopReservation | null) => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
-    const baseRes = existingRes && existingRes.status !== "ANNULEE" 
+    const setFeedback = (type: ReservationFeedback["type"], message: string) => {
+      setReservationFeedback(current => ({
+        ...current,
+        [dossier.id]: { type, message }
+      }));
+    };
+
+    if (activeRole !== UserRole.CHEF_ATELIER) {
+      setFeedback("error", "Action refusée : votre rôle ne permet pas cette opération.");
+      return;
+    }
+    if (!canRunGuardedAction(`reservation-suggest:${dossier.id}`)) {
+      setFeedback("error", "Réservation en cours : veuillez patienter.");
+      return;
+    }
+    if (!hasValidatedReservationDuration(dossier)) {
+      setFeedback("error", "Réservation impossible : durée non validée.");
+      return;
+    }
+    const selectedDesiredDate = new Date(selectedDate);
+    selectedDesiredDate.setHours(8, 0, 0, 0);
+    const rawBaseRes = existingRes && existingRes.status !== "ANNULEE"
       ? existingRes 
       : createReservationNeed(dossier, getSystemTime());
+    const baseRes = rawBaseRes
+      ? { ...rawBaseRes, desiredDate: selectedDesiredDate.toISOString() }
+      : null;
     
-    if (!baseRes) return;
+    if (!baseRes) {
+      setFeedback("error", "Réservation impossible : durée non validée.");
+      return;
+    }
 
     try {
       const suggested = suggestReservationSlot({
@@ -875,33 +939,82 @@ export default function WorkshopPlanning({
         availabilityConfig
       }, getSystemTime());
 
+      const validation = validateReservationSlot({
+        reservation: suggested,
+        dossiers,
+        reservations,
+        technicians: techniciens,
+        workshopBays: DEFAULT_WORKSHOP_BAYS,
+        availabilityConfig
+      }, getSystemTime());
+
+      if (!validation.allowed) {
+        setFeedback("error", formatReservationFailure(validation.codes, validation.reasons.join(" ")));
+        return;
+      }
+
       const exists = reservations.some(r => r.reservationId === suggested.reservationId);
       const nextRes = exists
         ? reservations.map(r => r.reservationId === suggested.reservationId ? suggested : r)
         : [...reservations, suggested];
       
       onUpdateReservations(nextRes);
+      setFeedback("success", "Suggestion de créneau affichée. Utilisez Réserver ce créneau pour confirmer.");
     } catch (err: any) {
-      console.error(err.message || "Erreur de suggestion.");
+      setFeedback("error", formatReservationFailure([], err.message || "Erreur de suggestion."));
     }
   };
 
   const handleConfirmReservation = (res: WorkshopReservation) => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    const setFeedback = (type: ReservationFeedback["type"], message: string) => {
+      setReservationFeedback(current => ({
+        ...current,
+        [res.dossierId]: { type, message }
+      }));
+    };
+
+    if (activeRole !== UserRole.CHEF_ATELIER) {
+      setFeedback("error", "Action refusée : votre rôle ne permet pas cette opération.");
+      return;
+    }
+    if (!canRunGuardedAction(`reservation-confirm:${res.reservationId}`)) {
+      setFeedback("error", "Réservation en cours : veuillez patienter.");
+      return;
+    }
     const confirmed = confirmReservation(res, getSystemTime());
     const nextRes = reservations.map(r => r.reservationId === res.reservationId ? confirmed : r);
     onUpdateReservations(nextRes);
+    setFeedback("success", "Créneau réservé avec succès.");
   };
 
   const handleCancelReservation = (res: WorkshopReservation) => {
     if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (!canRunGuardedAction(`reservation-cancel:${res.reservationId}`)) return;
     const cancelled = cancelReservation(res, getSystemTime());
     const nextRes = reservations.map(r => r.reservationId === res.reservationId ? cancelled : r);
     onUpdateReservations(nextRes);
+    setReservationFeedback(current => ({
+      ...current,
+      [res.dossierId]: { type: "success", message: "Réservation annulée." }
+    }));
   };
 
   const handleConvertReservation = (res: WorkshopReservation) => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    const setFeedback = (type: ReservationFeedback["type"], message: string) => {
+      setReservationFeedback(current => ({
+        ...current,
+        [res.dossierId]: { type, message }
+      }));
+    };
+
+    if (activeRole !== UserRole.CHEF_ATELIER) {
+      setFeedback("error", "Action refusée : votre rôle ne permet pas cette opération.");
+      return;
+    }
+    if (!canRunGuardedAction(`reservation-convert:${res.reservationId}`)) {
+      setFeedback("error", "Réservation en cours : veuillez patienter.");
+      return;
+    }
     const { dossiers: nextDossiers, reservation: nextResObj } = convertReservationToPlanning(res, dossiers, getSystemTime());
     
     const updatedDossier = nextDossiers.find(d => d.id === res.dossierId);
@@ -911,6 +1024,7 @@ export default function WorkshopPlanning({
     
     const nextRes = reservations.map(r => r.reservationId === res.reservationId ? nextResObj : r);
     onUpdateReservations(nextRes);
+    setFeedback("success", "Réservation atelier créée et Gantt mis à jour.");
   };
 
   const openRescheduleModal = (
@@ -941,6 +1055,7 @@ export default function WorkshopPlanning({
   const handleSaveReschedule = () => {
     if (activeRole !== UserRole.CHEF_ATELIER) return;
     if (!rescheduleTarget || !rescheduleTechId || !rescheduleBayId || !rescheduleDate || !rescheduleStart) return;
+    if (!canRunGuardedAction(`planning-reschedule:${rescheduleTarget.dossierId}:${rescheduleTarget.lineId}`)) return;
     const dossier = dossiers.find(current => current.id === rescheduleTarget.dossierId);
     const line = dossier?.ordresReparation.find(current => current.id === rescheduleTarget.lineId);
     if (!dossier || !line) return;
@@ -976,12 +1091,9 @@ export default function WorkshopPlanning({
       return;
     }
 
+    const segments = validation.segments.length > 0 ? validation.segments : buildPlanningSegments(start, end);
     const techName = techniciens.find(tech => tech.id === rescheduleTechId)?.nom || rescheduleTechId;
     const bayName = DEFAULT_WORKSHOP_BAYS.find(bay => bay.id === rescheduleBayId)?.name || rescheduleBayId;
-    const confirmed = window.confirm(`Déplacer la tâche "${line.designation}" vers ${techName} / ${bayName} le ${start.toLocaleString("fr-FR")} ?`);
-    if (!confirmed) return;
-
-    const segments = validation.segments.length > 0 ? validation.segments : buildPlanningSegments(start, end);
     const nextLines = dossier.ordresReparation.map(current => current.id === line.id ? {
       ...current,
       planningStart: start.toISOString(),
@@ -1035,9 +1147,10 @@ export default function WorkshopPlanning({
 
   const handlePrintTaskSheet = (dossier: DossierSAV, line: RepairOrderLine | null | undefined) => {
     if (!line) {
-      window['alert']("Aucune tâche sélectionnée pour impression.");
+      setPlanningActionError("Aucune tâche sélectionnée pour impression.");
       return;
     }
+    setPlanningActionError("");
     setTaskSheetTarget({ dossier, line });
     document.body.classList.add("printing-task-sheet");
 
@@ -1132,6 +1245,12 @@ export default function WorkshopPlanning({
 
           </div>
         </div>
+
+        {planningActionError && (
+          <div data-testid="action-feedback" className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">
+            <span data-testid="action-error-message">{planningActionError}</span>
+          </div>
+        )}
 
         {/* Date Navigator Header */}
         <div className="flex items-center justify-between mt-5 pt-4 border-t border-gray-100">
@@ -1707,6 +1826,7 @@ export default function WorkshopPlanning({
                 const displayedDuration = isReservedFromSuggestion
                   ? reservation.totalHours
                   : duration;
+                const feedback = reservationFeedback[dossier.id];
                 
                 // Check if slot has issues
                 let validationErrors: string[] = [];
@@ -1761,19 +1881,29 @@ export default function WorkshopPlanning({
                         const isExpanded = expandedResId === reservation.reservationId;
 
                         return (
-                          <div className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mt-1.5 space-y-1">
+                          <div
+                            data-testid={status === "CRENEAU_PROPOSE" ? "planning-suggestion-panel" : undefined}
+                            className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mt-1.5 space-y-1"
+                          >
                             <div className="font-black text-gray-700 uppercase text-[9px]">
                               {isReservedFromSuggestion ? "Créneau réservé :" : "Créneau proposé :"}
                             </div>
                             <div>
-                              Début : <span data-testid="res-start" className="font-bold text-gray-800">
+                              Début : <span data-testid="planning-suggestion-start" className="font-bold text-gray-800">
+                                <span data-testid="res-start">
                                 {new Date(reservation.startTime).toLocaleDateString("fr-FR")} à {new Date(reservation.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
                               </span>
                             </div>
                             <div>
-                              Fin estimée : <span data-testid="res-end" className="font-bold text-gray-800">
+                              Fin estimée : <span data-testid="planning-suggestion-end" className="font-bold text-gray-800">
+                                <span data-testid="res-end">
                                 {reservation.endTime ? `${new Date(reservation.endTime).toLocaleDateString("fr-FR")} à ${new Date(reservation.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "-"}
+                                </span>
                               </span>
+                            </div>
+                            <div>
+                              Durée : <span data-testid="planning-suggestion-duration" className="font-bold text-gray-800">{reservation.totalHours}h</span>
                             </div>
                             <div>
                               Charge répartie sur : <span data-testid="res-days" className="font-bold text-gray-800">
@@ -1785,7 +1915,7 @@ export default function WorkshopPlanning({
                                 {numSegments} {numSegments > 1 ? "segments" : "segment"}
                               </span>
                             </div>
-                            <div>Technicien : <span className="font-bold text-gray-800">{techniciens.find(t => t.id === reservation.technicianId)?.nom || reservation.technicianId}</span></div>
+                            <div>Technicien : <span data-testid="planning-suggestion-technician" className="font-bold text-gray-800">{techniciens.find(t => t.id === reservation.technicianId)?.nom || reservation.technicianId}</span></div>
                             <div>Pont : <span className="font-bold text-gray-800">{DEFAULT_WORKSHOP_BAYS.find(b => b.id === reservation.bayId)?.name || reservation.bayId}</span></div>
                             
                             {reservation.segments && reservation.segments.length > 0 && (
@@ -1821,7 +1951,7 @@ export default function WorkshopPlanning({
                     {validationErrors.length > 0 && (
                       <div className="bg-red-50 text-red-800 p-2 rounded-lg text-[10px] space-y-0.5 border border-red-150">
                         {validationErrors.map((err, i) => (
-                          <div key={i} className="flex items-center gap-1 font-bold">
+                      <div key={i} className="flex items-center gap-1 font-bold">
                             <AlertTriangle className="w-3 h-3 flex-shrink-0 text-red-650" />
                             {err}
                           </div>
@@ -1829,22 +1959,39 @@ export default function WorkshopPlanning({
                       </div>
                     )}
 
+                    {feedback && (
+                      <div
+                        data-testid="planning-reservation-feedback"
+                        className={`flex items-center gap-1 rounded-lg border p-2 text-[10px] font-extrabold ${
+                          feedback.type === "success"
+                            ? "border-emerald-150 bg-emerald-50 text-emerald-800"
+                            : "border-red-150 bg-red-50 text-red-800"
+                        }`}
+                      >
+                        {feedback.type === "error" && <AlertTriangle className="h-3 w-3 flex-shrink-0" />}
+                        {feedback.type === "success" && <Check className="h-3 w-3 flex-shrink-0" />}
+                        <span data-testid={feedback.type === "success" ? "planning-reservation-success" : "planning-reservation-error"}>
+                          {feedback.message}
+                        </span>
+                      </div>
+                    )}
+
                     {activeRole === UserRole.CHEF_ATELIER && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
-                      {/* Suggérer button */}
+                      {/* À réserver button */}
                       {(status === "A_RESERVER" || status === "CRENEAU_PROPOSE") && (
                         <button
                           onClick={() => handleSuggestReservation(dossier, reservation)}
                           disabled={!perm.canSuggestReservation(activeRole)}
-                          data-testid="reservation-suggest-btn"
+                          data-testid="planning-reserve-button"
                           className="px-2 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
                         >
                           <Sparkles className="w-3 h-3" />
-                          Suggérer
+                          <span data-testid="reservation-suggest-btn">À réserver</span>
                         </button>
                       )}
 
-                      {/* Confirmer button */}
+                      {/* Réserver le créneau button */}
                       {status === "CRENEAU_PROPOSE" && (
                         <button
                           onClick={() => handleConfirmReservation(reservation!)}
@@ -1853,7 +2000,7 @@ export default function WorkshopPlanning({
                           className="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
                         >
                           <Check className="w-3 h-3" />
-                          Confirmer
+                          <span data-testid="planning-confirm-slot">Réserver ce créneau</span>
                         </button>
                       )}
 
@@ -2704,15 +2851,7 @@ export default function WorkshopPlanning({
               <button
                 type="button"
                 data-testid="shift-profiles-reset-defaults"
-                onClick={() => {
-                  const confirmed = window.confirm("Réinitialiser les horaires par défaut de l'atelier ?");
-                  if (!confirmed) return;
-                  onUpdateAvailabilityConfig({
-                    ...availabilityConfig,
-                    schedule: getDefaultWorkshopSchedule(),
-                    shiftProfiles: getDefaultWorkshopShiftProfiles(),
-                  });
-                }}
+                onClick={() => setShowShiftResetConfirm(true)}
                 className="inline-flex min-h-12 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700"
               >
                 Réinitialiser les horaires par défaut
@@ -3270,6 +3409,23 @@ export default function WorkshopPlanning({
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={showShiftResetConfirm}
+        onClose={() => setShowShiftResetConfirm(false)}
+        onConfirm={() => {
+          onUpdateAvailabilityConfig?.({
+            ...availabilityConfig,
+            schedule: getDefaultWorkshopSchedule(),
+            shiftProfiles: getDefaultWorkshopShiftProfiles(),
+          });
+          setShowShiftResetConfirm(false);
+        }}
+        title="Réinitialiser les horaires"
+        message="Réinitialiser les horaires par défaut de l'atelier ?"
+        confirmText="Réinitialiser"
+        isDanger
+      />
 
       {createPortal(
         <div id="technician-task-print-root" className="print-only">

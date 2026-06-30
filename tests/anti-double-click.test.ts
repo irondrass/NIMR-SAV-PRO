@@ -42,4 +42,21 @@ if (third.ok) {
   assert.equal(third.value, "saved-again");
 }
 
+let failed = false;
+try {
+  await guard.run("save-dossier", () => {
+    throw new Error("terrain failure");
+  });
+} catch {
+  failed = true;
+}
+assert.equal(failed, true);
+assert.equal(guard.isRunning("save-dossier"), false);
+
+const afterFailure = await guard.run("save-dossier", () => "reset-ok");
+assert.equal(afterFailure.ok, true);
+if (afterFailure.ok) {
+  assert.equal(afterFailure.value, "reset-ok");
+}
+
 console.log("anti-double-click.test.ts OK");

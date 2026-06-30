@@ -93,6 +93,7 @@ import ControleQualiteView from "./components/ControleQualiteView";
 import LivraisonView from "./components/LivraisonView";
 import WarrantyView from "./components/WarrantyView";
 import SatisfactionView from "./components/SatisfactionView";
+import ConfirmModal from "./components/ConfirmModal";
 
 // Icons
 import { 
@@ -438,6 +439,31 @@ export default function App() {
         ancienStatut: original.statut,
         nouveauStatut: updatedDossier.statut,
         commentaire: `Dossier marqué comme ${updatedDossier.statut}`,
+      });
+    }
+
+    if (
+      original &&
+      original.checklistQC.validationGlobale === "valide" &&
+      updatedDossier.checklistQC.validationGlobale === "a_refaire"
+    ) {
+      recordAudit({
+        module: "atelier",
+        action: "modification_atelier_apres_qc",
+        dossierId: updatedDossier.id,
+        dossierLabel: `${updatedDossier.vehiculeMarque} ${updatedDossier.vehiculeModele}`,
+        commentaire: "Modification enregistrée : le contrôle qualité doit être refait.",
+        result: "success",
+        source: "atelier",
+      });
+      recordAudit({
+        module: "controle-qualite",
+        action: "invalidation_qc_apres_modification_atelier",
+        dossierId: updatedDossier.id,
+        dossierLabel: `${updatedDossier.vehiculeMarque} ${updatedDossier.vehiculeModele}`,
+        commentaire: "Modification enregistrée : le contrôle qualité doit être refait.",
+        result: "success",
+        source: "qc",
       });
     }
 
@@ -1473,39 +1499,17 @@ export default function App() {
             </>
           )}
 
-          {showExportConfirm && (
-            <div data-testid="export-json-confirm-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-              <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="h-5 w-5 shrink-0 text-amber-600" />
-                  <div>
-                    <h3 className="font-black uppercase text-slate-900">Confirmer l'export JSON</h3>
-                    <p className="mt-1 font-semibold text-slate-600">
-                      L'export contient des données locales sensibles. Les téléphones sont masqués si le rôle courant n'est pas autorisé.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    data-testid="export-json-cancel"
-                    onClick={() => setShowExportConfirm(false)}
-                    className="rounded-lg bg-slate-100 px-4 py-2 font-extrabold text-slate-700"
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="export-json-confirm"
-                    onClick={executeExportDataJSON}
-                    className="rounded-lg bg-slate-900 px-4 py-2 font-extrabold text-white"
-                  >
-                    Confirmer l'export
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <ConfirmModal
+            isOpen={showExportConfirm}
+            onClose={() => setShowExportConfirm(false)}
+            onConfirm={executeExportDataJSON}
+            title="Confirmer l'export JSON"
+            message="L'export contient des données locales sensibles. Les téléphones sont masqués si le rôle courant n'est pas autorisé."
+            confirmText="Confirmer l'export"
+            modalAliasTestId="export-json-confirm-modal"
+            cancelAliasTestId="export-json-cancel"
+            confirmAliasTestId="export-json-confirm"
+          />
 
           {pendingImport && (
             <div data-testid="import-json-confirm-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">

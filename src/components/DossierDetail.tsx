@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import StandardReasonModal from "./StandardReasonModal";
 import QuoteImportModal from "./QuoteImportModal";
 import PrintDocuments from "./PrintDocuments";
+import ConfirmModal from "./ConfirmModal";
+import AuditTrailView from "./AuditTrailView";
 import { applyQuoteImportPreview } from "../quote-import";
 import {
   DossierSAV,
@@ -59,6 +61,8 @@ import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
 import { getTaskStatusVisual } from "../task-status-visual";
 import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
+import { logAuditEvent, AuditTrailResult, AuditTrailSource } from "../audit-trail";
+import { canRunGuardedAction } from "../action-guard";
 import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
 import {
   buildDossierPlanningOverview,
@@ -143,6 +147,7 @@ export default function DossierDetail({
   const [taskError, setTaskError] = useState<string | null>(null);
   const [qcError, setQcError] = useState<string | null>(null);
   const [deliveryError, setDeliveryError] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: AuditTrailResult; message: string } | null>(null);
   const [signatureCaptured, setSignatureCaptured] = useState(false);
   const [showQCValidationConfirm, setShowQCValidationConfirm] = useState(false);
   const [showDeliveryValidationConfirm, setShowDeliveryValidationConfirm] = useState(false);
@@ -198,9 +203,49 @@ export default function DossierDetail({
       })
   );
 
+  const recordLocalAudit = (event: {
+    action: string;
+    summary: string;
+    result?: AuditTrailResult;
+    blockReason?: string;
+    source: AuditTrailSource;
+    ancienStatut?: DossierStatus | string;
+    nouveauStatut?: DossierStatus | string;
+  }) => {
+    logAuditEvent({
+      user: userRole,
+      role: userRole,
+      module: "dossier",
+      action: event.action,
+      dossierId: dossier.id,
+      dossierLabel: `${dossier.vehiculeMarque} ${dossier.vehiculeModele}`,
+      ancienStatut: event.ancienStatut,
+      nouveauStatut: event.nouveauStatut,
+      summary: event.summary,
+      commentaire: event.summary,
+      result: event.result || "success",
+      blockReason: event.blockReason,
+      source: event.source,
+    });
+  };
+
+  const setSuccessFeedback = (message: string) => {
+    setActionFeedback({ type: "success", message });
+  };
+
+  const setBlockedFeedback = (message: string) => {
+    setActionFeedback({ type: "blocked", message });
+  };
+
   const handlePrintDocument = (type: "reception" | "or" | "qc" | "delivery") => {
+    if (!canRunGuardedAction(`print-document:${dossier.id}:${type}`)) return;
     setPrintTask(null);
     setPrintType(type);
+    recordLocalAudit({
+      action: "impression_document",
+      summary: `Impression document ${type} demandée pour ${dossier.id}.`,
+      source: "impression",
+    });
     document.body.classList.add("printing-standard-document");
 
     const cleanup = () => {
@@ -220,11 +265,18 @@ export default function DossierDetail({
 
   const handlePrintTaskDocument = (line: RepairOrderLine | null | undefined) => {
     if (!line) {
-      window['alert']("Aucune tâche sélectionnée pour impression.");
+      setTaskError("Aucune tâche sélectionnée pour impression.");
+      setActionFeedback({ type: "failed", message: "Aucune tâche sélectionnée pour impression." });
       return;
     }
+    if (!canRunGuardedAction(`print-task:${dossier.id}:${line.id}`)) return;
     setPrintTask(line);
     setPrintType("task");
+    recordLocalAudit({
+      action: "impression_fiche_tache",
+      summary: `Impression fiche tâche ${line.designation}.`,
+      source: "impression",
+    });
     document.body.classList.add("printing-task-sheet");
 
     const cleanup = () => {
@@ -340,8 +392,16 @@ export default function DossierDetail({
 
   const handleApplyPlanningStepSuggestion = () => {
     resetPlanningStepMessages();
+    if (!canRunGuardedAction(`planning-step-reserve:${dossier.id}:${planningStepSuggestion?.lineId || "none"}`)) return;
     if (!canEditDossierPlanning) {
       setPlanningStepError("Consultation uniquement : action réservée au Chef Atelier.");
+      recordLocalAudit({
+        action: "reservation_planning_refusee",
+        summary: "Action refusée : votre rôle ne permet pas cette opération.",
+        result: "blocked",
+        blockReason: "Action refusée : votre rôle ne permet pas cette opération.",
+        source: "planning",
+      });
       return;
     }
     if (!planningStepSuggestion) {
@@ -362,20 +422,41 @@ export default function DossierDetail({
     }, new Date());
 
     if (result.ok === false) {
-      setPlanningStepError(result.error || "Le créneau proposé n'est plus disponible.");
+      const message = result.error || "Réservation impossible : technicien déjà occupé sur ce créneau.";
+      setPlanningStepError(message);
+      recordLocalAudit({
+        action: "reservation_planning_bloquee",
+        summary: message,
+        result: "blocked",
+        blockReason: message,
+        source: "planning",
+      });
       return;
     }
 
     onUpdateDossier(result.dossier);
     onUpdateReservations(result.reservations);
     setPlanningStepFeedback("Créneau réservé avec succès.");
+    recordLocalAudit({
+      action: "reservation_planning",
+      summary: "Créneau réservé avec succès.",
+      source: "planning",
+    });
     setPlanningStepSuggestion(null);
   };
 
   const handleReleasePlanningStep = (stepId: PlanningStepId) => {
     resetPlanningStepMessages();
+    if (!canRunGuardedAction(`planning-step-release:${dossier.id}:${stepId}`)) return;
     if (!canEditDossierPlanning) {
       setPlanningStepError("Consultation uniquement : action réservée au Chef Atelier.");
+      recordLocalAudit({
+        action: "liberation_planning_refusee",
+        summary: "Action refusée : votre rôle ne permet pas cette opération.",
+        result: "blocked",
+        blockReason: "Action refusée : votre rôle ne permet pas cette opération.",
+        source: "planning",
+      });
       return;
     }
     const result = releasePlanningStepReservation(dossier, reservations || [], stepId, new Date());
@@ -387,6 +468,11 @@ export default function DossierDetail({
     onUpdateReservations(result.reservations);
     setPlanningStepSuggestion(null);
     setPlanningStepFeedback("Étape libérée du planning atelier.");
+    recordLocalAudit({
+      action: "liberation_planning",
+      summary: "Étape libérée du planning atelier.",
+      source: "planning",
+    });
   };
 
   const handleViewStepOnGantt = (stepId: PlanningStepId) => {
@@ -441,6 +527,7 @@ export default function DossierDetail({
 
   const handleConfirmDurationValidation = () => {
     if (!durationValidationLineId) return;
+    if (!canRunGuardedAction(`duration-validation:${dossier.id}:${durationValidationLineId}`)) return;
     const parsedHours = Number(durationValidationHours);
     const reason = durationValidationReason.trim();
     if (!Number.isFinite(parsedHours) || parsedHours <= 0 || parsedHours > 12) {
@@ -464,6 +551,12 @@ export default function DossierDetail({
     updateDossierState({
       ordresReparation: updatedLines
     });
+    recordLocalAudit({
+      action: "validation_duree_planning",
+      summary: "Durée atelier validée pour planification.",
+      source: "planning",
+    });
+    setSuccessFeedback("Durée atelier validée pour planification.");
     handleCloseDurationValidation();
   };
 
@@ -486,17 +579,33 @@ export default function DossierDetail({
   const applyTaskMutation = (result: ReturnType<typeof startRepairOrder>) => {
     if (result.ok === false) {
       setTaskError(result.error);
+      setActionFeedback({ type: "blocked", message: result.error });
       return;
     }
     setTaskError(null);
     onUpdateDossier(result.dossier);
+    if (dossier.checklistQC.validationGlobale === "valide" && result.dossier.checklistQC.validationGlobale === "a_refaire") {
+      recordLocalAudit({
+        action: "modification_atelier_apres_qc",
+        summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+        source: "atelier",
+      });
+      recordLocalAudit({
+        action: "invalidation_qc_apres_modification_atelier",
+        summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+        source: "qc",
+      });
+      setSuccessFeedback("Modification enregistrée : le contrôle qualité doit être refait.");
+    }
   };
 
   const handleStartROLine = (lineId: string) => {
+    if (!canRunGuardedAction(`task-start:${dossier.id}:${lineId}`)) return;
     applyTaskMutation(startRepairOrder(dossiers, dossier.id, lineId));
   };
 
   const handlePauseROLine = (lineId: string) => {
+    if (!canRunGuardedAction(`task-pause:${dossier.id}:${lineId}`)) return;
     applyTaskMutation(pauseRepairOrder(dossiers, dossier.id, lineId));
   };
 
@@ -586,6 +695,7 @@ export default function DossierDetail({
     !!dossier.checklistQC.photosApresOk;
 
   const handleQCSubmit = (globVal: "valide" | "refuse", comment?: string) => {
+    if (!canRunGuardedAction(`qc-submit:${dossier.id}:${globVal}`)) return;
     if (globVal === "valide" && !isChecklistComplete) {
       setQcError("Impossible de valider le QC sans checklist complète.");
       return;
@@ -596,6 +706,12 @@ export default function DossierDetail({
     }
     setQcError(null);
     onUpdateDossier(submitQualityControl(dossier, userRole, globVal, comment));
+    recordLocalAudit({
+      action: globVal === "valide" ? "validation_qc" : "refus_qc",
+      summary: globVal === "valide" ? "Contrôle qualité validé." : "Contrôle qualité refusé avec retour atelier.",
+      source: "qc",
+      nouveauStatut: globVal === "valide" ? DossierStatus.PRET_A_LIVRER : DossierStatus.EN_TRAVAUX,
+    });
   };
 
   const handleQCValidationRequest = () => {
@@ -611,11 +727,29 @@ export default function DossierDetail({
   const handleDeliveryConfirm = () => {
     const deliveryGate = canDeliverDossier(dossier);
     if (!deliveryGate.allowed) {
-      setDeliveryError(deliveryGate.reasons.join(" "));
+      const message = deliveryGate.reasons.join(" ") || "Action impossible : contrôle qualité conforme obligatoire.";
+      setDeliveryError(message);
+      setBlockedFeedback(message);
+      recordLocalAudit({
+        action: "tentative_livraison_bloquee",
+        summary: message,
+        result: "blocked",
+        blockReason: message,
+        source: "livraison",
+      });
       return;
     }
     if (!signatureCaptured) {
-      setDeliveryError("Acceptation/signature simple client obligatoire avant restitution.");
+      const message = "Acceptation/signature simple client obligatoire avant restitution.";
+      setDeliveryError(message);
+      setBlockedFeedback(message);
+      recordLocalAudit({
+        action: "tentative_livraison_bloquee",
+        summary: message,
+        result: "blocked",
+        blockReason: message,
+        source: "livraison",
+      });
       return;
     }
     setDeliveryError(null);
@@ -623,14 +757,29 @@ export default function DossierDetail({
   };
 
   const confirmDeliveryRequest = () => {
+    if (!canRunGuardedAction(`delivery-confirm-detail:${dossier.id}`)) return;
     setShowDeliveryValidationConfirm(false);
     setDeliveryError(null);
     onUpdateDossier(confirmDelivery(dossier, new Date(), "Livré sans réserve"));
+    recordLocalAudit({
+      action: "livraison_reussie",
+      summary: "Livraison réussie : restitution client validée.",
+      source: "livraison",
+      ancienStatut: dossier.statut,
+      nouveauStatut: DossierStatus.LIVRE,
+    });
+    setSuccessFeedback("Livraison réussie : restitution client validée.");
   };
 
   const handleFinalOperationalClose = () => {
+    if (!canRunGuardedAction(`operational-close:${dossier.id}`)) return;
     setDeliveryError(null);
     onUpdateDossier(markReadyForBilling(dossier));
+    recordLocalAudit({
+      action: "cloture_operationnelle",
+      summary: "Clôture opérationnelle validée.",
+      source: "livraison",
+    });
   };
 
   const handleQCRefuseConfirm = (reason: string, details: string) => {
@@ -647,6 +796,12 @@ export default function DossierDetail({
     onUpdateDossier({
       ...nextDossier,
       historiqueLogs: updatedLogs
+    });
+    recordLocalAudit({
+      action: "retour_atelier_qc",
+      summary: "Contrôle qualité refusé : retour atelier demandé.",
+      source: "qc",
+      nouveauStatut: DossierStatus.EN_TRAVAUX,
     });
     setModalActive(null);
   };
@@ -670,6 +825,19 @@ export default function DossierDetail({
           ...result.dossier,
           historiqueLogs: updatedLogs
         });
+        if (dossier.checklistQC.validationGlobale === "valide" && result.dossier.checklistQC.validationGlobale === "a_refaire") {
+          recordLocalAudit({
+            action: "modification_atelier_apres_qc",
+            summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+            source: "atelier",
+          });
+          recordLocalAudit({
+            action: "invalidation_qc_apres_modification_atelier",
+            summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+            source: "qc",
+          });
+          setSuccessFeedback("Modification enregistrée : le contrôle qualité doit être refait.");
+        }
         setTaskError(null);
       }
     }
@@ -712,6 +880,7 @@ export default function DossierDetail({
 
   const handleFinishConfirm = () => {
     if (!modalTargetLineId || finishSubmitting) return;
+    if (!canRunGuardedAction(`task-finish:${dossier.id}:${modalTargetLineId}`)) return;
     const validation = validateStructuredTechnicianDiagnostic({
       cause: finishCause,
       action: finishAction,
@@ -736,6 +905,19 @@ export default function DossierDetail({
     }
 
     onUpdateDossier(result.dossier);
+    if (dossier.checklistQC.validationGlobale === "valide" && result.dossier.checklistQC.validationGlobale === "a_refaire") {
+      recordLocalAudit({
+        action: "modification_atelier_apres_qc",
+        summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+        source: "atelier",
+      });
+      recordLocalAudit({
+        action: "invalidation_qc_apres_modification_atelier",
+        summary: "Modification enregistrée : le contrôle qualité doit être refait.",
+        source: "qc",
+      });
+      setSuccessFeedback("Modification enregistrée : le contrôle qualité doit être refait.");
+    }
     setModalActive(null);
     setModalTargetLineId(null);
     setFinishCause("");
@@ -824,7 +1006,7 @@ export default function DossierDetail({
 
   const handleSaveSatisfaction = () => {
     if (!satisfactionRating) {
-      window['alert']("Veuillez sélectionner une note de satisfaction.");
+      setActionFeedback({ type: "blocked", message: "Sélectionnez une note de satisfaction avant enregistrement." });
       return;
     }
     onUpdateDossier({
@@ -856,6 +1038,31 @@ export default function DossierDetail({
           {dossier.canceledReason && (
             <div className="font-semibold text-red-700">Motif : {dossier.canceledReason}</div>
           )}
+        </div>
+      )}
+
+      {actionFeedback && (
+        <div
+          data-testid="action-feedback"
+          className={`rounded-lg border p-3 text-xs font-bold ${
+            actionFeedback.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : actionFeedback.type === "blocked"
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-rose-200 bg-rose-50 text-rose-800"
+          }`}
+        >
+          <span
+            data-testid={
+              actionFeedback.type === "success"
+                ? "action-success-message"
+                : actionFeedback.type === "blocked"
+                  ? "action-blocked-message"
+                  : "action-error-message"
+            }
+          >
+            {actionFeedback.message}
+          </span>
         </div>
       )}
 
@@ -2476,72 +2683,34 @@ export default function DossierDetail({
           </div>
         )}
 
-        {showQCValidationConfirm && (
-          <div data-testid="modal-qc-validate-detail" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
-                <div>
-                  <h3 className="font-black text-slate-900">Confirmer la validation QC</h3>
-                  <p className="mt-1 font-semibold text-slate-600">Le dossier sera déclaré conforme et prêt à livrer.</p>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  data-testid="modal-qc-validate-detail-cancel"
-                  onClick={() => setShowQCValidationConfirm(false)}
-                  className="rounded-lg bg-slate-100 px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-200"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  data-testid="modal-qc-validate-detail-confirm"
-                  onClick={() => {
-                    setShowQCValidationConfirm(false);
-                    handleQCSubmit("valide");
-                  }}
-                  className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700"
-                >
-                  Confirmer
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <AuditTrailView currentRole={userRole} dossierId={dossier.id} />
 
-        {showDeliveryValidationConfirm && (
-          <div data-testid="modal-delivery-confirm-detail" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-xs shadow-xl">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
-                <div>
-                  <h3 className="font-black text-slate-900">Confirmer la restitution</h3>
-                  <p className="mt-1 font-semibold text-slate-600">L'acceptation simple client est capturée et le dossier passera au statut livré.</p>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  data-testid="modal-delivery-confirm-detail-cancel"
-                  onClick={() => setShowDeliveryValidationConfirm(false)}
-                  className="rounded-lg bg-slate-100 px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-200"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  data-testid="modal-delivery-confirm-detail-confirm"
-                  onClick={confirmDeliveryRequest}
-                  className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700"
-                >
-                  Confirmer
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmModal
+          isOpen={showQCValidationConfirm}
+          onClose={() => setShowQCValidationConfirm(false)}
+          onConfirm={() => {
+            setShowQCValidationConfirm(false);
+            handleQCSubmit("valide");
+          }}
+          title="Confirmer la validation QC"
+          message="Le dossier sera déclaré conforme et prêt à livrer."
+          confirmText="Confirmer"
+          modalAliasTestId="modal-qc-validate-detail"
+          cancelAliasTestId="modal-qc-validate-detail-cancel"
+          confirmAliasTestId="modal-qc-validate-detail-confirm"
+        />
+
+        <ConfirmModal
+          isOpen={showDeliveryValidationConfirm}
+          onClose={() => setShowDeliveryValidationConfirm(false)}
+          onConfirm={confirmDeliveryRequest}
+          title="Confirmer la restitution"
+          message="L'acceptation simple client est capturée et le dossier passera au statut livré."
+          confirmText="Confirmer"
+          modalAliasTestId="modal-delivery-confirm-detail"
+          cancelAliasTestId="modal-delivery-confirm-detail-cancel"
+          confirmAliasTestId="modal-delivery-confirm-detail-confirm"
+        />
 
         {modalActive === "task-finish" && (
           <div data-testid="modal-detail-task-finish" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
