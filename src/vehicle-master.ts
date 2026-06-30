@@ -414,9 +414,12 @@ export function normalizeVehicleMasterRecord(row: any): VehicleMasterRecord {
   const plateNumber = row.plateNumber ? String(row.plateNumber).toUpperCase().replace(/\s+/g, " ").trim() : undefined;
   const customerPhone = normalizePhone(row.customerPhone);
   const customerName = normalizeTextValue(row.customerName);
-  const model = normalizeTextValue(row.model);
-  const inferred = inferVehicleBrandAndModel(model, row.brand);
+  const importedDescription = normalizeTextValue(row.description ?? row.Description);
+  const rawModel = normalizeTextValue(row.model);
+  const modelCandidate = importedDescription || rawModel;
+  const inferred = inferVehicleBrandAndModel(modelCandidate, row.brand);
   const brand = inferred.brand;
+  const model = importedDescription ? (inferred.model || modelCandidate) : modelCandidate;
   const version = normalizeTextValue(row.version);
   const itemNo = normalizeTextValue(row.itemNo);
   const energy = normalizeTextValue(row.energy);
@@ -452,6 +455,7 @@ export function normalizeVehicleMasterRecord(row: any): VehicleMasterRecord {
     itemNo,
     brand,
     model,
+    description: importedDescription || model,
     version,
     deliveryDate,
     circulationDate,
@@ -489,6 +493,9 @@ export function parseVehicleMasterRows(rows: string[][]): VehicleMasterRecord[] 
       const field = headerMap[idx];
       if (field) {
         record[field] = cell;
+        if (field === "model" && normalizeHeader(headers[idx]).includes("description")) {
+          record.description = cell;
+        }
       }
     });
     records.push(normalizeVehicleMasterRecord(record));

@@ -242,8 +242,9 @@ export default function GuidedReception({
     console.debug(`[VehicleMaster] Utilisation du véhicule VIN: ${vehicle.vin}, Client: ${vehicle.customerName}, Tél: ${maskedPhone}`);
 
     const hints = getVehicleReceptionHints(vehicle, new Date());
-    const inferred = inferVehicleBrandAndModel(vehicle.model, vehicle.brand);
-    const importedModel = vehicle.model?.trim() || VEHICLE_MODEL_TO_FILL_PLACEHOLDER;
+    const importedDescription = vehicle.description?.trim() || vehicle.model?.trim();
+    const inferred = inferVehicleBrandAndModel(importedDescription, vehicle.brand);
+    const importedModel = importedDescription || VEHICLE_MODEL_TO_FILL_PLACEHOLDER;
     const validVin = vehicle.vin && validateVin(vehicle.vin) ? vehicle.vin : "";
 
     if (vehicle.customerName) updateClientNom(vehicle.customerName);
@@ -265,7 +266,7 @@ export default function GuidedReception({
       !vehicle.customerPhone ? "téléphone" : null,
       !validVin ? "VIN" : null,
       !vehicle.plateNumber ? "immatriculation" : null,
-      !vehicle.model?.trim() ? "modèle" : null
+      !importedDescription ? "modèle" : null
     ].filter(Boolean);
     setReceptionWarning(missingFields.length > 0 ? `Données véhicule partielles : ${missingFields.join(", ")} absent(s) ou invalide(s).` : null);
 

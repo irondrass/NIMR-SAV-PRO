@@ -192,6 +192,10 @@ export interface RepairOrderLine {
   quoteLineRef?: string;
   operationCode?: string;
   operationFamily?: string;
+  workshopStageId?: string;
+  preferredTechnicianId?: string;
+  requiredBayId?: string;
+  taskPriority?: "basse" | "normale" | "haute" | "urgente";
 
   // Fields for Lot 4 planning
   planningStart?: string;
@@ -560,6 +564,7 @@ export interface VehicleMasterRecord {
   itemNo?: string;
   brand?: string;
   model?: string;
+  description?: string;
   version?: string;
   deliveryDate?: string;
   circulationDate?: string;

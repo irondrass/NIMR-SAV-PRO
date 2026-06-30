@@ -129,7 +129,22 @@ function completeAllRepairOrders(dossier: DossierSAV): DossierSAV {
 }
 
 function createReadyForDeliveryFixture(): DossierSAV {
-  const completed = completeAllRepairOrders(createReceptionFixture());
+  const base = createReceptionFixture();
+  const completed = completeAllRepairOrders({
+    ...base,
+    ordresReparation: [
+      {
+        id: "ro_ready_fixture",
+        designation: "Contrôle atelier fictif",
+        tempsEstime: 1,
+        tempsPasse: 1,
+        status: "done",
+        estimateSource: "manual",
+        isEstimatedDurationValidated: true,
+      },
+    ],
+    avancementGlobal: 100,
+  });
   return submitQualityControl(completed, UserRole.CHEF_ATELIER, "valide", "", fixedNow);
 }
 
@@ -146,9 +161,7 @@ function testReceptionCreation() {
   assert.equal(dossier.dateSouhaiteeLivraison, "2026-06-11T10:00:00.000Z");
   assert.equal(dossier.photosAvant[0].takenBy, "Conseiller Client NIMR");
   assert.equal(dossier.photosAvant[0].category, "réception avant");
-  assert.equal(dossier.ordresReparation.length, 2);
-  assert.ok(dossier.ordresReparation.every(line => line.id.startsWith("ro_auto_")));
-  assert.ok(dossier.ordresReparation.every(line => line.status === "pending"));
+  assert.equal(dossier.ordresReparation.length, 0);
 }
 
 function testTechnicianAssignment() {

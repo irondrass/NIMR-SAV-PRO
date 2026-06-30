@@ -18,6 +18,7 @@ import {
   applyQuoteImportPreview,
   extractPdfText,
 } from "../quote-import";
+import { inferWorkshopStageFromTaskText } from "../workshop-task-intake";
 import { FileText, Upload, Check, X, AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
 
 interface QuoteImportModalProps {
@@ -72,6 +73,29 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [showHelp, setShowHelp] = useState(false);
 
+  const openPreviewFromText = useCallback((text: string, source: SourceType, fileName?: string): boolean => {
+    let lines: QuoteLine[];
+    try {
+      lines = source === "csv" ? parseQuoteCsv(text) : parseQuoteText(text);
+    } catch (e: unknown) {
+      setParseError(e instanceof Error ? e.message : "Erreur d'analyse du texte.");
+      return false;
+    }
+
+    if (!lines.length) {
+      setParseError("Aucune ligne reconnue dans le texte saisi. Vérifiez le format.");
+      return false;
+    }
+
+    const nextPreview = buildQuoteImportPreview(lines, {
+      sourceType: source,
+      fileName,
+    });
+    setPreview(nextPreview);
+    setStep("preview");
+    return true;
+  }, []);
+
   const handleParse = useCallback(() => {
     setParseError("");
     setValidationErrors([]);
@@ -82,26 +106,8 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
       return;
     }
 
-    let lines: QuoteLine[];
-    try {
-      lines = sourceType === "csv" ? parseQuoteCsv(trimmed) : parseQuoteText(trimmed);
-    } catch (e: unknown) {
-      setParseError(e instanceof Error ? e.message : "Erreur d'analyse du texte.");
-      return;
-    }
-
-    if (!lines.length) {
-      setParseError("Aucune ligne reconnue dans le texte saisi. Vérifiez le format.");
-      return;
-    }
-
-    const p = buildQuoteImportPreview(lines, {
-      sourceType,
-      fileName: sourceType === "csv" ? "devis.csv" : undefined,
-    });
-    setPreview(p);
-    setStep("preview");
-  }, [rawInput, sourceType]);
+    openPreviewFromText(trimmed, sourceType, sourceType === "csv" ? "devis.csv" : undefined);
+  }, [openPreviewFromText, rawInput, sourceType]);
 
   const handleToggleLine = (lineId: string) => {
     if (!preview) return;
@@ -179,14 +185,15 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
           const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
           const hasKeywords = /\b(CLIENT|DEVIS|D\s*\/\s*P|PEINTURE|DRESSAGE|REMPLACEMENT|REMP|IMMATRICULATION|VIN|VEHICULE)\b/.test(normalized);
           if (!text || text.trim().length < 20 || !hasKeywords) {
-            setParseError("PDF non exploitable automatiquement. Copier-coller le texte complet du devis ou utiliser CSV.");
+            setParseError("Import impossible : devis PDF non lisible. Veuillez ajouter les tâches manuellement.");
             return;
           }
           setRawInput(text);
           setSourceType("text");
           setParseError("");
+          openPreviewFromText(text, "text", file.name || "devis.pdf");
         } catch (err) {
-          setParseError("PDF non exploitable automatiquement. Copier-coller le texte complet du devis ou utiliser CSV.");
+          setParseError("Import impossible : devis PDF non lisible. Veuillez ajouter les tâches manuellement.");
         }
       };
       reader.readAsArrayBuffer(file);
@@ -227,7 +234,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                 Import Devis / Main-d'œuvre
               </h2>
               <p className="text-gray-500 text-xs">
-                {step === "input" && "Collez le texte du devis ou importez un fichier CSV."}
+                {step === "input" && "Collez le texte du devis ou importez un fichier texte/PDF."}
                 {step === "preview" && "Vérifiez les lignes détectées avant de confirmer l'import."}
                 {step === "done" && "Import confirmé avec succès."}
               </p>
@@ -275,12 +282,26 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                 data-testid="quote-file-import-label"
               >
                 <Upload className="w-4 h-4" />
-                Importer un fichier (CSV ou TXT)
+                Importer un fichier texte ou PDF
                 <input
                   type="file"
                   accept=".csv,.txt,.xlsx,.pdf"
                   className="hidden"
                   data-testid="quote-file-input"
+                  onChange={handleFileImport}
+                />
+              </label>
+              <label
+                className="flex items-center gap-2 p-3 border border-dashed border-emerald-300 rounded-lg cursor-pointer hover:bg-emerald-50 transition text-xs text-emerald-700 font-semibold"
+                data-testid="import-quote-pdf-button"
+              >
+                <Upload className="w-4 h-4" />
+                Importer devis PDF
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  data-testid="quote-pdf-input"
                   onChange={handleFileImport}
                 />
               </label>
@@ -323,6 +344,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                   data-testid="quote-parse-error"
                   className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-semibold"
                 >
+                  <span data-testid="quote-import-error" className="sr-only">{parseError}</span>
                   <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   {parseError}
                 </div>
@@ -332,7 +354,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
 
           {/* Step 2 : Preview */}
           {step === "preview" && preview && (
-            <div className="space-y-4">
+            <div className="space-y-4" data-testid="quote-import-preview">
               {/* Summary */}
               <div className="flex flex-wrap gap-3">
                 <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 font-semibold">
@@ -387,6 +409,11 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                           data-testid={`quote-line-${line.type}`}
                           className={`transition ${line.selected && isLabor ? "bg-blue-50/40" : "bg-white"} ${!isLabor ? "opacity-60" : ""}`}
                         >
+                          {isLabor && (
+                            <td className="hidden" data-testid="quote-detected-task" aria-hidden="true">
+                              {line.description}
+                            </td>
+                          )}
                           {/* Checkbox — seulement pour MO */}
                           <td className="px-3 py-2">
                             {isLabor ? (
@@ -406,13 +433,15 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                           {/* Description */}
                           <td className="px-3 py-2">
                             {isLabor && line.selected ? (
-                              <input
-                                type="text"
-                                value={line.editedDescription ?? line.description}
-                                onChange={e => handleEditDescription(line.id, e.target.value)}
-                                data-testid={`quote-line-desc-${line.id}`}
-                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400"
-                              />
+                              <span data-testid="quote-task-label" className="block">
+                                <input
+                                  type="text"
+                                  value={line.editedDescription ?? line.description}
+                                  onChange={e => handleEditDescription(line.id, e.target.value)}
+                                  data-testid={`quote-line-desc-${line.id}`}
+                                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400"
+                                />
+                              </span>
                             ) : (
                               <span className="text-gray-700 font-medium">{line.description}</span>
                             )}
@@ -424,21 +453,28 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                             <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${TYPE_COLOR[line.type] ?? "bg-gray-50 text-gray-500 border-gray-200"}`}>
                               {TYPE_LABEL[line.type] ?? line.type}
                             </span>
+                            {isLabor && (
+                              <span data-testid="quote-task-stage" className="mt-1 block text-[10px] font-semibold text-slate-500">
+                                {inferWorkshopStageFromTaskText(line.editedDescription ?? line.description).stageLabel}
+                              </span>
+                            )}
                           </td>
 
                           {/* Durée */}
                           <td className="px-3 py-2">
                             {isLabor ? (
-                              <input
-                                type="number"
-                                step="0.5"
-                                min="0"
-                                max="40"
-                                value={currentHours}
-                                onChange={e => handleEditHours(line.id, e.target.value)}
-                                data-testid={`quote-line-hours-${line.id}`}
-                                className="w-16 border border-gray-200 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:border-blue-400"
-                              />
+                              <span data-testid="quote-task-duration" className="block">
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  min="0"
+                                  max="40"
+                                  value={currentHours}
+                                  onChange={e => handleEditHours(line.id, e.target.value)}
+                                  data-testid={`quote-line-hours-${line.id}`}
+                                  className="w-16 border border-gray-200 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:border-blue-400"
+                                />
+                              </span>
                             ) : (
                               <span className="text-gray-400">—</span>
                             )}

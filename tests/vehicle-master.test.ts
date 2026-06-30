@@ -153,9 +153,10 @@ console.log("Démarrage des tests vehicle-master...");
   assert.strictEqual(rec.customerName, "Jean Dupont");
   // téléphone importé
   assert.strictEqual(rec.customerPhone, "+216 22 222 222");
-  // modèle/description importé
+  // description brute conservée, modèle exploitable inféré
   assert.strictEqual(rec.brand, "Dongfeng");
-  assert.strictEqual(rec.model, "Dongfeng Shine Max");
+  assert.strictEqual(rec.model, "Shine Max");
+  assert.strictEqual(rec.description, "Dongfeng Shine Max");
   // code article importé
   assert.strictEqual(rec.itemNo, "ART-100");
   // dates normalisées
@@ -193,7 +194,8 @@ console.log("Démarrage des tests vehicle-master...");
   assert.strictEqual(rec.customerPhone, "+21622222222");
   assert.strictEqual(rec.plateNumber, "2318TU259");
   assert.strictEqual(rec.brand, "Dongfeng");
-  assert.strictEqual(rec.model, "DONGFENG BOX EV 430");
+  assert.strictEqual(rec.model, "BOX EV 430");
+  assert.strictEqual(rec.description, "DONGFENG BOX EV 430");
   assert.strictEqual(rec.circulationDate, "2026-02-25");
   assert.strictEqual(rec.deliveryDate, "2026-03-04");
 

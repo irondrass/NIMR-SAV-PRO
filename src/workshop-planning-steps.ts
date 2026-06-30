@@ -147,6 +147,16 @@ function formatStepSearchText(line: RepairOrderLine): string {
 }
 
 export function mapRepairLineToPlanningStep(line: RepairOrderLine): PlanningStepMapping {
+  const explicitStep = PLANNING_STEP_DEFINITIONS.find(step => step.id === line.workshopStageId);
+  if (explicitStep) {
+    return {
+      stepId: explicitStep.id,
+      label: explicitStep.label,
+      serviceType: explicitStep.serviceType,
+      needsConfirmation: false,
+    };
+  }
+
   const normalized = normalizePlanningText(formatStepSearchText(line));
   const matched = PLANNING_STEP_DEFINITIONS
     .flatMap((step, stepIndex) => step.keywords.map(keyword => ({

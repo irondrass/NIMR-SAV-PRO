@@ -67,9 +67,17 @@ import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
 import {
   buildDossierPlanningOverview,
   getRepairLinePlanningSegments,
+  PLANNING_STEP_DEFINITIONS,
   PlanningStepId,
   releasePlanningStepReservation,
 } from "../workshop-planning-steps";
+import {
+  buildStageReservationNeeds,
+  buildWorkshopStageDurationSummary,
+  createManualWorkshopTaskLine,
+  WorkshopTaskPriority,
+} from "../workshop-task-intake";
+import { convertReservationToPlanning, validateReservationSlot } from "../workshop-reservations";
 import {
   ArrowLeft,
   FileText,
@@ -133,6 +141,23 @@ export default function DossierDetail({
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
   const [showQuoteImport, setShowQuoteImport] = useState(false);
+  const [showWorkshopTaskModal, setShowWorkshopTaskModal] = useState(false);
+  const [workshopTaskLabel, setWorkshopTaskLabel] = useState("");
+  const [workshopTaskDescription, setWorkshopTaskDescription] = useState("");
+  const [workshopTaskStage, setWorkshopTaskStage] = useState<PlanningStepId>("mechanical");
+  const [workshopTaskDuration, setWorkshopTaskDuration] = useState("");
+  const [workshopTaskTechnician, setWorkshopTaskTechnician] = useState("");
+  const [workshopTaskBay, setWorkshopTaskBay] = useState("");
+  const [workshopTaskPriority, setWorkshopTaskPriority] = useState<WorkshopTaskPriority>("normale");
+  const [workshopTaskComment, setWorkshopTaskComment] = useState("");
+  const [workshopTaskModalError, setWorkshopTaskModalError] = useState("");
+  const [reservationBatchResult, setReservationBatchResult] = useState<{
+    technicianName: string;
+    bayName: string;
+    start: string;
+    end: string;
+    count: number;
+  } | null>(null);
   const [durationValidationLineId, setDurationValidationLineId] = useState<string | null>(null);
   const [durationValidationHours, setDurationValidationHours] = useState("");
   const [durationValidationReason, setDurationValidationReason] = useState("");
@@ -182,6 +207,7 @@ export default function DossierDetail({
   const [planningStepError, setPlanningStepError] = useState("");
 
   const planningOverview = buildDossierPlanningOverview(dossier, reservations || []);
+  const workshopStageSummaryRows = buildWorkshopStageDurationSummary(dossier, reservations || []);
   const canEditDossierPlanning = userRole === UserRole.CHEF_ATELIER;
   const planningEtaInfo = getVehicleETAInfo(dossiers, dossier.id, reservations || []);
   const planningValidatedRows = planningOverview.steps.flatMap(step =>
@@ -334,6 +360,187 @@ export default function DossierDetail({
   const resetPlanningStepMessages = () => {
     setPlanningStepError("");
     setPlanningStepFeedback("");
+    setReservationBatchResult(null);
+  };
+
+  const resetWorkshopTaskModal = () => {
+    setWorkshopTaskLabel("");
+    setWorkshopTaskDescription("");
+    setWorkshopTaskStage("mechanical");
+    setWorkshopTaskDuration("");
+    setWorkshopTaskTechnician("");
+    setWorkshopTaskBay("");
+    setWorkshopTaskPriority("normale");
+    setWorkshopTaskComment("");
+    setWorkshopTaskModalError("");
+  };
+
+  const handleOpenWorkshopTaskModal = () => {
+    resetWorkshopTaskModal();
+    setShowWorkshopTaskModal(true);
+  };
+
+  const handleSaveWorkshopTask = () => {
+    const parsedDuration = Number(workshopTaskDuration.replace(",", "."));
+    if (!workshopTaskLabel.trim()) {
+      setWorkshopTaskModalError("Libellé tâche obligatoire.");
+      return;
+    }
+    if (!Number.isFinite(parsedDuration) || parsedDuration <= 0 || parsedDuration > 40) {
+      setWorkshopTaskModalError("Durée estimée atelier obligatoire entre 0,1h et 40h.");
+      return;
+    }
+
+    const newLine = createManualWorkshopTaskLine({
+      label: workshopTaskLabel,
+      shortDescription: workshopTaskDescription,
+      stageId: workshopTaskStage,
+      estimatedHours: parsedDuration,
+      preferredTechnicianId: workshopTaskTechnician || undefined,
+      requiredBayId: workshopTaskBay || undefined,
+      priority: workshopTaskPriority,
+      chefComment: workshopTaskComment,
+    });
+    const nextLines = [...dossier.ordresReparation, newLine];
+    updateDossierState({
+      ordresReparation: nextLines,
+      avancementGlobal: nextLines.length > 0
+        ? Math.round((nextLines.filter(isRepairOrderDone).length / nextLines.length) * 100)
+        : dossier.avancementGlobal,
+      historiqueLogs: [
+        `${new Date().toISOString()} - Tâche atelier créée par ${userRole}: ${newLine.designation}.`,
+        ...(dossier.historiqueLogs || []),
+      ],
+    });
+    recordLocalAudit({
+      action: "creation_tache_atelier",
+      summary: `Tâche atelier créée: ${newLine.designation}.`,
+      source: "atelier",
+    });
+    setShowWorkshopTaskModal(false);
+    resetWorkshopTaskModal();
+  };
+
+  const handleReserveAllWorkshopTasks = () => {
+    resetPlanningStepMessages();
+    if (!canRunGuardedAction(`reserve-all-workshop-tasks:${dossier.id}`)) return;
+    if (!canEditDossierPlanning) {
+      const message = "Consultation uniquement : action réservée au Chef Atelier.";
+      setPlanningStepError(message);
+      setReservationBatchResult(null);
+      recordLocalAudit({
+        action: "reservation_toutes_taches_refusee",
+        summary: message,
+        result: "blocked",
+        blockReason: message,
+        source: "planning",
+      });
+      return;
+    }
+
+    const activeSteps = planningOverview.steps.filter(step => step.active);
+    if (activeSteps.some(step => step.unvalidatedDurationCount > 0)) {
+      setPlanningStepError("Durée manquante sur une tâche.");
+      return;
+    }
+
+    let workingDossiers = dossiers.map(current => current.id === dossier.id ? dossier : current);
+    let workingReservations = [...(reservations || [])];
+    let workingDossier = workingDossiers.find(current => current.id === dossier.id) || dossier;
+    const createdReservations: WorkshopReservation[] = [];
+    const now = new Date();
+
+    try {
+      let needs = buildStageReservationNeeds(workingDossier, workingReservations);
+      if (needs.length === 0) {
+        setPlanningStepError("Aucune tâche active à réserver sur cette étape.");
+        return;
+      }
+
+      for (const need of needs) {
+        const suggestion = suggestWorkshopSlot({
+          dossiers: workingDossiers,
+          technicians: techniciens,
+          workshopBays: DEFAULT_WORKSHOP_BAYS,
+          estimatedHours: need.totalHours,
+          desiredDate: createdReservations.at(-1)?.endTime || now,
+          dossierId: workingDossier.id,
+          reservations: workingReservations,
+          availabilityConfig,
+        }, now);
+
+        const reservation: WorkshopReservation = {
+          reservationId: createRuntimeId("res_stage"),
+          dossierId: workingDossier.id,
+          taskIds: need.taskIds,
+          totalHours: need.totalHours,
+          desiredDate: suggestion.startTime,
+          startTime: suggestion.startTime,
+          endTime: suggestion.endTime,
+          segments: suggestion.segments,
+          technicianId: suggestion.technicianId,
+          bayId: suggestion.bayId,
+          status: "RESERVATION_CONFIRMEE",
+          source: "stage-batch-reservation",
+          history: [
+            `${now.toISOString()} - Réservation groupée ${need.label} au premier créneau disponible.`,
+          ],
+        };
+
+        const validation = validateReservationSlot({
+          reservation,
+          dossiers: workingDossiers,
+          reservations: workingReservations,
+          technicians: techniciens,
+          workshopBays: DEFAULT_WORKSHOP_BAYS,
+          availabilityConfig,
+        }, now);
+        if (!validation.allowed) {
+          throw new Error(validation.reasons.join(" ") || "Aucun créneau disponible dans la période sélectionnée.");
+        }
+
+        const converted = convertReservationToPlanning(reservation, workingDossiers, now);
+        workingDossiers = converted.dossiers;
+        workingReservations = [...workingReservations, converted.reservation];
+        workingDossier = workingDossiers.find(current => current.id === dossier.id) || workingDossier;
+        createdReservations.push(converted.reservation);
+        needs = buildStageReservationNeeds(workingDossier, workingReservations);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Aucun créneau disponible pour cette durée.";
+      setPlanningStepError(message || "Aucun créneau disponible pour cette durée.");
+      setReservationBatchResult(null);
+      recordLocalAudit({
+        action: "reservation_toutes_taches_bloquee",
+        summary: message,
+        result: "blocked",
+        blockReason: message,
+        source: "planning",
+      });
+      return;
+    }
+
+    if (createdReservations.length === 0) {
+      setPlanningStepError("Aucun créneau disponible pour cette durée.");
+      return;
+    }
+
+    onUpdateDossier(workingDossier);
+    onUpdateReservations(workingReservations);
+    const first = createdReservations[0];
+    setReservationBatchResult({
+      technicianName: getTechnicianName(first.technicianId),
+      bayName: getBayName(first.bayId),
+      start: first.startTime || "",
+      end: first.endTime || "",
+      count: createdReservations.length,
+    });
+    setPlanningStepFeedback(`${createdReservations.length} étape(s) réservée(s) au premier créneau disponible.`);
+    recordLocalAudit({
+      action: "reservation_toutes_taches",
+      summary: `${createdReservations.length} étape(s) réservée(s) au premier créneau disponible.`,
+      source: "planning",
+    });
   };
 
   const findPlanningStepLine = (stepId: PlanningStepId, mode: "reserve" | "reschedule") => {
@@ -1531,13 +1738,33 @@ export default function DossierDetail({
               </div>
               <div className="flex items-center gap-2">
                 {[UserRole.DIRECTEUR_SAV, UserRole.CHEF_ATELIER].includes(userRole) && (
-                  <button
-                    onClick={() => setShowQuoteImport(true)}
-                    data-testid="quote-import-button"
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
-                  >
-                    Importer devis / MO
-                  </button>
+                  <>
+                    {userRole === UserRole.CHEF_ATELIER && (
+                      <button
+                        onClick={handleOpenWorkshopTaskModal}
+                        data-testid="add-workshop-task-button"
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
+                      >
+                        Ajouter tâche
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowQuoteImport(true)}
+                      data-testid="quote-import-button"
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
+                    >
+                      Importer devis / MO
+                    </button>
+                    {userRole === UserRole.CHEF_ATELIER && (
+                      <button
+                        onClick={() => setShowQuoteImport(true)}
+                        data-testid="import-quote-pdf-button"
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs transition duration-200 cursor-pointer"
+                      >
+                        Importer devis PDF
+                      </button>
+                    )}
+                  </>
                 )}
                 <span className="bg-blue-50  text-blue-700  text-xs font-bold px-3 py-1 rounded font-mono">
                   Total estimé validé/proposé : {dossier.ordresReparation.reduce((acc, current) => acc + (current.tempsEstime > 0 ? current.tempsEstime : 0), 0)} Heures
@@ -1588,7 +1815,7 @@ export default function DossierDetail({
                     className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-neutral-50  border border-neutral-200  rounded-lg text-xs gap-4"
                   >
                     <div className="space-y-1">
-                      <span className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
+                      <span data-testid="workshop-task-card" className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
                       <div className="flex flex-wrap items-center gap-4 text-slate-400 text-[11px] font-semibold">
                         <span>Estimation: <span className="text-stone-700  font-bold font-mono">{formatRepairOrderDuration(line.tempsEstime)}</span></span>
                         <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
@@ -1828,6 +2055,16 @@ export default function DossierDetail({
                 <p className="text-xs font-semibold text-slate-400">Vue terrain par étapes, réservations unitaires et ETA véhicule.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                {canEditDossierPlanning && (
+                  <button
+                    type="button"
+                    data-testid="reserve-all-workshop-tasks"
+                    onClick={handleReserveAllWorkshopTasks}
+                    className="rounded-full border border-slate-900 bg-slate-900 px-3 py-1 text-white transition hover:bg-slate-800"
+                  >
+                    Réserver toutes les tâches
+                  </button>
+                )}
                 {planningOverview.planningComplete ? (
                   <span data-testid="planning-complete-badge" className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-emerald-700">
                     Planning complet
@@ -1854,8 +2091,32 @@ export default function DossierDetail({
                     : "border-emerald-200 bg-emerald-50 text-emerald-700"
                 }`}
               >
+                {planningStepError && <span data-testid="reservation-error" className="sr-only">{planningStepError}</span>}
                 {planningStepError || planningStepFeedback}
               </div>
+            )}
+
+            {reservationBatchResult && (
+              <section data-testid="reservation-first-slot-result" className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                  <div>
+                    <span className="block text-[10px] font-black uppercase text-emerald-600">Technicien</span>
+                    <strong data-testid="reservation-technician-name">{reservationBatchResult.technicianName}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black uppercase text-emerald-600">Pont / baie</span>
+                    <strong data-testid="reservation-bay-name">{reservationBatchResult.bayName}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black uppercase text-emerald-600">Début</span>
+                    <strong data-testid="reservation-start">{formatPlanningDate(reservationBatchResult.start)} · {formatPlanningTimeRange(reservationBatchResult.start, reservationBatchResult.start).split(" - ")[0]}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black uppercase text-emerald-600">Fin</span>
+                    <strong data-testid="reservation-end">{formatPlanningDate(reservationBatchResult.end)} · {formatPlanningTimeRange(reservationBatchResult.end, reservationBatchResult.end).split(" - ")[0]}</strong>
+                  </div>
+                </div>
+              </section>
             )}
 
             <section className="grid grid-cols-1 gap-3 xl:grid-cols-4">
@@ -1884,6 +2145,34 @@ export default function DossierDetail({
                 <span className="block text-[10px] font-black uppercase text-slate-400">Synthèse étapes</span>
                 <strong className="mt-1 block text-2xl font-black text-slate-900">{planningOverview.activeStepCount}</strong>
                 <p className="mt-2 font-semibold text-slate-500">{planningOverview.unreservedStepCount} étape(s) encore à réserver</p>
+              </div>
+            </section>
+
+            <section data-testid="workshop-stage-summary" className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Récapitulatif par étape</h4>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[680px] text-left text-xs">
+                  <thead className="bg-white text-[10px] font-black uppercase text-slate-400">
+                    <tr>
+                      <th className="px-4 py-2">Étape atelier</th>
+                      <th className="px-4 py-2">Nombre de tâches</th>
+                      <th className="px-4 py-2">Durée totale</th>
+                      <th className="px-4 py-2">Statut réservation</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {workshopStageSummaryRows.map(row => (
+                      <tr key={row.stepId} data-testid="workshop-stage-summary-row" className="bg-white">
+                        <td className="px-4 py-3 font-black text-slate-900">{row.label}</td>
+                        <td data-testid="workshop-stage-task-count" className="px-4 py-3 font-semibold text-slate-600">{row.taskCount}</td>
+                        <td data-testid="workshop-stage-duration-total" className="px-4 py-3 font-bold text-slate-700">{formatPlanningHours(row.durationHours)}</td>
+                        <td data-testid="workshop-stage-reservation-status" className="px-4 py-3 font-semibold text-slate-600">{row.reservationStatus}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </section>
 
@@ -1933,7 +2222,7 @@ export default function DossierDetail({
                         </div>
                         <div>
                           <span className="block text-slate-400">Durée validée</span>
-                          <strong className="text-slate-800">{formatPlanningHours(step.estimatedHours)}</strong>
+                          <strong data-testid="workshop-stage-total-duration" className="text-slate-800">{formatPlanningHours(step.estimatedHours)}</strong>
                         </div>
                         <div>
                           <span className="block text-slate-400">Technicien affecté</span>
@@ -2958,6 +3247,156 @@ export default function DossierDetail({
           )}
         </div>,
         document.body
+      )}
+
+      {showWorkshopTaskModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div data-testid="workshop-task-modal" className="w-full max-w-2xl space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xl">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-900">Créer une tâche atelier</h3>
+              <p className="mt-1 font-semibold text-slate-500">Tâche, étape, durée validée et préférences de réservation.</p>
+            </div>
+
+            {workshopTaskModalError && (
+              <div data-testid="workshop-task-error" className="rounded-lg border border-rose-200 bg-rose-50 p-3 font-bold text-rose-700">
+                {workshopTaskModalError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="block space-y-1 md:col-span-2">
+                <span className="font-black uppercase text-slate-600">Libellé tâche</span>
+                <input
+                  data-testid="workshop-task-label"
+                  type="text"
+                  value={workshopTaskLabel}
+                  onChange={(event) => setWorkshopTaskLabel(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Ex: Vidange + filtre huile"
+                />
+              </label>
+
+              <label className="block space-y-1 md:col-span-2">
+                <span className="font-black uppercase text-slate-600">Description courte</span>
+                <textarea
+                  data-testid="workshop-task-description"
+                  value={workshopTaskDescription}
+                  onChange={(event) => setWorkshopTaskDescription(event.target.value)}
+                  className="min-h-20 w-full rounded-lg border border-slate-200 bg-white p-2 font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Informations atelier utiles au technicien."
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-black uppercase text-slate-600">Étape atelier</span>
+                <select
+                  data-testid="workshop-task-stage"
+                  value={workshopTaskStage}
+                  onChange={(event) => setWorkshopTaskStage(event.target.value as PlanningStepId)}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  {PLANNING_STEP_DEFINITIONS.map(step => (
+                    <option key={step.id} value={step.id}>{step.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-black uppercase text-slate-600">Durée estimée (heures)</span>
+                <input
+                  data-testid="workshop-task-duration"
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="40"
+                  value={workshopTaskDuration}
+                  onChange={(event) => setWorkshopTaskDuration(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="1.5"
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-black uppercase text-slate-600">Technicien préféré</span>
+                <select
+                  data-testid="workshop-task-technician"
+                  value={workshopTaskTechnician}
+                  onChange={(event) => setWorkshopTaskTechnician(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="">Premier disponible</option>
+                  {techniciens.map(technician => (
+                    <option key={technician.id} value={technician.id}>{technician.nom}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-black uppercase text-slate-600">Pont / matériel requis</span>
+                <select
+                  data-testid="workshop-task-bay"
+                  value={workshopTaskBay}
+                  onChange={(event) => setWorkshopTaskBay(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="">Selon disponibilité</option>
+                  {DEFAULT_WORKSHOP_BAYS.map(bay => (
+                    <option key={bay.id} value={bay.id}>{bay.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="font-black uppercase text-slate-600">Priorité</span>
+                <select
+                  data-testid="workshop-task-priority"
+                  value={workshopTaskPriority}
+                  onChange={(event) => setWorkshopTaskPriority(event.target.value as WorkshopTaskPriority)}
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="basse">Basse</option>
+                  <option value="normale">Normale</option>
+                  <option value="haute">Haute</option>
+                  <option value="urgente">Urgente</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1 md:col-span-2">
+                <span className="font-black uppercase text-slate-600">Commentaire Chef Atelier</span>
+                <textarea
+                  data-testid="workshop-task-comment"
+                  value={workshopTaskComment}
+                  onChange={(event) => setWorkshopTaskComment(event.target.value)}
+                  className="min-h-20 w-full rounded-lg border border-slate-200 bg-white p-2 font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Consigne interne, contrôle attendu, contrainte client."
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                data-testid="workshop-task-cancel"
+                onClick={() => {
+                  setShowWorkshopTaskModal(false);
+                  resetWorkshopTaskModal();
+                }}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-black text-slate-700 hover:bg-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="workshop-task-save"
+                onClick={handleSaveWorkshopTask}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-black text-white hover:bg-emerald-700"
+              >
+                <Plus className="h-4 w-4" />
+                Créer tâche
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {durationValidationLineId && durationValidationLine && (

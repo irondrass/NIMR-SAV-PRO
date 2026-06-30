@@ -825,7 +825,7 @@ registerCheck("Lot 5F-3", "mapLaborLinesToRepairOrderLines — estimateSource = 
   const roLines = mapLaborLinesToRepairOrderLines(preview);
   assert.ok(roLines.length > 0, "Expected at least 1 RepairOrderLine");
   assert.equal(roLines[0].estimateSource, "quote-import");
-  assert.equal(roLines[0].isEstimatedDurationValidated, false);
+  assert.equal(roLines[0].isEstimatedDurationValidated, true);
 });
 
 registerCheck("Lot 5F-3", "planning bloqué si durée manquante (tempsEstime=0)", () => {
@@ -2475,7 +2475,8 @@ registerCheck("Lot 6G Invariants", "CSV réel-like ne perd pas VIN, client ni t�
   assert.equal(vehicle.customerPhone, "+21622222222");
   assert.equal(vehicle.plateNumber, "2318TU259");
   assert.equal(vehicle.brand, "Dongfeng");
-  assert.equal(vehicle.model, "DONGFENG BOX EV 430");
+  assert.equal(vehicle.model, "BOX EV 430");
+  assert.equal(vehicle.description, "DONGFENG BOX EV 430");
   assert.equal(vehicle.circulationDate, "2026-02-25");
   assert.equal(vehicle.deliveryDate, "2026-03-04");
   assert.deepEqual(getVehicleMasterStats(parsed.records), {
@@ -2515,13 +2516,14 @@ registerCheck("Lot 6G Invariants", "GuidedReception importe en ArrayBuffer et pr
   assert.equal(funcBody.includes("setVehiculeModele(inferred.model)"), false, "La marque inférée ne doit pas remplacer la Description modèle");
 });
 
-registerCheck("Lot 6G Invariants", "modèle réception = Description importée avec placeholder si vide", () => {
+registerCheck("Lot 6G Invariants", "Description importée conservée et modèle parser exploitable", () => {
   const parsed = parseVehicleMasterCsv(
     `VIN,Immatriculation,Marque,Description\n` +
     `VIN-DESC-001,111 TU 222,Dongfeng,Dongfeng Shine Max\n` +
     `VIN-DESC-002,222 TU 333,Dongfeng,`
   );
-  assert.equal(parsed.records[0].model, "Dongfeng Shine Max");
+  assert.equal(parsed.records[0].model, "Shine Max");
+  assert.equal(parsed.records[0].description, "Dongfeng Shine Max");
   assert.equal(parsed.records[0].brand, "Dongfeng");
   assert.equal(parsed.records[1].model, undefined);
   assert.equal(VEHICLE_MODEL_TO_FILL_PLACEHOLDER, "Modèle à renseigner");
@@ -2573,21 +2575,39 @@ registerCheck("Lot 6J Complément", "MO sans durée inventée et planning bloqu�
     objetsLaisses: [],
   }, [], new Date("2026-06-15T08:00:00Z"));
   assert.equal(dossier.vehiculeModele, "Modèle à renseigner");
-  assert.ok(dossier.ordresReparation.every(line => line.tempsEstime === 0), "Création dossier ne doit pas inventer de durée");
-  assert.ok(dossier.ordresReparation.every(line => line.isEstimatedDurationValidated === false), "Durée initiale non validée");
+  assert.equal(dossier.ordresReparation.length, 0, "Création dossier ne doit pas inventer de tâche atelier");
 
   const quoteLines = mapLaborLinesToRepairOrderLines(buildQuoteImportPreview(parseQuoteText("Contrôle géométrie 1H")));
   assert.equal(quoteLines[0].tempsEstime, 1);
-  assert.equal(quoteLines[0].isEstimatedDurationValidated, false, "Import MO reste à valider par Chef Atelier");
+  assert.equal(quoteLines[0].isEstimatedDurationValidated, true, "Import MO confirmé par Chef Atelier devient planifiable");
 
   const quoteDossier = getMockDossier({
-    id: "NIMR-QA-MO-NOVALID",
+    id: "NIMR-QA-MO-VALID",
     ordresReparation: [quoteLines[0]],
   });
-  const blocked = validatePlanningAssignment({
+  const allowed = validatePlanningAssignment({
     dossiers: [quoteDossier],
     dossierId: quoteDossier.id,
     lineId: quoteLines[0].id,
+    technicianId: mockTechs[0].id,
+    bayId: mockBays[0].id,
+    start: new Date("2026-06-15T10:00:00"),
+    end: new Date("2026-06-15T11:00:00"),
+    technicians: mockTechs,
+    workshopBays: mockBays,
+  }, new Date("2026-06-15T08:00:00"));
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.codes.includes("planning-duration-not-validated"), false);
+
+  const unvalidatedLine = { ...quoteLines[0], id: "ro_unvalidated_fixture", isEstimatedDurationValidated: false };
+  const unvalidatedDossier = getMockDossier({
+    id: "NIMR-QA-MO-NOVALID",
+    ordresReparation: [unvalidatedLine],
+  });
+  const blocked = validatePlanningAssignment({
+    dossiers: [unvalidatedDossier],
+    dossierId: unvalidatedDossier.id,
+    lineId: unvalidatedLine.id,
     technicianId: mockTechs[0].id,
     bayId: mockBays[0].id,
     start: new Date("2026-06-15T10:00:00"),

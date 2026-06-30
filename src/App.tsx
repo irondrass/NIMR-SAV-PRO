@@ -224,6 +224,7 @@ function loadStoredVehicleMaster(key: string): VehicleMasterRecord[] {
         itemNo: item.itemNo ? String(item.itemNo) : undefined,
         brand: item.brand ? String(item.brand) : undefined,
         model: item.model ? String(item.model) : undefined,
+        description: item.description ? String(item.description) : undefined,
         version: item.version ? String(item.version) : undefined,
         deliveryDate: item.deliveryDate ? String(item.deliveryDate) : undefined,
         circulationDate: item.circulationDate ? String(item.circulationDate) : undefined,

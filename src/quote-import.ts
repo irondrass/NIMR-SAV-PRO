@@ -1143,7 +1143,7 @@ export function mapLaborLinesToRepairOrderLines(
         tempsPasse: 0,
         status: "pending",
         estimateSource: "quote-import",
-        isEstimatedDurationValidated: false,
+        isEstimatedDurationValidated: hours > 0,
         quoteImportId: importId,
         quoteLineRef: line.id,
       };

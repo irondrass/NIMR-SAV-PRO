@@ -56,7 +56,20 @@ function makeTestDossier(overrides: Record<string, unknown> = {}) {
     [],
     new Date("2026-06-12T08:00:00Z")
   );
-  return { ...base, ...overrides };
+  const defaultLine = {
+    id: "ro_preset_fixture",
+    designation: "Durée atelier à confirmer",
+    tempsEstime: 2,
+    tempsPasse: 0,
+    status: "pending" as const,
+    estimateSource: "preset" as const,
+    isEstimatedDurationValidated: false,
+  };
+  return {
+    ...base,
+    ordresReparation: [defaultLine],
+    ...overrides,
+  };
 }
 
 // ─── Suite 1 : normalizeOperationText ────────────────────────────────────────
@@ -252,14 +265,14 @@ console.log("▶ Suite 9: mapLaborLinesToRepairOrderLines");
   assert.ok(roLines.length > 0, "Should produce RepairOrderLines");
   for (const line of roLines) {
     assert.equal(line.estimateSource, "quote-import", "estimateSource = quote-import");
-    assert.equal(line.isEstimatedDurationValidated, false, "isEstimatedDurationValidated = false until Chef Atelier validation");
+    assert.equal(line.isEstimatedDurationValidated, true, "isEstimatedDurationValidated = true after Chef Atelier import confirmation");
     assert.ok(line.tempsEstime > 0, "tempsEstime > 0");
     assert.ok(line.quoteImportId, "quoteImportId set");
     assert.ok(line.quoteLineRef, "quoteLineRef set");
     assert.equal(line.status, "pending", "status = pending");
     assert.equal(line.tempsPasse, 0, "tempsPasse = 0");
   }
-  console.log(`  ✅ mapLaborLinesToRepairOrderLines — ${roLines.length} lignes à valider`);
+  console.log(`  ✅ mapLaborLinesToRepairOrderLines — ${roLines.length} lignes validées par import`);
 }
 
 // ─── Suite 10 : applyQuoteImportPreview ──────────────────────────────────────
@@ -323,7 +336,7 @@ console.log("▶ Suite 12: validatePlanningAssignment — preset non validé");
   const now = new Date("2026-06-12T09:00:00");
   const dossier = makeTestDossier();
   
-  // First line is already preset & not validated (from createReceptionDossier)
+  // First line is a preset fixture and remains blocked until the duration is validated.
   const presetLine = dossier.ordresReparation[0];
   assert.equal(presetLine.estimateSource, "preset", "Preset line from createReceptionDossier");
   assert.equal(presetLine.isEstimatedDurationValidated, false, "Not validated by default");
@@ -344,8 +357,8 @@ console.log("▶ Suite 12: validatePlanningAssignment — preset non validé");
     workshopBays: [{ id: "bay_fast_01", name: "Pont rapide 1" }],
   }, now);
   
-  assert.equal(result.allowed, false, "Should not allow planning with missing preset duration");
-  assert.ok(result.codes.includes("planning-duration-missing"), `Expected planning-duration-missing, got: ${result.codes.join(", ")}`);
+  assert.equal(result.allowed, false, "Should not allow planning with unvalidated preset duration");
+  assert.ok(result.codes.includes("planning-duration-not-validated"), `Expected planning-duration-not-validated, got: ${result.codes.join(", ")}`);
   console.log("  ✅ planning blocked — durée preset à estimer");
 }
 
