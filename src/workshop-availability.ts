@@ -731,7 +731,8 @@ export function findNextAvailableWorkingSlot(input: {
         (
           res.status === "CRENEAU_PROPOSE" ||
           res.status === "RESERVATION_CONFIRMEE" ||
-          res.status === "AFFECTEE_ATELIER"
+          res.status === "AFFECTEE_ATELIER" ||
+          res.status === "TRANSFORMEE_PLANNING"
         ) &&
         res.startTime &&
         res.endTime

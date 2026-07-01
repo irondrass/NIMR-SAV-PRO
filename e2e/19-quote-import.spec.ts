@@ -577,9 +577,9 @@ Page 3 / 3
     }
     await humanWait(page, 300);
 
-    // Vérifier que 5 nouvelles tâches sont créées (en plus de celle de preset)
+    // Vérifier la décomposition ancienne app : 1 preset + 9 tâches atelier importées
     const taskCards = page.locator("[data-testid^=\"task-card-\"]");
-    await expect(taskCards).toHaveCount(6); // 1 preset + 5 imported
+    await expect(taskCards).toHaveCount(10);
 
     // Vérifier que le produit peinture, Report, Total, TVA ne sont pas des tâches
     const taskTexts = await taskCards.allTextContents();

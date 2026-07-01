@@ -830,7 +830,8 @@ function isSlotOverlappingActiveReservations(
     if (
       res.status !== "CRENEAU_PROPOSE" &&
       res.status !== "RESERVATION_CONFIRMEE" &&
-      res.status !== "AFFECTEE_ATELIER"
+      res.status !== "AFFECTEE_ATELIER" &&
+      res.status !== "TRANSFORMEE_PLANNING"
     ) continue;
     if (!res.startTime || !res.endTime) continue;
 
@@ -880,22 +881,19 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
 
     let startAfter = new Date(desiredDate);
     let isShiftedDueToNow = false;
+    const openingStart = new Date(desiredDate);
+    openingStart.setHours(8, 0, 0, 0);
+    startAfter = new Date(Math.max(desiredDate.getTime(), openingStart.getTime()));
     if (desiredDateStr === nowDateStr) {
-      const startOfToday = new Date(desiredDate);
-      startOfToday.setHours(8, 0, 0, 0);
       const alignedNow = new Date(now);
       alignedNow.setSeconds(0, 0);
       const mins = alignedNow.getMinutes();
       const roundedMins = Math.ceil(mins / 15) * 15;
       alignedNow.setMinutes(roundedMins);
-      if (alignedNow.getTime() > startOfToday.getTime()) {
+      if (alignedNow.getTime() > startAfter.getTime()) {
         startAfter = alignedNow;
         isShiftedDueToNow = true;
-      } else {
-        startAfter = startOfToday;
       }
-    } else {
-      startAfter.setHours(8, 0, 0, 0);
     }
 
     const dossier = input.dossierId ? input.dossiers.find(d => d.id === input.dossierId) : null;
@@ -1030,13 +1028,15 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
     let isShiftedDueToNow = false;
 
     if (dayOffset === 0 && desiredDateStr === nowDateStr) {
-      const earliestStart = maxDate(now, setTimeOnDate(candidateDate, 8, 0));
+      const earliestStart = maxDate(maxDate(now, desiredDate), setTimeOnDate(candidateDate, 8, 0));
       timeCursor = alignToWorkingTime(roundToNextSlot(earliestStart, 15));
       if (timeCursor.getTime() > setTimeOnDate(candidateDate, 8, 0).getTime()) {
         isShiftedDueToNow = true;
       }
     } else {
-      timeCursor = setTimeOnDate(candidateDate, 8, 0);
+      timeCursor = dayOffset === 0
+        ? maxDate(desiredDate, setTimeOnDate(candidateDate, 8, 0))
+        : setTimeOnDate(candidateDate, 8, 0);
     }
 
     const endOfDayLimit = candidateDate.getDay() === 6 
@@ -2837,7 +2837,8 @@ export function isVehicleOverlappingActiveReservations(
     if (
       res.status !== "CRENEAU_PROPOSE" &&
       res.status !== "RESERVATION_CONFIRMEE" &&
-      res.status !== "AFFECTEE_ATELIER"
+      res.status !== "AFFECTEE_ATELIER" &&
+      res.status !== "TRANSFORMEE_PLANNING"
     ) continue;
     if (!res.startTime || !res.endTime) continue;
 
@@ -2855,6 +2856,7 @@ const ACTIVE_VEHICLE_RESERVATION_STATUSES = new Set<WorkshopReservation["status"
   "CRENEAU_PROPOSE",
   "RESERVATION_CONFIRMEE",
   "AFFECTEE_ATELIER",
+  "TRANSFORMEE_PLANNING",
 ]);
 
 function getActiveVehicleReservations(

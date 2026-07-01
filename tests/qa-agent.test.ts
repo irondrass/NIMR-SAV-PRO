@@ -1010,9 +1010,11 @@ Total DT 157,500`;
   const lines = parseQuoteText(text);
   const preview = buildQuoteImportPreview(lines);
   const roLines = mapLaborLinesToRepairOrderLines(preview);
-  assert.equal(roLines.length, 1);
-  assert.equal(roLines[0].designation, "Peinture et finition AILE AV");
-  assert.equal(roLines[0].tempsEstime, 4.5);
+  assert.equal(roLines.length, 4);
+  assert.ok(roLines.some(l => l.designation === "Peinture et finition AILE AV" && l.tempsEstime === 3 && l.workshopStageId === "preparation"));
+  assert.ok(roLines.some(l => l.designation === "Peinture mutualisee par zone/cote cabine" && l.tempsEstime === 1.5 && l.workshopStageId === "paint"));
+  assert.ok(roLines.some(l => l.workshopStageId === "finish"));
+  assert.ok(roLines.some(l => l.workshopStageId === "quality"));
 });
 
 registerCheck("Lot 5F-3B Multi-pages", "import ne doit pas afficher 0 tâche si des lignes MO-TOL valides existent", () => {
@@ -1034,8 +1036,9 @@ MO-TOL DEPOSE ET REPOSE CALANDRE 1,0 35,000 35,000`;
   const lines = parseQuoteText(text);
   const preview = buildQuoteImportPreview(lines);
   const roLines = mapLaborLinesToRepairOrderLines(preview);
-  assert.equal(roLines.length, 1);
-  assert.equal(roLines[0].designation, "Dépose ET REPOSE CALANDRE");
+  assert.equal(roLines.length, 2);
+  assert.ok(roLines.some(l => l.designation === "Dépose ET REPOSE CALANDRE" && l.tempsEstime === 1));
+  assert.ok(roLines.some(l => l.workshopStageId === "quality"));
   const hasPaintTask = roLines.some(l => l.designation.toUpperCase().includes("PEINTURE") || l.designation.toUpperCase().includes("PRODUIT"));
   assert.equal(hasPaintTask, false, "Paint supplies must not be imported as tasks");
 });
@@ -1065,9 +1068,10 @@ MO-TOL REGLAGE OPTIQUES 0.5 35,000 17,500`;
 
   const preview = buildQuoteImportPreview(lines);
   const roLines = mapLaborLinesToRepairOrderLines(preview);
-  assert.equal(roLines.length, 1);
-  assert.equal(roLines[0].designation, "REGLAGE OPTIQUES");
-  assert.equal(roLines[0].tempsEstime, 0.5);
+  assert.equal(roLines.length, 2);
+  assert.ok(roLines.some(l => l.designation === "REGLAGE OPTIQUES" && l.tempsEstime === 0.5));
+  assert.ok(roLines.some(l => l.workshopStageId === "quality"));
+  assert.equal(roLines.some(l => l.tempsEstime <= 0), false, "Zero-hour tasks must not be imported");
 });
 
 // -----------------------------------------------------------------

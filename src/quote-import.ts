@@ -8,6 +8,16 @@
  */
 
 import { QuoteLine, QuoteLineType, QuoteImportPreview, QuoteImportResult, RepairOrderLine, DossierSAV } from "./types";
+import {
+  OLD_APP_PHASE_TO_PRO_STAGE,
+  buildOldAppAppliedEstimateLines,
+  distributeOldAppLaborHours,
+  getOldAppDefaultLaborAllocations,
+  getOldAppPhaseLabel,
+  normalizeOldAppOriginalLaborLine,
+  optimizeOldAppEstimateAllocationsFromOriginalLines,
+  OldAppOriginalLaborLine,
+} from "./core/old-app-quote-rules";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Constantes de classification
@@ -811,6 +821,11 @@ export function normalizeQuoteLine(rawText: string): string {
     .trim();
 }
 
+function extractQuoteSourceCode(text: string): string | undefined {
+  const match = String(text || "").match(/\b(MO[-\s]TOL|MO-[A-Z0-9-]+)\b/i);
+  return match ? match[1].replace(/\s+/g, "-").toUpperCase() : undefined;
+}
+
 /**
  * Calcule le niveau de confiance de classification.
  */
@@ -982,10 +997,12 @@ function parseCsvRaw(text: string): string[][] {
 function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[] {
   const seen = new Set<string>();
   const result: QuoteLine[] = [];
+  let pendingSourceCode: string | undefined;
 
   for (const rawLine of lineTexts) {
     const cleaned = normalizeQuoteLine(rawLine);
     if (!cleaned) continue;
+    const explicitSourceCode = extractQuoteSourceCode(cleaned);
 
     const normalizedForChecks = normalizeEstimateOperationText(cleaned);
 
@@ -1003,19 +1020,45 @@ function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[
     const type = classifyQuoteLine(cleaned);
     const hours = type === "labor" ? extractLaborHours(cleaned) : 0;
     const confidence = computeConfidence(cleaned, type, hours);
+    const sourceCode = explicitSourceCode || (type === "labor" && hours > 0 ? pendingSourceCode : undefined);
 
+    const id = generateId("ql");
     // Pour les lignes labor : utiliser le nom propre nettoyé
     const description = type === "labor" ? cleanLaborDescription(cleaned) || cleaned : cleaned;
+    const oldAppLine = type === "labor" && hours > 0
+      ? normalizeOldAppOriginalLaborLine({
+          id,
+          operation: description,
+          rawText: cleaned,
+          laborHours: hours,
+          allocations: getOldAppDefaultLaborAllocations(description, hours),
+        })
+      : null;
 
     result.push({
-      id: generateId("ql"),
+      id,
       rawText: rawLine,
+      sourceCode,
       description,
       type,
       hours,
       confidence,
       selected: type === "labor" && hours > 0, // pré-sélection : seulement MO avec durée > 0
+      oldAppPhaseAllocations: oldAppLine?.allocations,
+      oldAppSelectedPhases: oldAppLine?.selectedPhases,
+      oldAppPieceKind: oldAppLine?.pieceKind,
+      oldAppPaintFaces: oldAppLine?.paintFaces,
+      oldAppPaintGroup: oldAppLine?.paintGroup,
+      oldAppDetectionReason: oldAppLine ? "old-app-v21.96" : undefined,
     });
+
+    if (type === "labor" && hours <= 0 && explicitSourceCode) {
+      pendingSourceCode = explicitSourceCode;
+    } else if (type === "labor" && hours > 0) {
+      pendingSourceCode = undefined;
+    } else if (type !== "unknown") {
+      pendingSourceCode = undefined;
+    }
   }
 
   return result;
@@ -1032,60 +1075,29 @@ export interface LaborDistribution {
 }
 
 export function distributeLaborHours(operation: string, hours: number, options: any = {}): LaborDistribution[] {
-  const normalized = normalizeEstimateOperationText(operation);
-  const cleanDetail = removeKnownOperationPrefix(operation);
-  
-  if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
-    const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
-    return [
-      { phase: "body", operation: `D/P ${cleanDetail}`, laborHours: body },
-      { phase: "reassembly", operation: `REMONTAGE ${cleanDetail}`, laborHours: reassembly },
-    ];
-  }
-  if (/\bPEINTURE\s+ET\s+F(?:I)?NITION\b/.test(normalized)) {
-    const [prep, paint] = splitPlanningHours(hours, [0.5, 0.5]);
-    return [
-      { phase: "prep", operation: `PREPARATION ${cleanDetail}`, laborHours: prep },
-      { phase: "paint", operation: `PEINTURE ${cleanDetail}`, laborHours: paint },
-    ];
-  }
-  if (/\bDRESSAGE\b/.test(normalized)) {
-    const [body, prep, paint] = splitPlanningHours(hours, [1 / 3, 1 / 3, 1 / 3]);
-    return [
-      { phase: "body", operation: `DRESSAGE ${cleanDetail}`, laborHours: body },
-      { phase: "prep", operation: `PREPARATION ${cleanDetail}`, laborHours: prep },
-      { phase: "paint", operation: `PEINTURE ${cleanDetail}`, laborHours: paint },
-    ];
-  }
-  if (/\b(PASSAGE\s+SUR\s+MARBRE|MARBRE)\b/.test(normalized)) return [{ phase: "body", operation, laborHours: hours }];
-  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [{ phase: "oilService", operation, laborHours: hours }];
-  
-  const isClientOnly = ["client", "vidange", "mechanical_client", "electrical_client"].includes(options.claimType);
-  const insuranceElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|BATTERIE|HAUTE\s+TENSION|HV|PYROTECHNIQUE)\b/;
-  const clientElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|ELECTRIQUE|ELECTRICITE|ALTERNATEUR|DEMARREUR|BATTERIE|FAISCEAU|CAPTEUR|HAUTE\s+TENSION|HV)\b/;
-  
-  if ((isClientOnly ? clientElectricalPattern : insuranceElectricalPattern).test(normalized)) return [{ phase: "electrical", operation, laborHours: hours }];
-  if (/\b(REMPLACEMENT\s+BOITE|BOITE\s+VITESSE|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR|MECANIQUE|MECAN)\b/.test(normalized)) return [{ phase: "mechanical", operation, laborHours: hours }];
-  if (/\b(CHANG(?:EMENT)?|REMP|REMPL|REMPLACEMENT)\s+(FEU|OPTIQUE|PHARE|PROJECTEUR|LANTERNE|PARE\s+BOUE|SUPPORT|AILE|PARE\s+CHOC|JUPE|MALLE|CAPOT|PORTE|SERRURE)\b/.test(normalized)) {
-    return [{ phase: "reassembly", operation, laborHours: hours }];
-  }
-  if (/\bCHANG(?:EMENT)?\b/.test(normalized)) return [{ phase: "reassembly", operation, laborHours: hours }];
-  if (/\bPREPARATION\b/.test(normalized)) return [{ phase: "prep", operation, laborHours: hours }];
-  if (/\bPEINTURE\b/.test(normalized)) return [{ phase: "paint", operation, laborHours: hours }];
-  if (/\bD\s*\/\s*P\b/.test(normalized)) {
-    const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
-    return [
-      { phase: "body", operation: `D/P ${cleanDetail}`, laborHours: body },
-      { phase: "reassembly", operation: `REMONTAGE ${cleanDetail}`, laborHours: reassembly },
-    ];
-  }
-  if (/\b(DEMONTAGE|DEPOSE)\b/.test(normalized)) return [{ phase: "body", operation, laborHours: hours }];
-  if (/\b(REMONTAGE|REPOSE)\b/.test(normalized)) return [{ phase: "reassembly", operation, laborHours: hours }];
-  if (/\bFINITION\b/.test(normalized)) return [{ phase: "finish", operation, laborHours: hours }];
-  if (/\b(BOITE|VITESSE)\b/.test(normalized)) return [{ phase: "mechanical", operation, laborHours: hours }];
-  if (/\b(REMP|REMPL|REMPLACEMENT)\b/.test(normalized)) return [{ phase: "reassembly", operation, laborHours: hours }];
-  if (/\bREPARATION\b/.test(normalized)) return [{ phase: "body", operation, laborHours: hours }];
-  return [];
+  return distributeOldAppLaborHours(operation, hours, options);
+}
+
+function quoteLineToOldAppOriginalLine(line: QuoteLine): OldAppOriginalLaborLine | null {
+  if (line.type !== "labor") return null;
+  const hours = line.editedHours !== undefined ? line.editedHours : line.hours;
+  if (!hours || hours <= 0) return null;
+  const operation = line.editedDescription?.trim() || line.description;
+  return normalizeOldAppOriginalLaborLine({
+    id: line.id,
+    operation,
+    rawText: line.rawText,
+    laborHours: hours,
+    allocations: line.oldAppPhaseAllocations?.map(allocation => ({
+      phase: allocation.phase as OldAppOriginalLaborLine["selectedPhases"][number],
+      operation: allocation.operation,
+      laborHours: allocation.laborHours,
+    })),
+    selectedPhases: line.oldAppSelectedPhases as OldAppOriginalLaborLine["selectedPhases"] | undefined,
+    pieceKind: line.oldAppPieceKind,
+    paintFaces: line.oldAppPaintFaces,
+    paintGroup: line.oldAppPaintGroup as OldAppOriginalLaborLine["paintGroup"] | undefined,
+  });
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -1099,6 +1111,10 @@ export function buildQuoteImportPreview(
   const laborLines = lines.filter(l => l.type === "labor");
   const partLines = lines.filter(l => l.type === "part");
   const totalDetectedHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
+  const oldAppOriginalLines = laborLines
+    .map(quoteLineToOldAppOriginalLine)
+    .filter((line): line is OldAppOriginalLaborLine => Boolean(line));
+  const oldAppOptimized = optimizeOldAppEstimateAllocationsFromOriginalLines(oldAppOriginalLines);
 
   return {
     importId: generateId("qimport"),
@@ -1109,6 +1125,12 @@ export function buildQuoteImportPreview(
     partCount: partLines.length,
     totalDetectedHours: roundPlanningHours(totalDetectedHours),
     ignoredCount: options.ignoredCount ?? 0,
+    oldAppTotals: oldAppOptimized.totals,
+    oldAppPaintOptimization: oldAppOptimized.paintOptimization.map(group => ({
+      group: group.group,
+      label: group.label,
+      total: group.total,
+    })),
   };
 }
 
@@ -1131,21 +1153,32 @@ export function mapLaborLinesToRepairOrderLines(
   preview: QuoteImportPreview
 ): RepairOrderLine[] {
   const importId = preview.importId;
-  return preview.lines
+  const oldAppOriginalLines = preview.lines
     .filter(l => l.selected && l.type === "labor")
+    .map(quoteLineToOldAppOriginalLine)
+    .filter((line): line is OldAppOriginalLaborLine => Boolean(line));
+  if (oldAppOriginalLines.length === 0) return [];
+  const appliedLines = buildOldAppAppliedEstimateLines(oldAppOriginalLines);
+
+  return appliedLines
+    .filter(line => line.laborHours > 0)
     .map((line): RepairOrderLine => {
-      const hours = line.editedHours !== undefined ? line.editedHours : line.hours;
-      const description = line.editedDescription?.trim() || line.description;
+      const stageId = OLD_APP_PHASE_TO_PRO_STAGE[line.phase];
       return {
         id: generateId("ro_quote"),
-        designation: description,
-        tempsEstime: hours,
+        designation: line.operation,
+        tempsEstime: line.laborHours,
         tempsPasse: 0,
         status: "pending",
         estimateSource: "quote-import",
-        isEstimatedDurationValidated: hours > 0,
+        isEstimatedDurationValidated: line.laborHours > 0,
         quoteImportId: importId,
         quoteLineRef: line.id,
+        operationFamily: getOldAppPhaseLabel(line.phase),
+        workshopStageId: stageId,
+        workshopZoneNote: line.paintOptimized
+          ? "Règle ancienne : peinture mutualisée par zone/côté cabine."
+          : "Règle ancienne NIMR SAV appliquée.",
       };
     });
 }

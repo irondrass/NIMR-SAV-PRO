@@ -117,6 +117,7 @@ export type QuoteLineType = "labor" | "part" | "paint" | "misc" | "unknown";
 export interface QuoteLine {
   id: string;
   rawText: string;
+  sourceCode?: string;
   description: string;
   type: QuoteLineType;
   hours: number; // hours, 0 if not labor or not detected
@@ -124,6 +125,12 @@ export interface QuoteLine {
   selected: boolean; // user selects which labor lines to import
   editedDescription?: string;
   editedHours?: number;
+  oldAppPhaseAllocations?: Array<{ phase: string; operation: string; laborHours: number }>;
+  oldAppSelectedPhases?: string[];
+  oldAppPieceKind?: "new" | "repair";
+  oldAppPaintFaces?: "outside" | "two_sides";
+  oldAppPaintGroup?: string;
+  oldAppDetectionReason?: string;
 }
 
 export interface QuoteImportPreview {
@@ -135,6 +142,8 @@ export interface QuoteImportPreview {
   partCount: number;
   totalDetectedHours: number;
   ignoredCount?: number;
+  oldAppTotals?: Record<string, number>;
+  oldAppPaintOptimization?: Array<{ group: string; label: string; total: number }>;
 }
 
 export interface QuoteImportResult {

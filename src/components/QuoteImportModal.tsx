@@ -5,7 +5,7 @@
  * Lot 5F-3 — Modal d'import de devis / MO
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   QuoteImportPreview,
   QuoteLine,
@@ -18,6 +18,14 @@ import {
   applyQuoteImportPreview,
   extractPdfText,
 } from "../quote-import";
+import {
+  OLD_APP_PAINT_GROUP_OPTIONS,
+  OLD_APP_PHASES,
+  getOldAppPhaseLabel,
+  makeOldAppWeightedAllocations,
+  normalizeOldAppOriginalLaborLine,
+  optimizeOldAppEstimateAllocationsFromOriginalLines,
+} from "../core/old-app-quote-rules";
 import { inferWorkshopStageFromTaskText } from "../workshop-task-intake";
 import { FileText, Upload, Check, X, AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -63,6 +71,11 @@ Remplacement plaquettes frein avant 2H
 Contrôle et réglage géométrie 1H30
 Filtre à air 1
 Huile moteur 5W40 5L`;
+
+function getSafeQuoteOriginLabel(line: QuoteLine): string {
+  const code = line.sourceCode || String(line.rawText || "").match(/\b(MO-[A-Z0-9-]+|MO-[A-Z]+)\b/i)?.[1];
+  return code ? `Origine devis · ${code.toUpperCase()}` : "Origine devis";
+}
 
 export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onCancel }: QuoteImportModalProps) {
   const [step, setStep] = useState<ImportStep>("input");
@@ -129,9 +142,12 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
       ...preview,
       lines: preview.lines.map(l =>
         l.id === lineId ? { 
-          ...l, 
+          ...l,
           editedHours: validHrs,
-          selected: validHrs <= 0 ? false : l.selected
+          selected: validHrs <= 0 ? false : l.selected,
+          oldAppPhaseAllocations: l.oldAppSelectedPhases
+            ? makeOldAppWeightedAllocations(l.editedDescription ?? l.description, validHrs, l.oldAppSelectedPhases)
+            : l.oldAppPhaseAllocations,
         } : l
       ),
     });
@@ -143,7 +159,49 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
     setPreview({
       ...preview,
       lines: preview.lines.map(l =>
-        l.id === lineId ? { ...l, editedDescription: value } : l
+        l.id === lineId ? {
+          ...l,
+          editedDescription: value,
+          oldAppPhaseAllocations: l.oldAppSelectedPhases
+            ? makeOldAppWeightedAllocations(value, l.editedHours ?? l.hours, l.oldAppSelectedPhases)
+            : l.oldAppPhaseAllocations,
+        } : l
+      ),
+    });
+  };
+
+  const handleToggleOldAppPhase = (lineId: string, phase: string) => {
+    if (!preview) return;
+    setPreview({
+      ...preview,
+      lines: preview.lines.map(line => {
+        if (line.id !== lineId || line.type !== "labor") return line;
+        const current = line.oldAppSelectedPhases || line.oldAppPhaseAllocations?.map(allocation => allocation.phase) || [];
+        const nextPhases = current.includes(phase)
+          ? current.filter(item => item !== phase)
+          : [...current, phase];
+        const operation = line.editedDescription ?? line.description;
+        const hours = line.editedHours ?? line.hours;
+        return {
+          ...line,
+          oldAppSelectedPhases: nextPhases,
+          oldAppPhaseAllocations: makeOldAppWeightedAllocations(operation, hours, nextPhases),
+        };
+      }),
+    });
+    setValidationErrors([]);
+  };
+
+  const handleOldAppPaintField = (
+    lineId: string,
+    field: "oldAppPieceKind" | "oldAppPaintFaces" | "oldAppPaintGroup",
+    value: string
+  ) => {
+    if (!preview) return;
+    setPreview({
+      ...preview,
+      lines: preview.lines.map(line =>
+        line.id === lineId ? { ...line, [field]: value } : line
       ),
     });
   };
@@ -216,6 +274,31 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
 
   const selectedLaborCount = preview?.lines.filter(l => l.selected && l.type === "labor").length ?? 0;
   const partCount = preview?.lines.filter(l => l.type === "part").length ?? 0;
+  const oldAppLaborLines = useMemo(
+    () => preview?.lines.filter(line => line.type === "labor" && (line.editedHours ?? line.hours) > 0) ?? [],
+    [preview]
+  );
+  const oldAppReview = useMemo(() => {
+    if (!preview) return null;
+    const originalLines = oldAppLaborLines.map(line => normalizeOldAppOriginalLaborLine({
+        id: line.id,
+        operation: line.editedDescription ?? line.description,
+        rawText: line.rawText,
+        laborHours: line.editedHours ?? line.hours,
+        allocations: line.oldAppPhaseAllocations?.map(allocation => ({
+          phase: allocation.phase as any,
+          operation: allocation.operation,
+          laborHours: allocation.laborHours,
+        })),
+        selectedPhases: line.oldAppSelectedPhases as any,
+        pieceKind: line.oldAppPieceKind,
+        paintFaces: line.oldAppPaintFaces,
+        paintGroup: line.oldAppPaintGroup as any,
+      }));
+    const optimized = optimizeOldAppEstimateAllocationsFromOriginalLines(originalLines);
+    const total = Object.values(optimized.totals).reduce((sum, value) => sum + Number(value || 0), 0);
+    return { originalLines, optimized, total };
+  }, [preview, oldAppLaborLines]);
 
   return (
     <div
@@ -387,6 +470,137 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                 </div>
               )}
 
+              {/* Old app parity review */}
+              <section
+                data-testid="old-app-duration-review"
+                className="rounded-xl border border-slate-200 bg-white p-4 space-y-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wide text-slate-900">Durées estimées</h3>
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      Chaque ligne peut être affectée à une ou plusieurs étapes. Préparation + peinture suit la règle ancienne, avec mutualisation cabine par zone/côté.
+                    </p>
+                  </div>
+                  <div data-testid="old-app-total-atelier" className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800">
+                    Total atelier: {(oldAppReview?.total ?? 0).toFixed(2).replace(".", ",")} h
+                  </div>
+                </div>
+
+                {oldAppLaborLines.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 p-3 text-xs font-semibold text-slate-500">
+                    Aucune ligne MO importée. Importez le devis ou saisissez les durées manuellement.
+                  </div>
+                ) : (
+                  <div className="space-y-3" data-testid="old-app-labor-list">
+                    {oldAppLaborLines.map((line, index) => {
+                      const selectedPhases = line.oldAppSelectedPhases || line.oldAppPhaseAllocations?.map(allocation => allocation.phase) || [];
+                      const allocations = line.oldAppPhaseAllocations || [];
+                      const needsPaintControls = selectedPhases.includes("prep") || selectedPhases.includes("paint");
+                      return (
+                        <article
+                          key={line.id}
+                          data-testid="old-app-labor-row"
+                          className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-3"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="flex min-w-0 items-start gap-2">
+                              <span data-testid="old-app-line-number" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-black text-white">
+                                {index + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <strong data-testid="old-app-labor-label" className="block text-xs text-slate-900">
+                                  {line.editedDescription ?? line.description}
+                                </strong>
+                                <span data-testid="old-app-labor-origin" className="block truncate text-[10px] font-semibold text-slate-500">
+                                  {getSafeQuoteOriginLabel(line)}
+                                </span>
+                              </div>
+                            </div>
+                            <b data-testid="old-app-labor-duration" className="rounded-lg bg-blue-50 px-2 py-1 text-[11px] text-blue-700">
+                              {(line.editedHours ?? line.hours).toString().replace(".", ",")} h
+                            </b>
+                          </div>
+
+                          <div data-testid="old-app-stage-checkboxes" className="grid gap-1.5 sm:grid-cols-3">
+                            {OLD_APP_PHASES.filter(phase => phase !== "quality").map(phase => (
+                              <label key={phase} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600">
+                                <input
+                                  type="checkbox"
+                                  data-testid={`old-app-stage-${phase}`}
+                                  checked={selectedPhases.includes(phase)}
+                                  onChange={() => handleToggleOldAppPhase(line.id, phase)}
+                                  className="h-3 w-3 accent-blue-600"
+                                />
+                                {getOldAppPhaseLabel(phase)}
+                              </label>
+                            ))}
+                          </div>
+
+                          <div data-testid="old-app-allocation-badges" className="flex flex-wrap gap-1.5">
+                            {allocations.length ? allocations.map(allocation => (
+                              <span key={`${line.id}-${allocation.phase}`} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700">
+                                {getOldAppPhaseLabel(allocation.phase)} <strong>{allocation.laborHours.toString().replace(".", ",")} h</strong>
+                              </span>
+                            )) : (
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                Aucune étape affectée
+                              </span>
+                            )}
+                          </div>
+
+                          <div className={`grid gap-2 sm:grid-cols-3 ${needsPaintControls ? "" : "opacity-60"}`}>
+                            <label className="text-[10px] font-bold text-slate-600">
+                              État pièce
+                              <select
+                                data-testid="old-app-piece-kind"
+                                value={line.oldAppPieceKind || "new"}
+                                onChange={event => handleOldAppPaintField(line.id, "oldAppPieceKind", event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-1.5 text-[11px]"
+                              >
+                                <option value="new">Pièce neuve / remplacée</option>
+                                <option value="repair">Pièce à réparer / dressage</option>
+                              </select>
+                            </label>
+                            <label className="text-[10px] font-bold text-slate-600">
+                              Côté peinture
+                              <select
+                                data-testid="old-app-paint-faces"
+                                value={line.oldAppPaintFaces || "outside"}
+                                onChange={event => handleOldAppPaintField(line.id, "oldAppPaintFaces", event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-1.5 text-[11px]"
+                              >
+                                <option value="outside">Extérieur seulement</option>
+                                <option value="two_sides">Deux côtés</option>
+                              </select>
+                            </label>
+                            <label className="text-[10px] font-bold text-slate-600">
+                              Zone de groupement
+                              <select
+                                data-testid="old-app-paint-group"
+                                value={line.oldAppPaintGroup || "general"}
+                                onChange={event => handleOldAppPaintField(line.id, "oldAppPaintGroup", event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-1.5 text-[11px]"
+                              >
+                                {OLD_APP_PAINT_GROUP_OPTIONS.map(([value, label]) => (
+                                  <option key={value} value={value}>{label}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {oldAppReview?.optimized.paintOptimization.length ? (
+                  <div data-testid="old-app-paint-mutualization" className="rounded-lg border border-purple-100 bg-purple-50 p-2 text-[11px] font-bold text-purple-800">
+                    Peinture mutualisée : {oldAppReview.optimized.paintOptimization.map(group => `${group.label} ${group.total.toString().replace(".", ",")} h`).join(" · ")}
+                  </div>
+                ) : null}
+              </section>
+
               {/* Table preview */}
               <div className="overflow-x-auto rounded-xl border border-gray-200" data-testid="quote-preview-table">
                 <table className="w-full text-xs">
@@ -445,7 +659,7 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                             ) : (
                               <span className="text-gray-700 font-medium">{line.description}</span>
                             )}
-                            <span className="block text-[10px] text-gray-400 mt-0.5 truncate max-w-xs">{line.rawText}</span>
+                            <span className="block text-[10px] text-gray-400 mt-0.5 truncate max-w-xs">{getSafeQuoteOriginLabel(line)}</span>
                           </td>
 
                           {/* Type badge */}
