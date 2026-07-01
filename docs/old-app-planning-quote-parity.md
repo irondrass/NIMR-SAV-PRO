@@ -49,3 +49,45 @@ Downloaded reference files used for analysis:
 - The old UI was embedded in the dossier detail page. PRO uses a modal for quote import; the old review panel is rendered inside that modal to preserve existing workflows.
 - Old resource roles (`tolier`, `peintre`, `pont_vidange`, `cabine`) do not directly match PRO resource/bay models. Planning parity is therefore asserted at the behavior level: validated duration, first available slot, no technician collision, no bay collision, Gantt visible, ETA updated.
 
+
+## Hotfix 6K-F-C: Analysis & Implementation Details
+
+### 1. Écran "Étapes à modifier" (renderDurations)
+- **Ancienne fonction :** `renderDurations`
+- **Comportement exact ancien :** Affiche 9 cartes d'étapes chronologiques. Les cartes avec durée > 0 sont encadrées/actives. Permet de modifier le temps de l'étape, de sélectionner le "technicien à réserver" (choix filtré sur les techniciens actifs dont le rôle correspond à l'étape, par défaut "Auto - meilleur disponible"), et le "service à réserver dans le planning" (pour les étapes autorisées). Modifier la durée ou le technicien/service annule le planning existant pour forcer un recalcul.
+- **Comportement PRO avant correction :** Les cartes d'étapes étaient affichées de manière purement informative et statique (lecture seule), sans champs de formulaire pour modifier la durée, choisir le technicien à réserver ou modifier le type de service.
+- **Écart :** Absence des contrôles interactifs cruciaux pour l'affectation manuelle et la personnalisation des étapes.
+- **Correction appliquée :** Rendre les cartes interactives : inputs pour la durée (synchronisée avec les tâches associées), select pour le technicien à réserver (filtré par compatibilité), select pour le service (avec motif d'override obligatoire et audit log).
+- **Amélioration éventuelle :** Intégration soignée avec le style moderne de PRO tout en gardant l'aide contextuelle obligatoire.
+- **Impact métier :** Permet au Chef d'Atelier de moduler précisément chaque étape avant de lancer la réservation.
+- **Test ajouté :** `tests/old-app-stage-editor-parity.test.ts`
+
+### 2. Compatibilité Technicien / Métier
+- **Ancienne fonction :** Contrôle de la compatibilité des ressources (`getSelectableTechniciansForStep`).
+- **Comportement exact ancien :** Associe chaque étape à un rôle de technicien requis (`tolier`, `mecanicien`, `peintre`, `electricien`, `controle`). Empêche d'affecter un technicien ayant une autre spécialité.
+- **Comportement PRO avant correction :** La compatibilité était testée de façon globale sur le type de dossier (ex: dossier vidange -> mécanicien), permettant des aberrations comme l'affectation d'une tâche peinture à un mécanicien.
+- **Écart :** Non-respect des restrictions par étape métier.
+- **Correction appliquée :** Implémentation de `isTechnicianCompatibleForStep` et filtrage strict dans la validation de planification (qui renvoie le code d'erreur `planning-tech-incompatible` en cas d'incompatibilité). Pas de fallback vers le technicien du dossier s'il est incompatible (affiche "Aucun technicien compatible affecté.").
+- **Amélioration éventuelle :** None.
+- **Impact métier :** Garantie absolue que seules les personnes formées et affectées à la bonne zone effectuent le travail.
+- **Test ajouté :** `tests/planning-trade-compatibility.test.ts`
+
+### 3. Sélection Automatique "Auto - meilleur disponible"
+- **Ancienne fonction :** Algorithme de planification séquentielle (`findBestResourceSlot`).
+- **Comportement exact ancien :** L'auto-planification affecte le meilleur technicien disponible parmi ceux qui ont le rôle compatible pour l'étape.
+- **Comportement PRO avant correction :** L'auto-réservation ne restreignait pas la recherche aux techniciens compatibles avec l'étape spécifique de la tâche.
+- **Écart :** L'auto-réservation pouvait attribuer des tâches de carrosserie ou peinture à des mécaniciens.
+- **Correction appliquée :** Filtrage strict des techniciens testés par `isTechnicianCompatibleForStep` dans `buildVehicleAutoReservationPlan` et `suggestWorkshopSlot`.
+- **Amélioration éventuelle :** None.
+- **Impact métier :** Planification automatique réaliste sans intervention corrective manuelle requise après coup.
+- **Test ajouté :** `tests/old-app-planning-parity.test.ts`
+
+### 4. Synchronisation Réservation Planning → Ordre de Travail
+- **Ancienne fonction :** Persistance des affectations de ressources (`convertReservationToPlanning`).
+- **Comportement exact ancien :** Dès qu'un créneau est réservé ou planifié, le technicien et le pont associés s'affichent sur la tâche et dans les fiches de travail.
+- **Comportement PRO avant correction :** Les réservations de planification n'écrivaient pas immédiatement le technicien sur les lignes d'ordres de réparation, ce qui laissait ces lignes afficher "Non assigné" dans certains écrans.
+- **Écart :** Désynchronisation entre le planning Gantt (réservé) et le détail du dossier (non assigné).
+- **Correction appliquée :** Lecture unifiée de l'affectation résolvant le technicien/pont depuis la réservation active si le planning Gantt n'est pas encore finalisé. Écriture systématique des affectations lors de la création de réservations automatiques.
+- **Amélioration éventuelle :** None.
+- **Impact métier :** Alignement total des écrans pour éviter les confusions en atelier.
+- **Test ajouté :** `tests/planning-technician-assignment-sync.test.ts`

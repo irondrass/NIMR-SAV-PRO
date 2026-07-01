@@ -222,8 +222,8 @@ function testEtaAfterStepReservation() {
     dossierId: target.id,
     lineId: "task-eta-step",
     suggestion: {
-      technicianId: "tech_01",
-      technicianName: "Technicien 1",
+      technicianId: "tech_03",
+      technicianName: "Technicien 3",
       bayId: "bay_fast_01",
       bayName: "Pont rapide 1",
       startTime: localIso("2026-06-24", 8),

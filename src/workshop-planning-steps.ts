@@ -91,7 +91,7 @@ export const PLANNING_STEP_DEFINITIONS: PlanningStepDefinition[] = [
     id: "electrical",
     label: "Réparation électrique",
     serviceType: "Électricité / diagnostic",
-    keywords: ["defaut electrique", "défaut électrique", "electrique", "électrique", "batterie", "capteur", "faisceau"],
+    keywords: ["defaut electrique", "défaut électrique", "electrique", "électrique", "batterie", "capteur", "faisceau", "diagnostic"],
   },
   {
     id: "preparation",

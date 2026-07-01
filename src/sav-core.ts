@@ -29,6 +29,7 @@ import {
   WorkshopReservation,
   WorkshopAvailabilityConfig,
 } from "./types";
+import { mapRepairLineToPlanningStep } from "./workshop-planning-steps";
 import { createComplaint } from "./complaints-workflow";
 import { normalizePlateNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, validateTechnicianDiagnostic } from "./field-validations";
 import { canReleaseBlock } from "./permissions";
@@ -128,6 +129,8 @@ export interface WorkshopSlotSuggestionInput {
   estimatedHours: number;
   desiredDate: Date | string;
   dossierId?: string;
+  lineId?: string;
+  stepId?: string;
   reservations?: WorkshopReservation[];
   availabilityConfig?: WorkshopAvailabilityConfig;
 }
@@ -163,6 +166,7 @@ export type PlanningBlockingCode =
   | "planning-dossier-not-found"
   | "planning-duration-missing"
   | "planning-duration-not-validated"
+  | "planning-tech-incompatible"
   | "workshop-closed"
   | "workshop-holiday"
   | "technician-absent"
@@ -815,6 +819,96 @@ export function isTechnicianCompatible(tech: TechnicienResource, type?: Interven
   }
 }
 
+export function isTechnicianCompatibleForStep(tech: TechnicienResource, stepId: string, serviceType?: string): boolean {
+  const effectiveService = serviceType && serviceType !== "auto" ? serviceType : null;
+  
+  if (effectiveService) {
+    switch (effectiveService) {
+      case "tolerie":
+        return tech.zoneAffectee === AtelierZone.CARROSSERIE || tech.specialite.toLowerCase().includes("tolier") || tech.specialite.toLowerCase().includes("tôlier") || tech.specialite.toLowerCase().includes("carrosserie");
+      case "mecanique":
+        return tech.zoneAffectee === AtelierZone.MECANIQUE_RAPIDE || tech.zoneAffectee === AtelierZone.GRANDS_TRAVAUX || tech.specialite.toLowerCase().includes("mecanicien") || tech.specialite.toLowerCase().includes("mécanicien") || tech.specialite.toLowerCase().includes("mecanique") || tech.specialite.toLowerCase().includes("mécanique") || tech.specialite.toLowerCase().includes("entretien") || tech.specialite.toLowerCase().includes("vidange");
+      case "peinture":
+        return tech.zoneAffectee === AtelierZone.PEINTURE || tech.zoneAffectee === AtelierZone.PREPARATION || tech.specialite.toLowerCase().includes("peintre") || tech.specialite.toLowerCase().includes("peinture") || tech.specialite.toLowerCase().includes("preparateur") || tech.specialite.toLowerCase().includes("préparateur");
+      case "electrique":
+        return tech.zoneAffectee === AtelierZone.ELECTRICITE_DIAG || tech.specialite.toLowerCase().includes("electrique") || tech.specialite.toLowerCase().includes("électrique") || tech.specialite.toLowerCase().includes("electricity") || tech.specialite.toLowerCase().includes("electricite") || tech.specialite.toLowerCase().includes("diagnostic");
+    }
+  }
+
+  switch (stepId) {
+    case "body":
+    case "body-disassembly":
+      return tech.zoneAffectee === AtelierZone.CARROSSERIE || tech.specialite.toLowerCase().includes("tolier") || tech.specialite.toLowerCase().includes("tôlier") || tech.specialite.toLowerCase().includes("carrosserie");
+    case "oilService":
+    case "quick-service":
+      return tech.zoneAffectee === AtelierZone.MECANIQUE_RAPIDE || tech.specialite.toLowerCase().includes("mecanicien") || tech.specialite.toLowerCase().includes("mécanicien") || tech.specialite.toLowerCase().includes("mecanique") || tech.specialite.toLowerCase().includes("mécanique") || tech.specialite.toLowerCase().includes("entretien") || tech.specialite.toLowerCase().includes("vidange");
+    case "mechanical":
+      return tech.zoneAffectee === AtelierZone.GRANDS_TRAVAUX || tech.zoneAffectee === AtelierZone.MECANIQUE_RAPIDE || tech.specialite.toLowerCase().includes("mecanicien") || tech.specialite.toLowerCase().includes("mécanicien") || tech.specialite.toLowerCase().includes("mecanique") || tech.specialite.toLowerCase().includes("mécanique");
+    case "electrical":
+      return tech.zoneAffectee === AtelierZone.ELECTRICITE_DIAG || tech.specialite.toLowerCase().includes("electrique") || tech.specialite.toLowerCase().includes("électrique") || tech.specialite.toLowerCase().includes("electricity") || tech.specialite.toLowerCase().includes("electricite") || tech.specialite.toLowerCase().includes("diagnostic");
+    case "prep":
+    case "preparation":
+      return tech.zoneAffectee === AtelierZone.PREPARATION || tech.zoneAffectee === AtelierZone.PEINTURE || tech.specialite.toLowerCase().includes("preparateur") || tech.specialite.toLowerCase().includes("préparateur") || tech.specialite.toLowerCase().includes("peintre") || tech.specialite.toLowerCase().includes("peinture");
+    case "paint":
+      return tech.zoneAffectee === AtelierZone.PEINTURE || tech.specialite.toLowerCase().includes("peintre") || tech.specialite.toLowerCase().includes("peinture");
+    case "reassembly":
+      return tech.zoneAffectee === AtelierZone.CARROSSERIE || tech.specialite.toLowerCase().includes("tolier") || tech.specialite.toLowerCase().includes("tôlier") || tech.specialite.toLowerCase().includes("carrosserie");
+    case "finish":
+      return tech.zoneAffectee === AtelierZone.LAVAGE_FINITION || tech.specialite.toLowerCase().includes("finition") || tech.specialite.toLowerCase().includes("lavage") || tech.specialite.toLowerCase().includes("laveur");
+    case "quality":
+      return tech.zoneAffectee === AtelierZone.CONTROLE_QUALITE ||
+             tech.zoneAffectee === AtelierZone.ELECTRICITE_DIAG ||
+             tech.zoneAffectee === AtelierZone.GRANDS_TRAVAUX ||
+             tech.zoneAffectee === AtelierZone.MECANIQUE_RAPIDE ||
+             tech.specialite.toLowerCase().includes("qualite") ||
+             tech.specialite.toLowerCase().includes("qualité") ||
+             tech.specialite.toLowerCase().includes("controleur") ||
+             tech.specialite.toLowerCase().includes("contrôleur") ||
+             tech.specialite.toLowerCase().includes("controle") ||
+             tech.specialite.toLowerCase().includes("contrôle") ||
+             tech.specialite.toLowerCase().includes("mecanicien") ||
+             tech.specialite.toLowerCase().includes("mécanicien") ||
+             tech.specialite.toLowerCase().includes("electricien") ||
+             tech.specialite.toLowerCase().includes("électricien") ||
+             tech.specialite.toLowerCase().includes("diagnostic");
+    default:
+      return true;
+  }
+}
+
+export function isBayCompatibleForStep(bay: WorkshopBay, stepId: string, serviceType?: string): boolean {
+  const effectiveService = serviceType && serviceType !== "auto" ? serviceType : null;
+  
+  if (effectiveService) {
+    switch (effectiveService) {
+      case "tolerie":
+        return bay.zone === AtelierZone.CARROSSERIE || bay.id === "bay_general_01";
+      case "mecanique":
+        return bay.zone === AtelierZone.MECANIQUE_RAPIDE || bay.zone === AtelierZone.GRANDS_TRAVAUX || bay.id === "bay_general_01";
+      case "peinture":
+        return bay.zone === AtelierZone.PEINTURE || bay.zone === AtelierZone.PREPARATION || bay.id === "bay_general_01";
+      case "electrique":
+        return bay.zone === AtelierZone.ELECTRICITE_DIAG || bay.id === "bay_general_01";
+    }
+  }
+
+  switch (stepId) {
+    case "body":
+    case "body-disassembly":
+    case "reassembly":
+      return bay.zone === AtelierZone.CARROSSERIE || bay.id === "bay_general_01";
+    case "oilService":
+    case "quick-service":
+      return bay.zone === AtelierZone.MECANIQUE_RAPIDE || bay.id === "bay_general_01";
+    case "mechanical":
+      return bay.zone === AtelierZone.GRANDS_TRAVAUX || bay.id === "bay_general_01";
+    case "electrical":
+      return bay.zone === AtelierZone.ELECTRICITE_DIAG || bay.id === "bay_general_01";
+    default:
+      return true;
+  }
+}
+
 function isSlotOverlappingActiveReservations(
   reservations: WorkshopReservation[] | undefined,
   techId: string | undefined,
@@ -897,9 +991,22 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
     }
 
     const dossier = input.dossierId ? input.dossiers.find(d => d.id === input.dossierId) : null;
-    const typeDossier = dossier?.typeDossier;
+    let stepId: string | undefined = input.stepId;
+    if (!stepId && dossier && input.lineId) {
+      const line = dossier.ordresReparation.find(l => l.id === input.lineId);
+      if (line) {
+        stepId = line.workshopStageId || mapRepairLineToPlanningStep(line).stepId;
+      }
+    }
+    const serviceType = (dossier && stepId) ? dossier.stepServiceTypes?.[stepId] : undefined;
 
     const sortedTechs = [...techsToTry].sort((left, right) => {
+      const compStepLeft = stepId ? isTechnicianCompatibleForStep(left, stepId, serviceType) : true;
+      const compStepRight = stepId ? isTechnicianCompatibleForStep(right, stepId, serviceType) : true;
+      if (compStepLeft && !compStepRight) return -1;
+      if (!compStepLeft && compStepRight) return 1;
+
+      const typeDossier = dossier?.typeDossier;
       const compLeft = typeDossier ? isTechnicianCompatible(left, typeDossier) : true;
       const compRight = typeDossier ? isTechnicianCompatible(right, typeDossier) : true;
       if (compLeft && !compRight) return -1;
@@ -927,10 +1034,13 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
     } | null = null;
 
     for (const tech of sortedTechs) {
+      if (stepId && !isTechnicianCompatibleForStep(tech, stepId, serviceType)) continue;
+
       const compatibleBays = input.workshopBays.filter(bay => !bay.zone || bay.zone === tech.zoneAffectee);
       const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays;
 
       for (const bay of baysToTry) {
+        if (stepId && !isBayCompatibleForStep(bay, stepId, serviceType)) continue;
         const slot = findNextAvailableWorkingSlot({
           durationMinutes,
           startDate: startAfter,
@@ -1210,6 +1320,15 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     const tech = input.technicians.find(t => t.id === input.technicianId);
     if (!tech) {
       pushIssue("planning-tech-not-found");
+    } else if (dossier) {
+      const line = dossier.ordresReparation.find(l => l.id === input.lineId);
+      if (line) {
+        const stepId = line.workshopStageId || mapRepairLineToPlanningStep(line).stepId;
+        const serviceType = dossier.stepServiceTypes?.[stepId];
+        if (!isTechnicianCompatibleForStep(tech, stepId, serviceType)) {
+          pushIssue("planning-tech-incompatible");
+        }
+      }
     }
   }
 
@@ -1217,6 +1336,15 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     const bay = input.workshopBays.find(b => b.id === input.bayId);
     if (!bay) {
       pushIssue("planning-bay-not-found");
+    } else if (dossier) {
+      const line = dossier.ordresReparation.find(l => l.id === input.lineId);
+      if (line) {
+        const stepId = line.workshopStageId || mapRepairLineToPlanningStep(line).stepId;
+        const serviceType = dossier.stepServiceTypes?.[stepId];
+        if (!isBayCompatibleForStep(bay, stepId, serviceType)) {
+          pushIssue("planning-collision-bay");
+        }
+      }
     }
   }
 
@@ -2361,6 +2489,7 @@ function buildPlanningValidationResult(
     "planning-dossier-not-found": "Dossier inexistant.",
     "planning-duration-missing": "Durée estimée absente ou nulle. Ouvrez le dossier pour saisir ou importer la durée.",
     "planning-duration-not-validated": "Durée à valider par Chef Atelier avant de planifier.",
+    "planning-tech-incompatible": "Le technicien n'est pas compatible avec le type de tâche à effectuer.",
     "workshop-holiday": "L'atelier est fermé pour jour férié.",
     "workshop-closed": "L'atelier est fermé à cette date.",
     "outside-effective-working-hours": "En dehors des horaires d'ouverture.",
@@ -3340,6 +3469,8 @@ export function buildVehicleAutoReservationPlan(
     }
   }
 
+  let updatedDossiers = [...input.dossiers];
+
   for (const { dossier, task } of tasksToReserve) {
     const taskRank = getVehicleTaskCategoryRank(task.designation);
     const predecessorEnds = taskEntries
@@ -3352,12 +3483,17 @@ export function buildVehicleAutoReservationPlan(
     const taskCursor = predecessorEnd && predecessorEnd.getTime() > vehicleCursor.getTime()
       ? predecessorEnd
       : vehicleCursor;
+
+    const stepId = task.workshopStageId || mapRepairLineToPlanningStep(task).stepId;
+    const serviceType = dossier.stepServiceTypes?.[stepId];
+
     const sortedTechnicians = [...usableTechnicians].sort((left, right) => {
-      const leftCompatible = isTechnicianCompatible(left, dossier.typeDossier);
-      const rightCompatible = isTechnicianCompatible(right, dossier.typeDossier);
+      const leftCompatible = isTechnicianCompatibleForStep(left, stepId, serviceType);
+      const rightCompatible = isTechnicianCompatibleForStep(right, stepId, serviceType);
       if (leftCompatible !== rightCompatible) return leftCompatible ? -1 : 1;
       return left.chargeActuelle - right.chargeActuelle;
     });
+
     let bestSlot: {
       startTime: Date;
       endTime: Date;
@@ -3367,12 +3503,16 @@ export function buildVehicleAutoReservationPlan(
     } | null = null;
 
     for (const technician of sortedTechnicians) {
+      if (!isTechnicianCompatibleForStep(technician, stepId, serviceType)) continue;
+
       const compatibleBays = input.workshopBays.filter(bay =>
-        !bay.zone || bay.zone === technician.zoneAffectee
+        (!bay.zone || bay.zone === technician.zoneAffectee) &&
+        isBayCompatibleForStep(bay, stepId, serviceType)
       );
-      const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays;
+      const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays.filter(bay => isBayCompatibleForStep(bay, stepId, serviceType));
 
       for (const bay of baysToTry) {
+        if (!isBayCompatibleForStep(bay, stepId, serviceType)) continue;
         let searchStart = new Date(taskCursor);
 
         for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -3381,7 +3521,7 @@ export function buildVehicleAutoReservationPlan(
             startDate: searchStart,
             technicianId: technician.id,
             bayId: bay.id,
-            dossiers: input.dossiers,
+            dossiers: updatedDossiers,
             reservations: temporaryReservations,
             config: input.availabilityConfig,
             vehicleDossierId: dossier.id,
@@ -3401,7 +3541,7 @@ export function buildVehicleAutoReservationPlan(
             calculateTechnicianDailyLoad(
               technician.id,
               dateKey,
-              input.dossiers,
+              updatedDossiers,
               temporaryReservations,
               task.id
             ) + addedHours <= technician.capaciteJournaliere
@@ -3450,6 +3590,41 @@ export function buildVehicleAutoReservationPlan(
     temporaryReservations = [...temporaryReservations, reservation];
     vehicleCursor = new Date(bestSlot.endTime);
     scheduledEndByTaskId.set(task.id, new Date(bestSlot.endTime));
+
+    // Update task line in dossier
+    updatedDossiers = updatedDossiers.map(d => {
+      if (d.id === dossier.id) {
+        const updatedLines = d.ordresReparation.map(line => {
+          if (line.id === task.id) {
+            return {
+              ...line,
+              planningStart: bestSlot!.startTime.toISOString(),
+              planningEnd: bestSlot!.endTime.toISOString(),
+              planningSegments: bestSlot!.segments,
+              plannedTechnicianId: bestSlot!.technicianId,
+              plannedBayId: bestSlot!.bayId,
+              planningDate: bestSlot!.startTime.toISOString().split("T")[0]
+            };
+          }
+          return line;
+        });
+        return {
+          ...d,
+          ordresReparation: updatedLines,
+          technicienId: bestSlot!.technicianId,
+          workshopBayId: bestSlot!.bayId,
+          datePlanningDebut: bestSlot!.startTime.toISOString(),
+          datePlanningFin: bestSlot!.endTime.toISOString(),
+          statut: DossierStatus.TRAVAUX_PLANIFIES,
+          dateDernierStatut: now.toISOString(),
+          historiqueLogs: [
+            `${now.toISOString()} - Réservation automatique pour ${task.designation} avec le technicien ${bestSlot!.technicianId} sur le pont ${bestSlot!.bayId}.`,
+            ...(d.historiqueLogs ?? [])
+          ]
+        };
+      }
+      return d;
+    });
   }
 
   const taskById = new Map(taskEntries.map(({ task }) => [task.id, task]));
@@ -3480,6 +3655,7 @@ export function buildVehicleAutoReservationPlan(
     ok: true,
     reservations: temporaryReservations,
     createdReservations,
+    dossiers: updatedDossiers,
     warning: hasLogicalOrderWarning
       ? "Attention : certaines tâches déjà planifiées ou réservées violent l'ordre logique conseillé."
       : undefined,

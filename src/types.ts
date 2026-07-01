@@ -460,6 +460,8 @@ export interface DossierSAV {
   datePlanningFin?: string;
   historiqueLogs?: string[];
   operationalTraces?: DossierOperationalTrace[];
+  stepServiceTypes?: Record<string, string>;
+  stepPreferredResources?: Record<string, string>;
 }
 
 export type WorkshopReservationStatus =

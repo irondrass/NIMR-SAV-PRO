@@ -1825,6 +1825,7 @@ function testVehicleETAAndAutoReserve() {
     estimatedHours: 1,
     desiredDate: suggestionDate,
     dossierId: suggestedDossier.id,
+    lineId: "task-suggest",
     reservations: [],
     availabilityConfig: vehiclePlanningConfig,
   }, new Date(2026, 5, 24, 7, 0, 0, 0));

@@ -759,6 +759,12 @@ export default function WorkshopPlanning({
     }
 
     onUpdateReservations(result.reservations);
+    if (result.dossiers) {
+      const targetDossier = result.dossiers.find(d => d.id === vehicleDossierId);
+      if (targetDossier) {
+        onUpdateDossier(targetDossier);
+      }
+    }
     setAutoPlanningWarning(result.warning || "");
     setAutoPlanningSuccess(
       `${result.createdReservations.length} tâche(s) du véhicule réservée(s) automatiquement.`

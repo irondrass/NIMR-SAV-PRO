@@ -51,6 +51,8 @@ import {
   isDossierActive,
   suggestWorkshopSlot,
   reserveSuggestedWorkshopSlot,
+  isTechnicianCompatibleForStep,
+  isBayCompatibleForStep,
   WorkshopSlotSuggestion,
   getQCStatusDisplayLabel,
   normalizeQCStatus,
@@ -601,6 +603,8 @@ export default function DossierDetail({
         estimatedHours: line.tempsEstime,
         desiredDate: new Date(),
         dossierId: dossier.id,
+        lineId: line.id,
+        stepId,
         reservations: reservations || [],
         availabilityConfig,
       }, new Date());
@@ -614,6 +618,149 @@ export default function DossierDetail({
       setPlanningStepSuggestion(null);
       setPlanningStepError(error.message || "Aucun créneau disponible dans la période sélectionnée.");
     }
+  };
+
+  const handleStepDurationChange = (stepId: string, nextValue: number) => {
+    if (!canEditDossierPlanning) return;
+    
+    let updatedDossier = { ...dossier };
+    const linesOfStep = updatedDossier.ordresReparation.filter(line => {
+      const mapping = mapRepairLineToPlanningStep(line);
+      return line.workshopStageId === stepId || mapping.stepId === stepId;
+    });
+    
+    let nextLines = [...updatedDossier.ordresReparation];
+    if (linesOfStep.length === 0) {
+      if (nextValue > 0) {
+        const stepDef = PLANNING_STEP_DEFINITIONS.find(s => s.id === stepId);
+        const newTask: RepairOrderLine = {
+          id: createRuntimeId("task_step"),
+          designation: stepDef?.label || stepId,
+          tempsEstime: nextValue,
+          tempsPasse: 0,
+          status: "non_demarre",
+          workshopStageId: stepId,
+          isEstimatedDurationValidated: true,
+          estimateSource: "manual",
+          history: [`${new Date().toISOString()} - Tâche créée pour activer l'étape par modification de durée.`]
+        };
+        nextLines.push(newTask);
+      }
+    } else {
+      let isFirst = true;
+      nextLines = nextLines.map(line => {
+        const mapping = mapRepairLineToPlanningStep(line);
+        if (line.workshopStageId === stepId || mapping.stepId === stepId) {
+          if (isFirst) {
+            isFirst = false;
+            return {
+              ...line,
+              tempsEstime: nextValue,
+              isEstimatedDurationValidated: true
+            };
+          } else {
+            return {
+              ...line,
+              tempsEstime: 0,
+              isEstimatedDurationValidated: true
+            };
+          }
+        }
+        return line;
+      });
+    }
+    
+    const activeRes = reservations.find(r => r.dossierId === dossier.id && r.status !== "ANNULEE" && r.taskIds.some(tid => nextLines.find(nl => nl.id === tid && (nl.workshopStageId === stepId || mapRepairLineToPlanningStep(nl).stepId === stepId))));
+    let nextReservations = [...reservations];
+    if (activeRes) {
+      nextReservations = reservations.map(r => r.reservationId === activeRes.reservationId ? { ...r, status: "ANNULEE" as const } : r);
+      nextLines = nextLines.map(line => {
+        const mapping = mapRepairLineToPlanningStep(line);
+        if (line.workshopStageId === stepId || mapping.stepId === stepId) {
+          const { planningStart, planningEnd, planningSegments, plannedTechnicianId, plannedBayId, planningDate, ...rest } = line;
+          return rest;
+        }
+        return line;
+      });
+    }
+    
+    updatedDossier.ordresReparation = nextLines;
+    onUpdateDossier(updatedDossier);
+    onUpdateReservations(nextReservations);
+  };
+
+  const handleStepPreferredTechnicianChange = (stepId: string, techId: string) => {
+    if (!canEditDossierPlanning) return;
+    const updatedDossier = { ...dossier };
+    updatedDossier.stepPreferredResources = {
+      ...(updatedDossier.stepPreferredResources || {}),
+      [stepId]: techId
+    };
+    
+    const activeRes = reservations.find(r => r.dossierId === dossier.id && r.status !== "ANNULEE" && r.taskIds.some(tid => dossier.ordresReparation.find(nl => nl.id === tid && (nl.workshopStageId === stepId || mapRepairLineToPlanningStep(nl).stepId === stepId))));
+    let nextReservations = [...reservations];
+    let nextLines = [...dossier.ordresReparation];
+    if (activeRes) {
+      nextReservations = reservations.map(r => r.reservationId === activeRes.reservationId ? { ...r, status: "ANNULEE" as const } : r);
+      nextLines = nextLines.map(line => {
+        const mapping = mapRepairLineToPlanningStep(line);
+        if (line.workshopStageId === stepId || mapping.stepId === stepId) {
+          const { planningStart, planningEnd, planningSegments, plannedTechnicianId, plannedBayId, planningDate, ...rest } = line;
+          return rest;
+        }
+        return line;
+      });
+    }
+    
+    updatedDossier.ordresReparation = nextLines;
+    onUpdateDossier(updatedDossier);
+    onUpdateReservations(nextReservations);
+  };
+
+  const handleStepServiceTypeChange = (stepId: string, nextService: string) => {
+    if (!canEditDossierPlanning) return;
+    
+    const promptFn = typeof window.prompt === "function" ? window.prompt.bind(window) : null;
+    const reason = promptFn ? String(promptFn("Modifiez le service seulement si l’opération doit être confiée à un autre métier.\n\nMotif obligatoire de la modification du service :") || "").trim() : "";
+    if (!reason) {
+      alert("Motif obligatoire pour modifier le service.");
+      return;
+    }
+    
+    const tempDossier = { ...dossier };
+    tempDossier.stepServiceTypes = {
+      ...(tempDossier.stepServiceTypes || {}),
+      [stepId]: nextService
+    };
+    
+    const compatibleTechs = techniciens.filter(t => t.active !== false && isTechnicianCompatibleForStep(t, stepId, nextService));
+    if (compatibleTechs.length === 0) {
+      alert("Aucun technicien compatible pour ce métier dans l'atelier.");
+      return;
+    }
+    
+    const newLog = `${new Date().toISOString()} - Modification service pour l'étape ${stepId} vers ${nextService}. Motif: ${reason}`;
+    const newLogs = [newLog, ...(tempDossier.historiqueLogs || [])];
+    tempDossier.historiqueLogs = newLogs;
+    
+    const activeRes = reservations.find(r => r.dossierId === dossier.id && r.status !== "ANNULEE" && r.taskIds.some(tid => dossier.ordresReparation.find(nl => nl.id === tid && (nl.workshopStageId === stepId || mapRepairLineToPlanningStep(nl).stepId === stepId))));
+    let nextReservations = [...reservations];
+    let nextLines = [...dossier.ordresReparation];
+    if (activeRes) {
+      nextReservations = reservations.map(r => r.reservationId === activeRes.reservationId ? { ...r, status: "ANNULEE" as const } : r);
+      nextLines = nextLines.map(line => {
+        const mapping = mapRepairLineToPlanningStep(line);
+        if (line.workshopStageId === stepId || mapping.stepId === stepId) {
+          const { planningStart, planningEnd, planningSegments, plannedTechnicianId, plannedBayId, planningDate, ...rest } = line;
+          return rest;
+        }
+        return line;
+      });
+    }
+    
+    tempDossier.ordresReparation = nextLines;
+    onUpdateDossier(tempDossier);
+    onUpdateReservations(nextReservations);
   };
 
   const handleApplyPlanningStepSuggestion = () => {
@@ -1897,7 +2044,15 @@ export default function DossierDetail({
             <div className="space-y-2.5">
               {dossier.ordresReparation.map((line) => {
                 const status = normalizeRepairOrderStatus(line.status);
-                const assignedTechnicianId = line.plannedTechnicianId || dossier.technicienId;
+                const stepId = line.workshopStageId || mapRepairLineToPlanningStep(line).stepId;
+                const serviceType = dossier.stepServiceTypes?.[stepId];
+                let assignedTechnicianId = line.plannedTechnicianId;
+                if (!assignedTechnicianId && dossier.technicienId) {
+                  const globalTech = techniciens.find(t => t.id === dossier.technicienId);
+                  if (globalTech && isTechnicianCompatibleForStep(globalTech, stepId, serviceType)) {
+                    assignedTechnicianId = dossier.technicienId;
+                  }
+                }
                 const activeLineInSameDossier = dossier.ordresReparation.find(current =>
                   current.id !== line.id && normalizeRepairOrderStatus(current.status) === "in_progress"
                 );
@@ -1936,6 +2091,7 @@ export default function DossierDetail({
                       <div className="flex flex-wrap items-center gap-4 text-slate-400 text-[11px] font-semibold">
                         <span>Estimation: <span className="text-stone-700  font-bold font-mono">{formatRepairOrderDuration(line.tempsEstime)}</span></span>
                         <span>Passé: <span className="font-mono">{line.tempsPasse}H</span></span>
+                        <span>Technicien: <span className="text-stone-700 font-bold" data-testid={`task-technician-${line.id}`}>{assignedTechnicianId ? getTechnicianName(assignedTechnicianId) : "Aucun technicien compatible affecté."}</span></span>
                         {line.estimateSource && (
                           <span
                             data-testid={`task-source-badge-${line.id}`}
@@ -2335,6 +2491,9 @@ export default function DossierDetail({
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Étapes à modifier</h4>
                 <span className="text-[10px] font-bold uppercase text-slate-400">Réservation unitaire par tâche atelier</span>
               </div>
+              <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+                Les cartes encadrées sont les étapes actives du devis. Modifiez le service seulement si l’opération doit être confiée à un autre métier.
+              </p>
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                 {planningOverview.steps.map(step => {
                   const activeSuggestion = planningStepSuggestion?.stepId === step.stepId ? planningStepSuggestion.suggestion : null;
@@ -2342,8 +2501,16 @@ export default function DossierDetail({
                   const plannedLine = step.lines.find(item => item.isPlanned);
                   const plannedStart = plannedLine?.line.planningStart || plannedLine?.reservation?.startTime;
                   const plannedEnd = plannedLine?.line.planningEnd || plannedLine?.reservation?.endTime;
-                  const technicianId = plannedLine?.line.plannedTechnicianId || plannedLine?.reservation?.technicianId;
+                  const rawTechId = plannedLine?.line.plannedTechnicianId || plannedLine?.reservation?.technicianId;
                   const bayId = plannedLine?.line.plannedBayId || plannedLine?.reservation?.bayId;
+
+                  let technicianId = rawTechId;
+                  if (!technicianId && dossier.technicienId) {
+                    const globalTech = techniciens.find(t => t.id === dossier.technicienId);
+                    if (globalTech && isTechnicianCompatibleForStep(globalTech, step.stepId, dossier.stepServiceTypes?.[step.stepId])) {
+                      technicianId = dossier.technicienId;
+                    }
+                  }
 
                   return (
                     <article
@@ -2376,17 +2543,66 @@ export default function DossierDetail({
                         </div>
                         <div>
                           <span className="block text-slate-400">Durée validée</span>
-                          <strong data-testid="workshop-stage-total-duration" className="text-slate-800">{formatPlanningHours(step.estimatedHours)}</strong>
+                          <input
+                            type="number"
+                            step="0.25"
+                            min="0"
+                            disabled={!canEditDossierPlanning}
+                            value={step.estimatedHours}
+                            onChange={(e) => handleStepDurationChange(step.stepId, parseFloat(e.target.value) || 0)}
+                            className="mt-1 block w-20 rounded border border-slate-200 bg-white px-2 py-0.5 text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold font-mono"
+                          />
                         </div>
                         <div>
                           <span className="block text-slate-400">Technicien affecté</span>
-                          <strong className="text-slate-800">{getTechnicianName(technicianId)}</strong>
+                          <strong className="text-slate-800">{technicianId ? getTechnicianName(technicianId) : "Aucun technicien compatible affecté."}</strong>
                         </div>
                         <div>
                           <span className="block text-slate-400">Pont / matériel</span>
                           <strong className="text-slate-800">{getBayName(bayId)}</strong>
                         </div>
                       </div>
+
+                      {step.active && (
+                        <div className="mt-3 space-y-2 border-t pt-2">
+                          <label className="block text-[11px] font-semibold text-slate-500">
+                            <span className="block text-slate-400">Technicien à réserver</span>
+                            <select
+                              disabled={!canEditDossierPlanning}
+                              value={dossier.stepPreferredResources?.[step.stepId] || ""}
+                              onChange={(e) => handleStepPreferredTechnicianChange(step.stepId, e.target.value)}
+                              className="mt-1 block w-full rounded border border-slate-200 bg-white px-2 py-1 text-slate-800 focus:border-blue-500 focus:outline-none font-medium"
+                            >
+                              <option value="">Auto - meilleur disponible</option>
+                              {techniciens.filter(t => t.active !== false && isTechnicianCompatibleForStep(t, step.stepId, dossier.stepServiceTypes?.[step.stepId])).map(tech => (
+                                <option key={tech.id} value={tech.id}>
+                                  {tech.nom}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          {step.stepId !== "quality" && step.stepId !== "oilService" ? (
+                            <label className="block text-[11px] font-semibold text-slate-500">
+                              <span className="block text-slate-400">Service à réserver dans le planning</span>
+                              <select
+                                disabled={!canEditDossierPlanning}
+                                value={dossier.stepServiceTypes?.[step.stepId] || "auto"}
+                                onChange={(e) => handleStepServiceTypeChange(step.stepId, e.target.value)}
+                                className="mt-1 block w-full rounded border border-slate-200 bg-white px-2 py-1 text-slate-800 focus:border-blue-500 focus:outline-none font-medium"
+                              >
+                                <option value="auto">Auto recommandé</option>
+                                <option value="tolerie">Tôlerie</option>
+                                <option value="mecanique">Mécanique</option>
+                                <option value="electrique">Électrique</option>
+                                <option value="peinture">Peinture</option>
+                              </select>
+                            </label>
+                          ) : (
+                            <div className="text-[10px] text-slate-400 font-semibold italic mt-1">Service fixe</div>
+                          )}
+                        </div>
+                      )}
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         {step.isFullyReserved ? (
@@ -2480,6 +2696,7 @@ export default function DossierDetail({
                   );
                 })}
               </div>
+
             </section>
 
             <section data-testid="planning-validated-table" className="overflow-hidden rounded-lg border border-slate-200">
