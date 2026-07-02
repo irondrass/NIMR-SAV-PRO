@@ -9,6 +9,7 @@ import {
   RepairOrderLine,
   WorkshopReservation,
 } from "../src/types";
+import { humanClick } from "./helpers/human-actions";
 
 function baseDossier(id: string, lines: RepairOrderLine[], overrides: Partial<DossierSAV> = {}): DossierSAV {
   const dossier = createReceptionDossier({
@@ -72,9 +73,9 @@ async function loginChef(page: Page) {
 }
 
 async function openRepairOrders(page: Page, dossierId: string) {
-  await page.locator('[data-testid="nav-dossiers"]').click();
-  await page.locator(`[data-testid="dossier-card-${dossierId}"]`).click();
-  await page.locator('[data-testid="tab-repair-orders"]').click();
+  await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
+  await humanClick(page, page.locator(`[data-testid="dossier-card-${dossierId}"]`));
+  await humanClick(page, page.locator('[data-testid="tab-repair-orders"]'));
 }
 
 test.describe("Lot 6K-G - règles métier atelier", () => {
@@ -151,4 +152,3 @@ test.describe("Lot 6K-G - règles métier atelier", () => {
     expect(updated?.checklistQC.validationGlobale).toBe("a_refaire");
   });
 });
-

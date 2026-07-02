@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { humanClick } from "./helpers/human-actions";
 
 async function loginReception(page: import("@playwright/test").Page) {
   await page.goto("/");
@@ -22,13 +23,13 @@ test.describe("Lot 6K-G - runtime vide et préparation backend", () => {
     await page.addInitScript(() => localStorage.clear());
     await loginReception(page);
 
-    await page.locator('[data-testid="nav-dossiers"]').click();
+    await humanClick(page, page.locator('[data-testid="nav-dossiers"]'));
     await expect(page.locator('[data-testid="empty-state-dossiers"]')).toContainText("Aucune donnée enregistrée");
     await expect(page.locator('[data-testid="empty-state-clients"]')).toHaveCount(1);
-    await page.locator('[data-testid="dossier-mode-vehicles"]').click();
+    await humanClick(page, page.locator('[data-testid="dossier-mode-vehicles"]'));
     await expect(page.locator('[data-testid="empty-state-vehicles"]').first()).toContainText("Aucune donnée enregistrée");
 
-    await page.locator('[data-testid="nav-reception"]').click();
+    await humanClick(page, page.locator('[data-testid="nav-reception"]'));
     await expect(page.locator('[data-testid="empty-state-vehicles"]').first()).toContainText("Aucune base véhicules importée");
     await expect(page.locator('[data-testid="import-vehicles-empty-action"]').first()).toBeVisible();
     await expect(page.locator('[data-testid^="preset-client"]')).toHaveCount(0);
@@ -39,4 +40,3 @@ test.describe("Lot 6K-G - runtime vide et préparation backend", () => {
     expect(forbiddenRequests).toEqual([]);
   });
 });
-

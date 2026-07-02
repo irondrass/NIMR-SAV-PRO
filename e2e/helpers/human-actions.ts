@@ -9,25 +9,50 @@ export async function humanWait(page: Page, ms = 150) {
 export async function humanClick(page: Page, locator: Locator) {
   await locator.waitFor({ state: "visible", timeout: 5000 });
   await locator.scrollIntoViewIfNeeded();
+  let openedMobileMenu = await openMobileMenuForOffscreenTarget(page, locator);
   try {
     await locator.click({ timeout: 5000 });
   } catch (error) {
-    const mobileMenuButton = page.locator('[data-testid="mobile-menu-button"]');
-    const mobileOverlay = page.locator('[data-testid="mobile-menu-overlay"]');
-    const canOpenMobileMenu =
-      await mobileMenuButton.isVisible().catch(() => false) &&
-      !(await mobileOverlay.isVisible().catch(() => false));
-    const isOffscreen = await locator.evaluate((element: HTMLElement) => {
-      const rect = element.getBoundingClientRect();
-      return rect.right <= 0 || rect.left < 0 || rect.top < 0 || rect.bottom > window.innerHeight;
-    }).catch(() => false);
-
-    if (!canOpenMobileMenu || !isOffscreen) throw error;
-    await mobileMenuButton.click({ timeout: 3000 });
-    await humanWait(page);
+    const openedMenu = await openMobileMenuForOffscreenTarget(page, locator);
+    if (!openedMenu) throw error;
+    openedMobileMenu = true;
     await locator.click({ timeout: 5000 });
   }
+  if (openedMobileMenu) {
+    await waitForMobileMenuToClose(page);
+  }
   await humanWait(page);
+}
+
+async function openMobileMenuForOffscreenTarget(page: Page, locator: Locator) {
+  const mobileMenuButton = page.locator('[data-testid="mobile-menu-button"]');
+  const mobileOverlay = page.locator('[data-testid="mobile-menu-overlay"]');
+  const canOpenMobileMenu =
+    await mobileMenuButton.isVisible().catch(() => false) &&
+    !(await mobileOverlay.isVisible().catch(() => false));
+
+  if (!canOpenMobileMenu) return false;
+
+  const isOffscreen = await locator.evaluate((element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    return rect.right <= 0 || rect.left < 0 || rect.left >= window.innerWidth;
+  }).catch(() => false);
+
+  if (!isOffscreen) return false;
+
+  await mobileMenuButton.click({ timeout: 3000 });
+  await humanWait(page);
+  return true;
+}
+
+async function waitForMobileMenuToClose(page: Page) {
+  const mobileOverlay = page.locator('[data-testid="mobile-menu-overlay"]');
+  await mobileOverlay.waitFor({ state: "hidden", timeout: 1500 }).catch(async () => {
+    if (await mobileOverlay.isVisible().catch(() => false)) {
+      await mobileOverlay.click({ timeout: 1000 });
+      await mobileOverlay.waitFor({ state: "hidden", timeout: 1500 }).catch(() => undefined);
+    }
+  });
 }
 
 export async function humanFill(page: Page, locator: Locator, value: string) {
