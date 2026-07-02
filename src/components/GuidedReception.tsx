@@ -136,7 +136,7 @@ export default function GuidedReception({
     setVehiculeModele("");
     setVehiculeImmatriculation("");
     setVehiculeVIN("");
-    setVehiculeKilometrage(15000);
+    setVehiculeKilometrage("");
     setVehiculeCouleur("");
     setVehiculeVersion("");
     setVehiculeDateLivraison("");
@@ -386,7 +386,7 @@ export default function GuidedReception({
   const [vehiculeModele, setVehiculeModele] = useState("");
   const [vehiculeImmatriculation, setVehiculeImmatriculation] = useState("");
   const [vehiculeVIN, setVehiculeVIN] = useState("");
-  const [vehiculeKilometrage, setVehiculeKilometrage] = useState<number>(15000);
+  const [vehiculeKilometrage, setVehiculeKilometrage] = useState<number | "">("");
   const [vehiculeCouleur, setVehiculeCouleur] = useState("");
   const [vehiculeVersion, setVehiculeVersion] = useState("");
   const [vehiculeDateLivraison, setVehiculeDateLivraison] = useState("");
@@ -465,6 +465,13 @@ export default function GuidedReception({
     if (vinCheck.warning) {
       setReceptionWarning(vinCheck.warning);
     }
+    if (vehiculeKilometrage === "") {
+      setReceptionError("Le kilométrage est obligatoire.");
+      setShowSubmitConfirmModal(false);
+      setIsSubmittingReception(false);
+      receptionSubmitRef.current = false;
+      return;
+    }
     const dateCheck = getDateValidation();
     if (!dateCheck.valid) {
       setReceptionError(dateCheck.blockingReasons.join(" "));
@@ -500,7 +507,7 @@ export default function GuidedReception({
       vehiculeModele: sanitizedVehiculeModele,
       vehiculeImmatriculation: sanitizedVehiculeImmatriculation,
       vehiculeVIN: sanitizedVehiculeVIN,
-      vehiculeKilometrage: Number(vehiculeKilometrage),
+      vehiculeKilometrage,
       vehiculeCouleur: sanitizedVehiculeCouleur,
       typeDossier,
       priorite,
@@ -543,7 +550,7 @@ export default function GuidedReception({
     dateLivraison: vehiculeDateLivraison,
     dateMiseCirculation: vehiculeDateMiseCirculation,
     typeDossier,
-    vehiculeKilometrage: Number(vehiculeKilometrage),
+    vehiculeKilometrage: vehiculeKilometrage === "" ? Number.NaN : vehiculeKilometrage,
   });
 
   const stepsList = [
@@ -1024,7 +1031,7 @@ export default function GuidedReception({
                   type="text" 
                   data-testid="reception-vin"
                   className="w-full p-2.5 bg-slate-50  border border-slate-200  rounded-lg text-xs font-mono focus:outline-none " 
-                  placeholder="DEMOVIN000000001"
+                  placeholder="Ex : L..."
                   value={vehiculeVIN}
                   onChange={(e) => setVehiculeVIN(e.target.value)}
                 />
@@ -1038,7 +1045,8 @@ export default function GuidedReception({
                   className="w-full p-2.5 bg-slate-50  border border-slate-200  rounded-lg text-xs font-bold focus:outline-none " 
                   value={vehiculeKilometrage}
                   onChange={(e) => {
-                    setVehiculeKilometrage(Number(e.target.value));
+                    const val = e.target.value === "" ? "" : Number(e.target.value);
+                    setVehiculeKilometrage(val);
                     setMileageConfirmed(false);
                   }}
                 />
@@ -1613,6 +1621,10 @@ export default function GuidedReception({
                   if (vehiculeVIN && !validateVin(vehiculeVIN)) {
                     setReceptionWarning(vinCheck.warning || "VIN invalide non bloquant pour réception rapide simple.");
                   }
+                  if (vehiculeKilometrage === "") {
+                    setReceptionError("Le kilométrage est obligatoire.");
+                    return;
+                  }
                   const milCheck = validateMileage(vehiculeKilometrage);
                   if (!milCheck.valid) {
                     setReceptionError(milCheck.reason || "Kilométrage invalide.");
@@ -1649,6 +1661,10 @@ export default function GuidedReception({
                 }
                 if (vinCheck.warning) {
                   setReceptionWarning(vinCheck.warning);
+                }
+                if (vehiculeKilometrage === "") {
+                  setReceptionError("Le kilométrage est obligatoire.");
+                  return;
                 }
                 const dateCheck = getDateValidation();
                 if (!dateCheck.valid) {

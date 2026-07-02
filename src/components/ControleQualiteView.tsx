@@ -186,20 +186,27 @@ export default function ControleQualiteView({
       }
     };
 
-    const validated = submitQualityControl(updatedDossier, currentUser.role, "valide", "", new Date());
-    
-    // Add custom actor information to logs
-    const timestamp = new Date().toISOString();
-    const formattedLog = `${timestamp} - [${currentUser.role}] - Contrôle Qualité validé par ${currentUser.displayName}`;
-    validated.historiqueLogs = [formattedLog, ...(validated.historiqueLogs || [])];
-    
-    onUpdateDossier(validated);
-    recordQCAudit("validation_qc", `Contrôle qualité validé pour le dossier ${selectedDossier.id}.`);
-    setSuccessMsg(`Contrôle qualité validé pour le dossier ${selectedDossier.id} ! Le véhicule est prêt à être livré.`);
-    setSelectedDossierId(null);
-    setShowValidateConfirm(false);
-    setIsSubmittingQC(false);
-    qcSubmitRef.current = false;
+    try {
+      const validated = submitQualityControl(updatedDossier, currentUser.role, "valide", "", new Date());
+
+      // Add custom actor information to logs
+      const timestamp = new Date().toISOString();
+      const formattedLog = `${timestamp} - [${currentUser.role}] - Contrôle Qualité validé par ${currentUser.displayName}`;
+      validated.historiqueLogs = [formattedLog, ...(validated.historiqueLogs || [])];
+
+      onUpdateDossier(validated);
+      recordQCAudit("validation_qc", `Contrôle qualité validé pour le dossier ${selectedDossier.id}.`);
+      setSuccessMsg(`Contrôle qualité validé pour le dossier ${selectedDossier.id} ! Le véhicule est prêt à être livré.`);
+      setSelectedDossierId(null);
+      setShowValidateConfirm(false);
+    } catch (e: any) {
+      setValidationError(e.message || "Une erreur est survenue lors de la validation du contrôle qualité.");
+      recordQCAudit("validation_qc_erreur", e.message, "blocked", e.message);
+      setShowValidateConfirm(false);
+    } finally {
+      setIsSubmittingQC(false);
+      qcSubmitRef.current = false;
+    }
   };
 
   const handleRefuseQC = () => {

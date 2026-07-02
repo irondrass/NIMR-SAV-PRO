@@ -6,7 +6,7 @@
  */
 
 import { DossierSAV, QuoteLine, RepairOrderLine, WorkshopReservation } from "./types";
-import { parseQuoteText } from "./quote-import";
+import { parseQuoteText, isQualityControlLine } from "./quote-import";
 import {
   buildDossierPlanningOverview,
   mapRepairLineToPlanningStep,
@@ -135,7 +135,7 @@ export function createManualWorkshopTaskLine(input: ManualWorkshopTaskInput): Re
 
 export function detectQuoteWorkshopTaskCandidates(text: string): QuoteWorkshopTaskCandidate[] {
   return parseQuoteText(text)
-    .filter(line => line.type === "labor" && line.hours > 0)
+    .filter(line => line.type === "labor" && line.hours > 0 && !isQualityControlLine(line.description || line.rawText))
     .map(line => {
       const stage = inferWorkshopStageFromTaskText(line.description || line.rawText);
       return {

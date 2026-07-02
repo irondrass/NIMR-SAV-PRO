@@ -292,6 +292,51 @@ export const DELIVERY_BLOCKING_MESSAGES: Record<DeliveryBlockingCode, string> = 
   "delivery-dossier-already-delivered": "Dossier déjà livré.",
 };
 
+const DELIVERY_OPEN_TASK_STATUS_LABELS: Record<Exclude<RepairOrderStatus, "done" | "cancelled">, { singular: string; plural: string }> = {
+  blocked: { singular: "tâche bloquée", plural: "tâches bloquées" },
+  paused: { singular: "tâche en pause", plural: "tâches en pause" },
+  in_progress: { singular: "tâche en cours", plural: "tâches en cours" },
+  reopened: { singular: "tâche réouverte", plural: "tâches réouvertes" },
+  pending: { singular: "tâche en attente", plural: "tâches en attente" },
+};
+
+function countOpenRepairOrdersByStatus(lines: RepairOrderLine[]): Record<Exclude<RepairOrderStatus, "done" | "cancelled">, number> {
+  return lines.reduce((counts, line) => {
+    const status = normalizeRepairOrderStatus(line.status);
+    if (status !== "done" && status !== "cancelled") {
+      counts[status] += 1;
+    }
+    return counts;
+  }, {
+    blocked: 0,
+    paused: 0,
+    in_progress: 0,
+    reopened: 0,
+    pending: 0,
+  });
+}
+
+function getOpenWorkshopTasksMessage(openTasks: RepairOrderLine[]): string {
+  const openCount = openTasks.length;
+  if (openCount === 0) return "";
+
+  const counts = countOpenRepairOrdersByStatus(openTasks);
+  const hasBlockingStatus = counts.blocked > 0 || counts.paused > 0 || counts.reopened > 0;
+  if (!hasBlockingStatus) {
+    return `Livraison impossible : ${openCount} tâche${openCount > 1 ? "s" : ""} non terminée${openCount > 1 ? "s" : ""}.`;
+  }
+
+  const parts = (["blocked", "paused", "in_progress", "reopened", "pending"] as const)
+    .filter(status => counts[status] > 0)
+    .map(status => {
+      const count = counts[status];
+      const label = count > 1 ? DELIVERY_OPEN_TASK_STATUS_LABELS[status].plural : DELIVERY_OPEN_TASK_STATUS_LABELS[status].singular;
+      return `${count} ${label}`;
+    });
+
+  return `Livraison impossible : ${parts.join(", ")}.`;
+}
+
 export type TaskMutationResult =
   | { ok: true; dossiers: DossierSAV[]; dossier: DossierSAV; line: RepairOrderLine }
   | { ok: false; error: string };
@@ -439,6 +484,10 @@ export function getRepairOrderStatusLabel(status: string): string {
 export function isRepairOrderDone(line: RepairOrderLine): boolean {
   const status = normalizeRepairOrderStatus(line.status);
   return status === "done" || status === "cancelled";
+}
+
+export function isTechnicianPlanifiableResource(technician: TechnicienResource): boolean {
+  return technician.actif !== false && !["absent", "formation"].includes(technician.disponibilite);
 }
 
 export type DossierOperationalBucket = "active" | "ready_for_billing" | "delivered" | "closed";
@@ -973,8 +1022,7 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
       throw new Error("Impossible de planifier dans le passé.");
     }
 
-    const usableTechnicians = input.technicians.filter(technician => !["absent", "formation"].includes(technician.disponibilite));
-    const techsToTry = usableTechnicians.length > 0 ? usableTechnicians : input.technicians;
+    const techsToTry = input.technicians.filter(isTechnicianPlanifiableResource);
 
     let startAfter = new Date(desiredDate);
     let isShiftedDueToNow = false;
@@ -1126,8 +1174,7 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
     throw new Error("Impossible de planifier dans le passé.");
   }
 
-  const usableTechnicians = input.technicians.filter(technician => !["absent", "formation"].includes(technician.disponibilite));
-  const technicians = usableTechnicians.length > 0 ? usableTechnicians : input.technicians;
+  const technicians = input.technicians.filter(isTechnicianPlanifiableResource);
 
   // Search for the next 30 days
   for (let dayOffset = 0; dayOffset < 30; dayOffset += 1) {
@@ -1323,6 +1370,8 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     const tech = input.technicians.find(t => t.id === input.technicianId);
     if (!tech) {
       pushIssue("planning-tech-not-found");
+    } else if (!isTechnicianPlanifiableResource(tech)) {
+      pushIssue("technician-absent");
     } else if (dossier) {
       const line = dossier.ordresReparation.find(l => l.id === input.lineId);
       if (line) {
@@ -1624,8 +1673,16 @@ export function getDeliveryReadiness(dossier: DossierSAV): DeliveryReadiness {
     blockingCodes.push("delivery-workshop-open-tasks");
   }
 
+  const openTasks = dossier.ordresReparation.filter(t => !isRepairOrderDone(t));
+  const detailedMsg = getOpenWorkshopTasksMessage(openTasks);
+
   const uniqueCodes = uniqueDeliveryCodes(blockingCodes);
-  const blockingMessages = uniqueCodes.map(code => DELIVERY_BLOCKING_MESSAGES[code]);
+  const blockingMessages = uniqueCodes.map(code => {
+    if (code === "delivery-workshop-open-tasks" && detailedMsg) {
+      return detailedMsg;
+    }
+    return DELIVERY_BLOCKING_MESSAGES[code];
+  });
 
   const reasons: string[] = [];
 
@@ -1642,17 +1699,11 @@ export function getDeliveryReadiness(dossier: DossierSAV): DeliveryReadiness {
   }
 
   // Task conditions
-  const normalizedStatuses = dossier.ordresReparation.map(line => normalizeRepairOrderStatus(line.status));
-  const hasOpen = normalizedStatuses.some(s => s === "in_progress" || s === "pending" || s === "paused" || s === "reopened");
-  const hasBlocked = normalizedStatuses.some(s => s === "blocked");
-
   if (hasOpenWorkshopTasks || dossier.statut === DossierStatus.BLOQUE || Boolean(dossier.bloqueRaison?.trim())) {
-    reasons.push("Livraison bloquée : travaux atelier non terminés.");
-    if (hasOpen) {
-      reasons.push("Une tâche atelier est encore en cours");
-    }
-    if (hasBlocked) {
-      reasons.push("Une tâche atelier est bloquée");
+    if (detailedMsg) {
+      reasons.push(detailedMsg);
+    } else {
+      reasons.push("Livraison bloquée : travaux atelier non terminés.");
     }
   }
 
@@ -1725,6 +1776,12 @@ export function submitQualityControl(
   const safeComment = sanitizeFreeText(comment);
   if (validationGlobale === "refuse" && !safeComment.trim()) {
     return dossier;
+  }
+  if (validationGlobale === "valide") {
+    const openTasksCount = dossier.ordresReparation.filter(t => !isRepairOrderDone(t)).length;
+    if (openTasksCount > 0) {
+      throw new Error(`QC impossible : des tâches atelier sont encore ouvertes. (Nombre : ${openTasksCount})`);
+    }
   }
   const updatedQC: ChecklistQualite = {
     ...dossier.checklistQC,
@@ -3439,9 +3496,7 @@ export function buildVehicleAutoReservationPlan(
     };
   }
 
-  const usableTechnicians = input.technicians.filter(technician =>
-    technician.disponibilite !== "absent" && technician.disponibilite !== "formation"
-  );
+  const usableTechnicians = input.technicians.filter(isTechnicianPlanifiableResource);
   if (usableTechnicians.length === 0 || input.workshopBays.length === 0) {
     return { ok: false, error: "Aucun créneau disponible dans la période sélectionnée." };
   }

@@ -19,6 +19,19 @@ import {
   OldAppOriginalLaborLine,
 } from "./core/old-app-quote-rules";
 
+export function isQualityControlLine(desc: string | undefined): boolean {
+  const norm = String(desc || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    norm.includes("controle qualite") ||
+    norm.includes("qualite forfaitaire") ||
+    norm.includes("qc forfaitaire") ||
+    /\bqc\b/.test(norm)
+  );
+}
+
 // ───────────────────────────────────────────────────────────────────────────────
 // Constantes de classification
 // ───────────────────────────────────────────────────────────────────────────────
@@ -1025,7 +1038,10 @@ function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[
     const id = generateId("ql");
     // Pour les lignes labor : utiliser le nom propre nettoyé
     const description = type === "labor" ? cleanLaborDescription(cleaned) || cleaned : cleaned;
-    const oldAppLine = type === "labor" && hours > 0
+    const isQualityControl = type === "labor" && isQualityControlLine(description);
+    const effectiveType: QuoteLineType = isQualityControl ? "misc" : type;
+    const effectiveHours = isQualityControl ? 0 : hours;
+    const oldAppLine = type === "labor" && hours > 0 && !isQualityControl
       ? normalizeOldAppOriginalLaborLine({
           id,
           operation: description,
@@ -1040,10 +1056,10 @@ function linesToQuoteLines(lineTexts: string[], _sourceType: string): QuoteLine[
       rawText: rawLine,
       sourceCode,
       description,
-      type,
-      hours,
+      type: effectiveType,
+      hours: effectiveHours,
       confidence,
-      selected: type === "labor" && hours > 0, // pré-sélection : seulement MO avec durée > 0
+      selected: effectiveType === "labor" && effectiveHours > 0, // pré-sélection : seulement MO atelier avec durée > 0
       oldAppPhaseAllocations: oldAppLine?.allocations,
       oldAppSelectedPhases: oldAppLine?.selectedPhases,
       oldAppPieceKind: oldAppLine?.pieceKind,
@@ -1109,9 +1125,10 @@ export function buildQuoteImportPreview(
   options: { sourceType?: "text" | "csv" | "xlsx"; fileName?: string; ignoredCount?: number } = {}
 ): QuoteImportPreview {
   const laborLines = lines.filter(l => l.type === "labor");
+  const workshopLaborLines = laborLines.filter(l => !isQualityControlLine(l.editedDescription ?? l.description));
   const partLines = lines.filter(l => l.type === "part");
-  const totalDetectedHours = laborLines.reduce((sum, l) => sum + l.hours, 0);
-  const oldAppOriginalLines = laborLines
+  const totalDetectedHours = workshopLaborLines.reduce((sum, l) => sum + l.hours, 0);
+  const oldAppOriginalLines = workshopLaborLines
     .map(quoteLineToOldAppOriginalLine)
     .filter((line): line is OldAppOriginalLaborLine => Boolean(line));
   const oldAppOptimized = optimizeOldAppEstimateAllocationsFromOriginalLines(oldAppOriginalLines);
@@ -1136,7 +1153,7 @@ export function buildQuoteImportPreview(
 
 export function validateQuoteImportPreview(preview: QuoteImportPreview): string[] {
   const errors: string[] = [];
-  const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor");
+  const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor" && !isQualityControlLine(l.editedDescription ?? l.description));
   if (selectedLabor.length === 0) {
     errors.push("Aucune ligne de main-d'œuvre sélectionnée à importer.");
   }
@@ -1155,12 +1172,14 @@ export function mapLaborLinesToRepairOrderLines(
   const importId = preview.importId;
   const oldAppOriginalLines = preview.lines
     .filter(l => l.selected && l.type === "labor")
+    .filter(l => !isQualityControlLine(l.editedDescription ?? l.description))
     .map(quoteLineToOldAppOriginalLine)
     .filter((line): line is OldAppOriginalLaborLine => Boolean(line));
   if (oldAppOriginalLines.length === 0) return [];
   const appliedLines = buildOldAppAppliedEstimateLines(oldAppOriginalLines);
 
   return appliedLines
+    .filter(line => line.phase !== "quality")
     .filter(line => line.laborHours > 0)
     .map((line): RepairOrderLine => {
       const stageId = OLD_APP_PHASE_TO_PRO_STAGE[line.phase];
@@ -1184,7 +1203,7 @@ export function mapLaborLinesToRepairOrderLines(
 }
 
 export function buildQuoteImportHistoryEntry(preview: QuoteImportPreview): string {
-  const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor");
+  const selectedLabor = preview.lines.filter(l => l.selected && l.type === "labor" && !isQualityControlLine(l.editedDescription ?? l.description));
   const parts = preview.lines.filter(l => l.type === "part");
   const totalHours = roundPlanningHours(selectedLabor.reduce((s, l) => s + (l.editedHours ?? l.hours), 0));
   const fileName = preview.fileName ? ` depuis ${preview.fileName}` : "";

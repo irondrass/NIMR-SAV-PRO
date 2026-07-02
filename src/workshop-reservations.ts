@@ -28,7 +28,8 @@ import {
   nextWorkingDay,
   normalizeRepairOrderStatus,
   isRepairOrderDone,
-  getWorkingWindowsForDate
+  getWorkingWindowsForDate,
+  isTechnicianPlanifiableResource
 } from "./sav-core";
 import { 
   findNextAvailableWorkingSlot, 
@@ -365,8 +366,7 @@ export function suggestReservationSlot(
     startAfter.setHours(8, 0, 0, 0);
   }
 
-  const usableTechnicians = technicians.filter(t => !["absent", "formation"].includes(t.disponibilite));
-  const techsToTry = usableTechnicians.length > 0 ? usableTechnicians : technicians;
+  const techsToTry = technicians.filter(isTechnicianPlanifiableResource);
 
   // Find the earliest slot across all technician/bay combinations
   let bestSlot: {
@@ -457,7 +457,7 @@ export function suggestReservationSlot(
   if (!bestSlot) {
     const fallbackDate = new Date(nextWorkingDay(startAfter));
     fallbackDate.setHours(8, 0, 0, 0);
-    const fallbackTech = sortedTechs[0] || technicians[0];
+    const fallbackTech = sortedTechs[0];
     const fallbackBay = chooseWorkshopBay(workshopBays, fallbackTech?.zoneAffectee);
     const fallbackEndTime = addWorkingMinutes(fallbackDate, durationMinutes);
     const fallbackSegments = buildPlanningSegments(fallbackDate, fallbackEndTime);
@@ -472,7 +472,7 @@ export function suggestReservationSlot(
       status: "CRENEAU_PROPOSE",
       history: [
         ...reservation.history,
-        `${now.toISOString()} - Créneau proposé par défaut (aucun créneau disponible) : ${fallbackDate.toISOString()} avec le technicien ${fallbackTech?.nom} sur le pont ${fallbackBay.name}`
+        `${now.toISOString()} - Créneau proposé par défaut (aucun créneau disponible) : ${fallbackDate.toISOString()} avec le technicien ${fallbackTech?.nom ?? "à affecter"} sur le pont ${fallbackBay.name}`
       ]
     };
   }
@@ -651,6 +651,9 @@ export function validateReservationSlot(
     if (!techObj) {
       codes.push("planning-tech-not-found");
       reasons.push("Technicien inexistant.");
+    } else if (!isTechnicianPlanifiableResource(techObj)) {
+      codes.push("technician-absent");
+      reasons.push("Technicien inactif ou indisponible.");
     } else {
       const hasTechColl = submittedSegments.some(seg => {
         const s = new Date(seg.start);

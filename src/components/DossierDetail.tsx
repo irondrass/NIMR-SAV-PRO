@@ -1171,13 +1171,25 @@ export default function DossierDetail({
       return;
     }
     setQcError(null);
-    onUpdateDossier(submitQualityControl(dossier, userRole, globVal, comment));
-    recordLocalAudit({
-      action: globVal === "valide" ? "validation_qc" : "refus_qc",
-      summary: globVal === "valide" ? "Contrôle qualité validé." : "Contrôle qualité refusé avec retour atelier.",
-      source: "qc",
-      nouveauStatut: globVal === "valide" ? DossierStatus.PRET_A_LIVRER : DossierStatus.EN_TRAVAUX,
-    });
+    try {
+      onUpdateDossier(submitQualityControl(dossier, userRole, globVal, comment));
+      recordLocalAudit({
+        action: globVal === "valide" ? "validation_qc" : "refus_qc",
+        summary: globVal === "valide" ? "Contrôle qualité validé." : "Contrôle qualité refusé avec retour atelier.",
+        source: "qc",
+        nouveauStatut: globVal === "valide" ? DossierStatus.PRET_A_LIVRER : DossierStatus.EN_TRAVAUX,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "QC impossible : des tâches atelier sont encore ouvertes.";
+      setQcError(message);
+      recordLocalAudit({
+        action: "validation_qc_bloquee",
+        summary: message,
+        result: "blocked",
+        blockReason: message,
+        source: "qc",
+      });
+    }
   };
 
   const handleQCValidationRequest = () => {

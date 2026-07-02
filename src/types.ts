@@ -385,6 +385,8 @@ export interface TechnicienResource {
   absencesConges: string[]; // dates description
   capaciteJournaliere: number; // standard 8h
   chargeActuelle: number; // sum of scheduled hours
+  actif?: boolean; // active/inactive resource toggle
+  userId?: string; // optional link to a user account
 }
 
 export interface WorkshopBay {

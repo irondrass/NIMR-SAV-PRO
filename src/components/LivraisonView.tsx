@@ -197,7 +197,10 @@ export default function LivraisonView({
   };
 
   // 1. Filter dossiers
-  const readyDossiers = dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER || d.statut === DossierStatus.NON_RETIRE);
+  const candidateDossiers = dossiers.filter(d => d.statut === DossierStatus.PRET_A_LIVRER || d.statut === DossierStatus.NON_RETIRE);
+  const readyDossiers = candidateDossiers.filter(d => getDeliveryReadiness(d).canDeliver);
+  const blockedDossiers = candidateDossiers.filter(d => !getDeliveryReadiness(d).canDeliver);
+
   const deliveredDossiers = dossiers
     .filter(d => d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.NON_RETIRE || d.statut === DossierStatus.PRET_FACTURATION || d.statut === DossierStatus.CLOTURE)
     .sort((a, b) => {
@@ -344,7 +347,7 @@ export default function LivraisonView({
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-xs">
             <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-500" />
+              <Clock className="w-4 h-4 text-emerald-500" />
               Véhicules prêts à livrer ({readyDossiers.length})
             </h2>
 
@@ -355,11 +358,11 @@ export default function LivraisonView({
             )}
 
             {readyDossiers.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
+              <div className="text-center py-6 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
                 Aucun véhicule n'est actuellement prêt à être livré.
               </div>
             ) : (
-              <div data-testid="delivery-dossier-list" className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
+              <div data-testid="delivery-dossier-list" className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
                 {readyDossiers.map(dossier => {
                   const isSelected = selectedDossierId === dossier.id;
                   return (
@@ -386,6 +389,57 @@ export default function LivraisonView({
                         </p>
                       </div>
                       <ChevronRight className={`w-4 h-4 transition-transform ${isSelected ? "text-indigo-600 translate-x-0.5" : "text-slate-400"}`} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Blocked section */}
+            <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider mt-6 mb-3 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-500" />
+              Bloqués livraison ({blockedDossiers.length})
+            </h2>
+
+            {blockedDossiers.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
+                Aucun véhicule bloqué pour la livraison.
+              </div>
+            ) : (
+              <div data-testid="delivery-blocked-list" className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {blockedDossiers.map(dossier => {
+                  const isSelected = selectedDossierId === dossier.id;
+                  const readiness = getDeliveryReadiness(dossier);
+                  return (
+                    <button
+                      key={dossier.id}
+                      data-testid={`delivery-blocked-row-${dossier.id}`}
+                      onClick={() => handleSelectDossier(dossier)}
+                      className={`w-full text-left p-3.5 rounded-xl border transition-all flex flex-col gap-2 ${
+                        isSelected
+                          ? "bg-rose-50/50 border-rose-200 shadow-xs ring-1 ring-rose-200"
+                          : "bg-slate-50/30 hover:bg-slate-50 border-slate-100"
+                      }`}
+                    >
+                      <div className="flex justify-between items-center w-full">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-sm text-slate-800">{dossier.id}</span>
+                            <LicencePlate plate={dossier.vehiculeImmatriculation} />
+                          </div>
+                          <p className="text-[11px] font-bold text-slate-600">
+                            {dossier.vehiculeMarque} {dossier.vehiculeModele}
+                          </p>
+                        </div>
+                        <ChevronRight className={`w-4 h-4 transition-transform ${isSelected ? "text-rose-600 translate-x-0.5" : "text-slate-400"}`} />
+                      </div>
+                      <div className="text-[10px] text-rose-700 bg-rose-50 p-2 rounded-lg font-semibold border border-rose-100/50">
+                        {readiness.reasons.map((reason, idx) => (
+                          <div key={idx} data-testid="blocked-reason-detail" className="mb-0.5 last:mb-0">
+                            - {reason}
+                          </div>
+                        ))}
+                      </div>
                     </button>
                   );
                 })}

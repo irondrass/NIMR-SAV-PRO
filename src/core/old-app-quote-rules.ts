@@ -223,10 +223,11 @@ export function distributeOldAppLaborHours(
   if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [makeOldAppAllocation("oilService", operation, hours)];
 
   const isClientOnly = ["client", "vidange", "mechanical_client", "electrical_client"].includes(options.claimType || "");
-  const insuranceElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|BATTERIE|HAUTE\s+TENSION|HV|PYROTECHNIQUE)\b/;
+  const insuranceElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|ELECTRIQUE|ELECTRICITE|FAISCEAU|CAPTEUR|BATTERIE|HAUTE\s+TENSION|HV|PYROTECHNIQUE)\b/;
   const clientElectricalPattern = /\b(AIRBAGS?|DIAGNOSTIC|ELECTRIQUE|ELECTRICITE|ALTERNATEUR|DEMARREUR|BATTERIE|FAISCEAU|CAPTEUR|HAUTE\s+TENSION|HV)\b/;
   if ((isClientOnly ? clientElectricalPattern : insuranceElectricalPattern).test(normalized)) return [makeOldAppAllocation("electrical", operation, hours)];
-  if (/\b(REMPLACEMENT\s+BOITE|BOITE\s+VITESSE|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR|MECANIQUE|MECAN)\b/.test(normalized)) return [makeOldAppAllocation("mechanical", operation, hours)];
+  if (/\b(CONTROLE\s+GEOMETRIE|GEOMETRIE|PARALLELISME|REGLAGE\s+TRAIN|REMPLACEMENT\s+BOITE|BOITE\s+VITESSE|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR|MECANIQUE|MECAN)\b/.test(normalized)) return [makeOldAppAllocation("mechanical", operation, hours)];
+  if (/\b(TOLERIE|CARROSSERIE|REDRESSAGE)\b/.test(normalized)) return [makeOldAppAllocation("body", operation, hours)];
   if (/\b(CHANG(?:EMENT)?|REMP|REMPL|REMPLACEMENT)\s+(FEU|OPTIQUE|PHARE|PROJECTEUR|LANTERNE|PARE\s+BOUE|SUPPORT|AILE|PARE\s+CHOC|JUPE|MALLE|CAPOT|PORTE|SERRURE)\b/.test(normalized)) {
     return [makeOldAppAllocation("reassembly", operation, hours)];
   }
@@ -450,4 +451,3 @@ export function buildOldAppAppliedEstimateLines(
   });
   return lines;
 }
-

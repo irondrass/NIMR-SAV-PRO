@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile, User } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -92,6 +92,8 @@ interface WorkshopPlanningProps {
   activeRole: UserRole;
   availabilityConfig?: WorkshopAvailabilityConfig;
   onUpdateAvailabilityConfig?: (updated: WorkshopAvailabilityConfig) => void;
+  onUpdateTechnicians?: (updated: TechnicienResource[]) => void;
+  users?: any[];
 }
 
 const GANTT_LANE_HEIGHT = 56;
@@ -243,10 +245,66 @@ export default function WorkshopPlanning({
   onUpdateDossier,
   activeRole,
   availabilityConfig,
-  onUpdateAvailabilityConfig
+  onUpdateAvailabilityConfig,
+  onUpdateTechnicians,
+  users = []
 }: WorkshopPlanningProps) {
   const [filterZone, setFilterZone] = useState<string>("Toutes");
   const [filterBay, setFilterBay] = useState<string>("Toutes");
+
+  // Resource setup states
+  const [showResourceSetup, setShowResourceSetup] = useState(false);
+  const [techNom, setTechNom] = useState("");
+  const [techSpecialite, setTechSpecialite] = useState("Mécanicien");
+  const [techZone, setTechZone] = useState<AtelierZone>(AtelierZone.GRANDS_TRAVAUX);
+  const [techDisp, setTechDisp] = useState<"disponible" | "occupe" | "absent" | "formation">("disponible");
+  const [techActif, setTechActif] = useState(true);
+  const [techUserId, setTechUserId] = useState("");
+  const [resourceError, setResourceError] = useState("");
+
+  const handleCreateResource = (e: React.FormEvent) => {
+    e.preventDefault();
+    setResourceError("");
+    if (!techNom.trim()) {
+      setResourceError("Le nom de la ressource est obligatoire.");
+      return;
+    }
+    const newTech: TechnicienResource = {
+      id: "tech_" + Math.random().toString(36).substring(2, 9) + "_" + Date.now(),
+      nom: techNom.trim(),
+      specialite: techSpecialite,
+      zoneAffectee: techZone,
+      disponibilite: techDisp,
+      compétences: [techSpecialite],
+      absencesConges: [],
+      capaciteJournaliere: 8,
+      chargeActuelle: 0,
+      actif: techActif,
+      userId: techUserId || undefined
+    };
+    if (onUpdateTechnicians) {
+      onUpdateTechnicians([...techniciens, newTech]);
+    }
+    setTechNom("");
+    setTechUserId("");
+  };
+
+  const handleToggleResourceActive = (techId: string) => {
+    if (onUpdateTechnicians) {
+      const next = techniciens.map(t => t.id === techId ? { ...t, actif: !t.actif } : t);
+      onUpdateTechnicians(next);
+    }
+  };
+
+  const handleSpecialtyChange = (spec: string) => {
+    setTechSpecialite(spec);
+    if (spec === "Mécanicien") setTechZone(AtelierZone.GRANDS_TRAVAUX);
+    else if (spec === "Électricien") setTechZone(AtelierZone.ELECTRICITE_DIAG);
+    else if (spec === "Tôlier") setTechZone(AtelierZone.CARROSSERIE);
+    else if (spec === "Peintre") setTechZone(AtelierZone.PEINTURE);
+    else if (spec === "Contrôleur qualité") setTechZone(AtelierZone.CONTROLE_QUALITE);
+    else if (spec === "Finition / Lavage") setTechZone(AtelierZone.LAVAGE_FINITION);
+  };
   
   // Date navigation state
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -1224,8 +1282,212 @@ export default function WorkshopPlanning({
     });
   };
 
+  const renderResourceSetupForm = () => {
+    return (
+      <div className="space-y-6" data-testid="resource-setup-container">
+        <div>
+          <h3 className="text-xs font-black uppercase tracking-wide text-slate-900 mb-1">Configuration ressources atelier</h3>
+          <p className="text-gray-500 text-[10px]">Créez et liez les ressources compagnons/techniciens de l'atelier.</p>
+        </div>
+
+        {resourceError && (
+          <div data-testid="resource-error" className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 font-bold">
+            {resourceError}
+          </div>
+        )}
+
+        <form onSubmit={handleCreateResource} className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200" data-testid="resource-creation-form">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Nom *</label>
+            <input
+              type="text"
+              data-testid="resource-name"
+              className="w-full p-2 border border-gray-200 rounded bg-white text-xs font-bold"
+              placeholder="Ex: Mani"
+              value={techNom}
+              onChange={e => setTechNom(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Spécialité</label>
+            <select
+              data-testid="resource-specialty"
+              className="w-full p-2 border border-gray-200 rounded bg-white text-xs font-bold"
+              value={techSpecialite}
+              onChange={e => handleSpecialtyChange(e.target.value)}
+            >
+              <option value="Mécanicien">Mécanicien</option>
+              <option value="Électricien">Électricien</option>
+              <option value="Tôlier">Tôlier</option>
+              <option value="Peintre">Peintre</option>
+              <option value="Contrôleur qualité">Contrôleur qualité</option>
+              <option value="Finition / Lavage">Finition / Lavage</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Zone Affectée</label>
+            <select
+              data-testid="resource-zone"
+              className="w-full p-2 border border-gray-200 rounded bg-white text-xs font-bold"
+              value={techZone}
+              onChange={e => setTechZone(e.target.value as AtelierZone)}
+            >
+              {Object.values(AtelierZone).map(zone => (
+                <option key={zone} value={zone}>{zone}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Disponibilité initiale</label>
+            <select
+              data-testid="resource-availability"
+              className="w-full p-2 border border-gray-200 rounded bg-white text-xs font-bold"
+              value={techDisp}
+              onChange={e => setTechDisp(e.target.value as any)}
+            >
+              <option value="disponible">Disponible</option>
+              <option value="occupe">Occupé</option>
+              <option value="absent">Absent</option>
+              <option value="formation">En formation</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Liaison utilisateur (Optionnel)</label>
+            <select
+              data-testid="resource-user-link"
+              className="w-full p-2 border border-gray-200 rounded bg-white text-xs font-bold"
+              value={techUserId}
+              onChange={e => setTechUserId(e.target.value)}
+            >
+              <option value="">Aucune liaison</option>
+              {users.map((u: any) => (
+                <option key={u.id} value={u.id}>{u.displayName} ({u.role})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center pt-5">
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="resource-active-checkbox"
+                checked={techActif}
+                onChange={e => setTechActif(e.target.checked)}
+                className="w-4 h-4 accent-blue-600 cursor-pointer"
+              />
+              Actif (ressource planifiable)
+            </label>
+          </div>
+
+          <div className="md:col-span-3 flex justify-end">
+            <button
+              type="submit"
+              data-testid="submit-resource-button"
+              className="px-4 py-2 bg-slate-900 hover:bg-blue-700 text-white rounded text-xs font-black uppercase cursor-pointer"
+            >
+              Créer la ressource
+            </button>
+          </div>
+        </form>
+
+        {/* Existing resources list */}
+        <div className="space-y-2">
+          <h4 className="text-xs font-bold text-slate-700 uppercase">Ressources configurées ({techniciens.length})</h4>
+          {techniciens.length === 0 ? (
+            <p className="text-xs text-gray-400">Aucune ressource configurée pour le moment.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2 font-bold text-gray-600">Nom</th>
+                    <th className="px-4 py-2 font-bold text-gray-600">Spécialité</th>
+                    <th className="px-4 py-2 font-bold text-gray-600">Zone</th>
+                    <th className="px-4 py-2 font-bold text-gray-600">Liaison utilisateur</th>
+                    <th className="px-4 py-2 font-bold text-gray-600">Statut</th>
+                    <th className="px-4 py-2 font-bold text-gray-600">Actif</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {techniciens.map(t => {
+                    const linkedUser = users.find((u: any) => u.id === t.userId);
+                    return (
+                      <tr key={t.id} className="hover:bg-slate-50/50" data-testid={`resource-row-${t.id}`}>
+                        <td className="px-4 py-2 font-extrabold text-slate-900" data-testid="resource-row-name">{t.nom}</td>
+                        <td className="px-4 py-2 text-slate-600" data-testid="resource-row-specialty">{t.specialite}</td>
+                        <td className="px-4 py-2 text-slate-600" data-testid="resource-row-zone">{t.zoneAffectee}</td>
+                        <td className="px-4 py-2 text-slate-600">
+                          {linkedUser ? `${linkedUser.displayName} (${linkedUser.role})` : "Aucune"}
+                        </td>
+                        <td className="px-4 py-2 font-semibold">
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+                            t.disponibilite === "disponible" ? "bg-emerald-50 text-emerald-700" :
+                            t.disponibilite === "occupe" ? "bg-amber-50 text-amber-700" : "bg-gray-50 text-gray-600"
+                          }`}>
+                            {t.disponibilite}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="checkbox"
+                            checked={t.actif !== false}
+                            onChange={() => handleToggleResourceActive(t.id)}
+                            className="w-4 h-4 cursor-pointer"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (techniciens.length === 0) {
+    return (
+      <div className="space-y-6">
+        {/* Title & Date selector */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs">
+          <h2 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2 font-display">
+            <Calendar className="w-5 h-5 text-blue-600" />
+            PLANNING & CHARGE DES TECHNICIENS (GANTT)
+          </h2>
+          <p className="text-gray-500 text-xs">Visualisation de la charge journalière et affectation des créneaux de travaux.</p>
+        </div>
+
+        <div data-testid="empty-resources-warning" className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
+          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-bold">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0 text-amber-600" />
+            <div>
+              <p className="font-extrabold">Aucune ressource atelier configurée. Créez les ressources avant planification.</p>
+              {!(activeRole === UserRole.DIRECTEUR_SAV || activeRole === UserRole.CHEF_ATELIER) && (
+                <p className="mt-1 font-normal text-amber-700">Veuillez contacter un Directeur SAV ou Chef d'atelier pour configurer les ressources.</p>
+              )}
+            </div>
+          </div>
+          {(activeRole === UserRole.DIRECTEUR_SAV || activeRole === UserRole.CHEF_ATELIER) && (
+            renderResourceSetupForm()
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {showResourceSetup && (
+        <div data-testid="resource-setup-panel" className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs">
+          {renderResourceSetupForm()}
+        </div>
+      )}
       
       {/* Title & Date selector */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs">
@@ -1245,6 +1507,17 @@ export default function WorkshopPlanning({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {(activeRole === UserRole.DIRECTEUR_SAV || activeRole === UserRole.CHEF_ATELIER) && (
+              <button
+                type="button"
+                data-testid="toggle-resource-setup"
+                onClick={() => setShowResourceSetup(!showResourceSetup)}
+                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold rounded-lg transition active:scale-95 cursor-pointer"
+              >
+                {showResourceSetup ? "Masquer ressources" : "Gérer les ressources"}
+              </button>
+            )}
+
             {/* Saved indicator */}
             {showSavedIndicator && (
               <span 

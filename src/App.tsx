@@ -114,7 +114,9 @@ import {
   UserCog,
   Truck,
   ClipboardCheck,
-  Star
+  Star,
+  Menu,
+  X
 } from "lucide-react";
 
 function writeLocalStorageValue(key: string, value: string) {
@@ -288,6 +290,7 @@ export default function App() {
   // Vehicle master local database
   const [vehicleMasterRecords, setVehicleMasterRecords] = useState<VehicleMasterRecord[]>([]);
   const [vehicleMasterLastImport, setVehicleMasterLastImport] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleUpdateVehicleMaster = (records: VehicleMasterRecord[]) => {
     handleTouchSession();
@@ -838,6 +841,8 @@ export default function App() {
     setGlobalSearchTerm("");
     setStatusFilter("Tous");
     setPriorityFilter("Toutes");
+    setMobileMenuOpen(false);
+    setActiveTab("dashboard");
   };
 
   const handleCreateUser = async (input: CreateUserInput): Promise<{ ok: boolean; message: string }> => {
@@ -989,10 +994,37 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 transition duration-150 flex flex-col md:flex-row antialiased">
+    <div className="min-h-screen w-full overflow-x-hidden bg-slate-50 font-sans text-slate-800 transition duration-150 flex flex-col md:flex-row antialiased">
+
+      {/* Mobile top bar */}
+      <div className="md:hidden flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3 shadow-sm sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-md bg-blue-600 flex items-center justify-center text-white font-extrabold text-[10px]">SAV</div>
+          <span className="text-xs font-black text-slate-900 uppercase tracking-wider">{APP_NAME}</span>
+        </div>
+        <button
+          type="button"
+          data-testid="mobile-menu-button"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+        >
+          {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+      </div>
+
+      {/* Mobile overlay backdrop */}
+      {mobileMenuOpen && (
+        <div
+          data-testid="mobile-menu-overlay"
+          className="fixed inset-0 bg-black/40 z-40 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
       
       {/* 1. Lateral Left Sidebar Navigation */}
-      <aside className="w-full md:w-64 bg-white border-r border-gray-200 text-gray-800 p-5 flex flex-col justify-between shrink-0 font-sans shadow-xs">
+      <aside className={`${
+        mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+      } md:translate-x-0 fixed md:relative z-50 md:z-auto w-64 h-full md:h-auto bg-white border-r border-gray-200 text-gray-800 p-5 flex flex-col justify-between shrink-0 font-sans shadow-xs transition-transform duration-200 overflow-y-auto`}>
         <div className="space-y-6">
           
           {/* Logo Branding - Humble, Literal - Geometric Balance styled */}
@@ -1075,6 +1107,7 @@ export default function App() {
                   data-testid={navTestIds[item.id] || `nav-${item.id}`}
                   onClick={() => {
                     goToTab(item.id);
+                    setMobileMenuOpen(false);
                   }}
                   className={`w-full p-2.5 px-3 rounded-lg font-bold text-xs flex items-center justify-between transition-all duration-105 border ${
                     isSel 
@@ -1102,10 +1135,10 @@ export default function App() {
       </aside>
 
       {/* 2. Top Header and Central View Wrapper */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 w-full">
         
         {/* Top Header bar with search indices */}
-        <header className="p-4 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0 shadow-sm z-10">
+        <header className="p-4 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0 shadow-sm z-10 min-w-0">
           
           {/* Global search across dossiers */}
           <div className="relative w-full sm:max-w-md">
@@ -1134,7 +1167,7 @@ export default function App() {
           </div>
 
           {/* Quick status displays */}
-          <div className="flex items-center gap-4 text-xs font-semibold">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 text-xs font-semibold sm:w-auto sm:gap-4">
             
             {/* Blocker notification indicator */}
             {dossiers.some(d => d.statut === DossierStatus.BLOQUE) && (
@@ -1160,7 +1193,7 @@ export default function App() {
         </header>
 
         {/* Central Router Stage */}
-        <main className="p-6 flex-1 overflow-y-auto space-y-6">
+        <main className="w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 space-y-6">
           
           {selectedDossier ? (
             /* Open detailed view of client/vehicle */
@@ -1392,6 +1425,11 @@ export default function App() {
                   activeRole={activeRole}
                   availabilityConfig={availabilityConfig}
                   onUpdateAvailabilityConfig={handleUpdateAvailabilityConfig}
+                  onUpdateTechnicians={(updated) => {
+                    setTechList(updated);
+                    writeLocalStorageJSON(STORAGE_KEYS.techs, updated);
+                  }}
+                  users={users}
                 />
               )}
 

@@ -25,7 +25,9 @@ import {
   makeOldAppWeightedAllocations,
   normalizeOldAppOriginalLaborLine,
   optimizeOldAppEstimateAllocationsFromOriginalLines,
+  OLD_APP_PHASE_TO_PRO_STAGE,
 } from "../core/old-app-quote-rules";
+import { PLANNING_STEP_DEFINITIONS } from "../workshop-planning-steps";
 import { inferWorkshopStageFromTaskText } from "../workshop-task-intake";
 import { FileText, Upload, Check, X, AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -669,7 +671,16 @@ export default function QuoteImportModal({ dossierId: _dossierId, onConfirm, onC
                             </span>
                             {isLabor && (
                               <span data-testid="quote-task-stage" className="mt-1 block text-[10px] font-semibold text-slate-500">
-                                {inferWorkshopStageFromTaskText(line.editedDescription ?? line.description).stageLabel}
+                                {(() => {
+                                  const selectedPhases = line.oldAppSelectedPhases || line.oldAppPhaseAllocations?.map(a => a.phase) || [];
+                                  if (selectedPhases.length === 0) {
+                                    return inferWorkshopStageFromTaskText(line.editedDescription ?? line.description).stageLabel;
+                                  }
+                                  return selectedPhases.map(phase => {
+                                    const stageId = OLD_APP_PHASE_TO_PRO_STAGE[phase as any];
+                                    return PLANNING_STEP_DEFINITIONS.find(s => s.id === stageId)?.label || phase;
+                                  }).join(" + ");
+                                })()}
                               </span>
                             )}
                           </td>

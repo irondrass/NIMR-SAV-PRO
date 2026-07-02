@@ -21,8 +21,7 @@ assert.ok(byStage.has("reassembly"), "D/P doit créer une tâche remontage");
 assert.ok(byStage.has("preparation"), "Peinture doit créer une tâche préparation");
 assert.ok(byStage.has("paint"), "Peinture doit créer une tâche peinture mutualisée");
 assert.ok(byStage.has("finish"), "Peinture doit créer une tâche finition");
-assert.ok(byStage.has("quality"), "Application devis doit créer le contrôle qualité forfaitaire");
+assert.equal(byStage.has("quality"), false, "Le contrôle qualité forfaitaire reste dans le module QC, jamais comme tâche atelier");
 assert.equal(byStage.get("paint")?.workshopZoneNote, "Règle ancienne : peinture mutualisée par zone/côté cabine.");
 
 console.log("quote-stage-mapping-parity.test.ts OK");
-
