@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mapRepairLineToPlanningStep } from "../src/workshop-planning-steps";
 import { RepairOrderLine } from "../src/types";
+import { distributeOldAppLaborHours } from "../src/core/old-app-quote-rules";
 
 console.log("Démarrage des tests old-app-stage-editor-parity...");
 
@@ -50,5 +51,23 @@ const diagLine: RepairOrderLine = {
 const mapping = mapRepairLineToPlanningStep(diagLine);
 assert.equal(mapping.stepId, "electrical");
 assert.equal(mapping.serviceType, "Électricité / diagnostic");
+
+// 4. Geometry and wheel alignment mapping
+const keywords = [
+  "contrôle géométrie",
+  "controle geometrie",
+  "parallélisme",
+  "parallelisme",
+  "réglage train",
+  "reglage train",
+  "alignement train",
+  "alignement roues"
+];
+
+for (const kw of keywords) {
+  const dist = distributeOldAppLaborHours(kw, 1.0);
+  assert.equal(dist.length, 1);
+  assert.equal(dist[0].phase, "mechanical");
+}
 
 console.log("old-app-stage-editor-parity.test.ts OK");

@@ -78,12 +78,13 @@ test.describe("Old app parity - Étapes à modifier & Technicien Réservation Pa
     // Now let's try to plan the task. Go to "Planification RDV & Atelier" tab
     await humanClick(page, page.locator('[data-testid="tab-rdv-planning"]'));
     // Open manual reservation dropdown / panel
-    await humanClick(page, page.locator('[data-testid="suggest-slot-step-electrical"]'));
-    await expect(page.locator('[data-testid="suggested-slot-card"]')).toBeVisible();
+    const electricalCard = page.locator('[data-testid="planning-step-card-electrical"]');
+    await humanClick(page, electricalCard.locator('[data-testid="planning-step-reserve"]'));
+    await expect(page.locator('[data-testid="planning-suggest-result"]')).toBeVisible();
 
-    // Click "Réserver" to open confirm modal
-    await humanClick(page, page.locator('[data-testid="confirm-suggested-slot-btn"]'));
-    await expect(page.locator('[data-testid="suggested-slot-card"]')).not.toBeVisible();
+    // Click "Réserver ce créneau" to apply suggestion
+    await humanClick(page, page.locator('[data-testid="planning-suggest-apply"]'));
+    await expect(page.locator('[data-testid="planning-suggest-result"]')).not.toBeVisible();
 
     // Go back to tasks tab
     await humanClick(page, page.locator('[data-testid="tab-repair-orders"]'));

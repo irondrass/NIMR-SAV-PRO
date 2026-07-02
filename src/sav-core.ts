@@ -206,17 +206,20 @@ export interface VehicleAutoReservationInput {
   availabilityConfig: WorkshopAvailabilityConfig;
 }
 
-export type VehicleAutoReservationResult =
+export type VehicleAutoReservationPlanResult =
   | {
       ok: true;
       reservations: WorkshopReservation[];
       createdReservations: WorkshopReservation[];
+      dossiers: DossierSAV[];
       warning?: string;
     }
   | {
       ok: false;
       error: string;
     };
+
+export type VehicleAutoReservationResult = VehicleAutoReservationPlanResult;
 
 export interface SuggestedSlotReservationInput {
   role: UserRole;
@@ -901,7 +904,7 @@ export function isBayCompatibleForStep(bay: WorkshopBay, stepId: string, service
     case "quick-service":
       return bay.zone === AtelierZone.MECANIQUE_RAPIDE || bay.id === "bay_general_01";
     case "mechanical":
-      return bay.zone === AtelierZone.GRANDS_TRAVAUX || bay.id === "bay_general_01";
+      return bay.zone === AtelierZone.GRANDS_TRAVAUX || bay.zone === AtelierZone.MECANIQUE_RAPIDE || bay.id === "bay_general_01";
     case "electrical":
       return bay.zone === AtelierZone.ELECTRICITE_DIAG || bay.id === "bay_general_01";
     default:
@@ -3388,7 +3391,7 @@ export function reserveSuggestedWorkshopSlot(
 export function buildVehicleAutoReservationPlan(
   input: VehicleAutoReservationInput,
   now: Date = new Date()
-): VehicleAutoReservationResult {
+): VehicleAutoReservationPlanResult {
   const activeVehicleDossiers = getActiveVehicleDossiers(input.dossiers, input.targetDossierId);
   if (activeVehicleDossiers.length === 0) {
     return { ok: false, error: "Aucun dossier actif trouvé pour ce véhicule." };
@@ -3432,6 +3435,7 @@ export function buildVehicleAutoReservationPlan(
       ok: true,
       reservations: input.reservations,
       createdReservations: [],
+      dossiers: input.dossiers,
     };
   }
 

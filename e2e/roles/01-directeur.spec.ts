@@ -3,6 +3,7 @@ import { changeUserRole, humanWait, humanClick } from "../helpers/human-actions"
 import { createMockDossier, createMockTech } from "../helpers/test-data-creator";
 import { STORAGE_KEYS } from "../../src/storage-keys";
 import { DossierStatus, DossierPriority } from "../../src/types";
+import { MOCK_TECHNICIENS } from "../../src/data";
 
 test.describe("Rôle : Directeur SAV", () => {
   const testDossier = createMockDossier({
@@ -20,16 +21,22 @@ test.describe("Rôle : Directeur SAV", () => {
     technicienId: "tech_01",
     bloqueRaison: "Attente pièce",
     ordresReparation: [
-      { id: "ro_dir_blocked", designation: "Tâche bloquée", tempsEstime: 1.0, tempsPasse: 0.5, status: "blocked" }
+      { id: "ro_dir_blocked", designation: "Diagnostic électrique", tempsEstime: 1.0, tempsPasse: 0.5, status: "blocked" }
     ]
   });
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.evaluate(({ key, value }) => {
+    await page.evaluate(({ key, value, techKey, techValue }) => {
       localStorage.clear();
       localStorage.setItem(key, JSON.stringify(value));
-    }, { key: STORAGE_KEYS.dossiers, value: [testDossier, blockedDossier] });
+      localStorage.setItem(techKey, JSON.stringify(techValue));
+    }, {
+      key: STORAGE_KEYS.dossiers,
+      value: [testDossier, blockedDossier],
+      techKey: STORAGE_KEYS.techs,
+      techValue: MOCK_TECHNICIENS
+    });
     await page.reload();
     await changeUserRole(page, "role-option-directeur");
   });

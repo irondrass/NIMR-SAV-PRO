@@ -499,6 +499,7 @@ export default function WorkshopPlanning({
         estimatedHours: selectedTargetForSuggest.line.tempsEstime,
         desiredDate: targetDesiredDate,
         dossierId: selectedTargetForSuggest.dossier.id,
+        lineId: selectedTargetForSuggest.line.id,
         reservations,
         availabilityConfig,
       }, getSystemTime());

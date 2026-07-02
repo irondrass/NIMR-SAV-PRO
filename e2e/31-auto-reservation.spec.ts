@@ -354,7 +354,7 @@ test.describe("Lot 6K-B-A — Vehicle-Level Auto Reservation and Delivery ETA", 
           isEstimatedDurationValidated: true,
           planningStart: localIso("2026-06-23", 8),
           planningEnd: localIso("2026-06-23", 9),
-          plannedTechnicianId: "tech_01",
+          plannedTechnicianId: "tech_03",
           plannedBayId: "bay_fast_01",
           planningDate: "2026-06-23"
         }
@@ -373,6 +373,7 @@ test.describe("Lot 6K-B-A — Vehicle-Level Auto Reservation and Delivery ETA", 
 
     await humanSelect(page, page.locator('[data-testid="planning-manual-dossier"]'), "NIMR-AUTO-MODIF");
     await humanSelect(page, page.locator('[data-testid="planning-manual-task"]'), "task-modif");
+    await humanSelect(page, page.locator('[data-testid="planning-manual-tech"]'), "tech_03");
     await humanSelect(page, page.locator('[data-testid="planning-manual-hour"]'), "11");
     await humanSelect(page, page.locator('[data-testid="planning-manual-minute"]'), "00");
     await humanClick(page, page.locator('[data-testid="planning-manual-submit"]'));

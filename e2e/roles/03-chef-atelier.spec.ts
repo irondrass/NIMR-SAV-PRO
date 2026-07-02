@@ -27,7 +27,8 @@ test.describe("Rôle : Chef d'Atelier", () => {
   const testTech = createMockTech({
     id: "tech_chef_01",
     nom: "Tech Chef Standard",
-    disponibilite: "disponible"
+    disponibilite: "disponible",
+    specialite: "Mécanicien",
   });
 
   test.beforeEach(async ({ page }) => {

@@ -91,3 +91,13 @@ Downloaded reference files used for analysis:
 - **Amélioration éventuelle :** None.
 - **Impact métier :** Alignement total des écrans pour éviter les confusions en atelier.
 - **Test ajouté :** `tests/planning-technician-assignment-sync.test.ts`
+
+### 5. Mapping Géométrie / Alignement
+- **Ancienne fonction :** Mapping main-d’œuvre vers étape atelier
+- **Comportement exact ancien :** Contrôle géométrie relève de la réparation mécanique / trains roulants.
+- **Comportement PRO avant correction :** La ligne était classée en body-disassembly, donc bloquée par la compatibilité stricte.
+- **Écart :** Mauvais mapping MO → étape.
+- **Correction appliquée :** Ajout d’une règle prioritaire géométrie/parallélisme/alignement train vers Réparation mécanique.
+- **Amélioration éventuelle :** Aucune logique nouvelle, correction du mapping métier.
+- **Impact métier :** La géométrie est réservée sur mécanicien + pont grands travaux, pas sur tôlier.
+- **Test ajouté :** QA-133 conservé et/ou test unitaire dédié géométrie → mechanical.

@@ -70,10 +70,12 @@ import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
 import {
   buildDossierPlanningOverview,
   getRepairLinePlanningSegments,
+  mapRepairLineToPlanningStep,
   PLANNING_STEP_DEFINITIONS,
   PlanningStepId,
   releasePlanningStepReservation,
 } from "../workshop-planning-steps";
+import { OLD_APP_PHASE_TO_PRO_STAGE } from "../core/old-app-quote-rules";
 import {
   buildStageReservationNeeds,
   buildWorkshopStageDurationSummary,
@@ -150,6 +152,9 @@ export default function DossierDetail({
   // Temporary form values for adding a repair order line
   const [newROLineText, setNewROLineText] = useState("");
   const [showQuoteImport, setShowQuoteImport] = useState(false);
+  const [activeStepDurationEditId, setActiveStepDurationEditId] = useState<string | null>(null);
+  const [tempStepDurationValue, setTempStepDurationValue] = useState<number>(0);
+  const [tempStepDurationSource, setTempStepDurationSource] = useState<"manual" | "preset">("manual");
   const [showWorkshopTaskModal, setShowWorkshopTaskModal] = useState(false);
   const [workshopTaskLabel, setWorkshopTaskLabel] = useState("");
   const [workshopTaskDescription, setWorkshopTaskDescription] = useState("");
@@ -620,7 +625,7 @@ export default function DossierDetail({
     }
   };
 
-  const handleStepDurationChange = (stepId: string, nextValue: number) => {
+  const handleStepDurationChange = (stepId: string, nextValue: number, source: "manual" | "preset" = "manual") => {
     if (!canEditDossierPlanning) return;
     
     let updatedDossier = { ...dossier };
@@ -638,10 +643,10 @@ export default function DossierDetail({
           designation: stepDef?.label || stepId,
           tempsEstime: nextValue,
           tempsPasse: 0,
-          status: "non_demarre",
+          status: "pending",
           workshopStageId: stepId,
           isEstimatedDurationValidated: true,
-          estimateSource: "manual",
+          estimateSource: source,
           history: [`${new Date().toISOString()} - Tâche créée pour activer l'étape par modification de durée.`]
         };
         nextLines.push(newTask);
@@ -656,13 +661,15 @@ export default function DossierDetail({
             return {
               ...line,
               tempsEstime: nextValue,
-              isEstimatedDurationValidated: true
+              isEstimatedDurationValidated: true,
+              estimateSource: source
             };
           } else {
             return {
               ...line,
               tempsEstime: 0,
-              isEstimatedDurationValidated: true
+              isEstimatedDurationValidated: true,
+              estimateSource: source
             };
           }
         }
@@ -723,7 +730,8 @@ export default function DossierDetail({
     const promptFn = typeof window.prompt === "function" ? window.prompt.bind(window) : null;
     const reason = promptFn ? String(promptFn("Modifiez le service seulement si l’opération doit être confiée à un autre métier.\n\nMotif obligatoire de la modification du service :") || "").trim() : "";
     if (!reason) {
-      alert("Motif obligatoire pour modifier le service.");
+      setPlanningStepFeedback("");
+      setPlanningStepError("Motif obligatoire pour modifier le service.");
       return;
     }
     
@@ -733,9 +741,10 @@ export default function DossierDetail({
       [stepId]: nextService
     };
     
-    const compatibleTechs = techniciens.filter(t => t.active !== false && isTechnicianCompatibleForStep(t, stepId, nextService));
+    const compatibleTechs = techniciens.filter(t => isTechnicianCompatibleForStep(t, stepId, nextService));
     if (compatibleTechs.length === 0) {
-      alert("Aucun technicien compatible pour ce métier dans l'atelier.");
+      setPlanningStepFeedback("");
+      setPlanningStepError("Aucun technicien compatible pour ce métier dans l'atelier.");
       return;
     }
     
@@ -2486,7 +2495,7 @@ export default function DossierDetail({
               </div>
             </section>
 
-            <section className="space-y-3">
+            <section data-testid="stage-editor-container" className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Étapes à modifier</h4>
                 <span className="text-[10px] font-bold uppercase text-slate-400">Réservation unitaire par tâche atelier</span>
@@ -2543,15 +2552,17 @@ export default function DossierDetail({
                         </div>
                         <div>
                           <span className="block text-slate-400">Durée validée</span>
-                          <input
-                            type="number"
-                            step="0.25"
-                            min="0"
+                          <button
                             disabled={!canEditDossierPlanning}
-                            value={step.estimatedHours}
-                            onChange={(e) => handleStepDurationChange(step.stepId, parseFloat(e.target.value) || 0)}
-                            className="mt-1 block w-20 rounded border border-slate-200 bg-white px-2 py-0.5 text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold font-mono"
-                          />
+                            onClick={() => {
+                              setActiveStepDurationEditId(step.stepId);
+                              setTempStepDurationValue(step.estimatedHours);
+                            }}
+                            data-testid={`edit-stage-duration-${step.stepId}`}
+                            className="mt-1 block rounded border border-slate-200 bg-white px-2 py-0.5 text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold font-mono hover:bg-slate-50 cursor-pointer text-left w-20"
+                          >
+                            {step.estimatedHours > 0 ? `${step.estimatedHours.toFixed(1)}H` : "À estimer"}
+                          </button>
                         </div>
                         <div>
                           <span className="block text-slate-400">Technicien affecté</span>
@@ -2574,7 +2585,7 @@ export default function DossierDetail({
                               className="mt-1 block w-full rounded border border-slate-200 bg-white px-2 py-1 text-slate-800 focus:border-blue-500 focus:outline-none font-medium"
                             >
                               <option value="">Auto - meilleur disponible</option>
-                              {techniciens.filter(t => t.active !== false && isTechnicianCompatibleForStep(t, step.stepId, dossier.stepServiceTypes?.[step.stepId])).map(tech => (
+                              {techniciens.filter(t => isTechnicianCompatibleForStep(t, step.stepId, dossier.stepServiceTypes?.[step.stepId])).map(tech => (
                                 <option key={tech.id} value={tech.id}>
                                   {tech.nom}
                                 </option>
@@ -2582,7 +2593,7 @@ export default function DossierDetail({
                             </select>
                           </label>
 
-                          {step.stepId !== "quality" && step.stepId !== "oilService" ? (
+                          {step.stepId !== "quality" && step.stepId !== OLD_APP_PHASE_TO_PRO_STAGE.oilService ? (
                             <label className="block text-[11px] font-semibold text-slate-500">
                               <span className="block text-slate-400">Service à réserver dans le planning</span>
                               <select
@@ -3878,6 +3889,79 @@ export default function DossierDetail({
                 className="rounded-lg bg-emerald-600 px-4 py-2 font-black text-white hover:bg-emerald-700"
               >
                 Valider durée
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeStepDurationEditId && (
+        <div data-testid="stage-duration-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xl">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-900">Modifier la durée de l'étape</h3>
+              <p className="mt-1 font-semibold text-slate-500">
+                Ajustez le temps estimé pour l'étape : {planningOverview.steps.find(s => s.stepId === activeStepDurationEditId)?.label}
+              </p>
+            </div>
+            
+            <label className="block space-y-1">
+              <span className="font-black uppercase text-slate-600">Durée (heures)</span>
+              <input
+                type="number"
+                step="0.25"
+                min="0"
+                value={tempStepDurationValue}
+                onChange={(e) => {
+                  setTempStepDurationValue(parseFloat(e.target.value) || 0);
+                  setTempStepDurationSource("manual");
+                }}
+                className="w-full rounded-lg border border-slate-200 bg-white p-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </label>
+
+            <div className="space-y-1">
+              <span className="font-black uppercase text-slate-600 block">Presets de temps</span>
+              <div className="flex flex-wrap gap-1.5">
+                {[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    data-testid={`preset-duration-option-${val.toFixed(1)}`}
+                    onClick={() => {
+                      setTempStepDurationValue(val);
+                      setTempStepDurationSource("preset");
+                    }}
+                    className={`px-2.5 py-1 rounded font-bold border ${
+                      tempStepDurationValue === val
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    } cursor-pointer`}
+                  >
+                    {val.toFixed(1)}H
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setActiveStepDurationEditId(null)}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-black text-slate-700 hover:bg-slate-200 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-stage-duration"
+                onClick={() => {
+                  handleStepDurationChange(activeStepDurationEditId, tempStepDurationValue, tempStepDurationSource);
+                  setActiveStepDurationEditId(null);
+                }}
+                className="rounded-lg bg-emerald-600 px-4 py-2 font-black text-white hover:bg-emerald-700 cursor-pointer"
+              >
+                Confirmer
               </button>
             </div>
           </div>

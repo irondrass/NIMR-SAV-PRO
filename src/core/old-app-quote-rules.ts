@@ -193,6 +193,10 @@ export function distributeOldAppLaborHours(
   const normalized = normalizeOldAppEstimateText(operation);
   const cleanDetail = removeOldAppKnownOperationPrefix(operation);
 
+  if (/\b(GEOMETRIE|PARALLELISME|REGLAGE\s+TRAIN|ALIGNEMENT\s+TRAIN|ALIGNEMENT\s+ROUES)\b/.test(normalized)) {
+    return [makeOldAppAllocation("mechanical", operation, hours)];
+  }
+
   if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
     const [body, reassembly] = splitOldAppPlanningHours(hours, [0.5, 0.5]);
     return [
