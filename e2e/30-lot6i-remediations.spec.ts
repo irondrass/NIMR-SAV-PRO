@@ -121,7 +121,7 @@ test.describe("Lot 6I — remédiations P0/P1 SAV", () => {
     await changeUserRole(page, "role-option-livraison");
 
     await humanClick(page, page.locator('[data-testid="nav-livraison"]'));
-    await humanClick(page, page.locator(`[data-testid="delivery-dossier-row-${dossier.id}"]`));
+    await humanClick(page, page.locator(`[data-testid="delivery-blocked-row-${dossier.id}"]`));
     await expect(page.locator('[data-testid="delivery-simple-signature-notice"]')).toContainText(PILOT_SIGNATURE_NOTICE);
 
     await humanClick(page, page.locator('[data-testid="delivery-check-qc"]'));

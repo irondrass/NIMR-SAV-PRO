@@ -577,15 +577,16 @@ Page 3 / 3
     }
     await humanWait(page, 300);
 
-    // Vérifier la décomposition ancienne app : 1 preset + 9 tâches atelier importées
+    // Vérifier la décomposition ancienne app : 1 preset + 8 tâches atelier importées
     const taskCards = page.locator("[data-testid^=\"task-card-\"]");
-    await expect(taskCards).toHaveCount(10);
+    await expect(taskCards).toHaveCount(9);
 
     // Vérifier que le produit peinture, Report, Total, TVA ne sont pas des tâches
     const taskTexts = await taskCards.allTextContents();
     for (const text of taskTexts) {
       const upper = text.toUpperCase();
       expect(upper).not.toContain("PRODUIT DE PEINTURE");
+      expect(upper).not.toContain("CONTROLE QUALITE");
       expect(upper).not.toContain("REPORT");
       expect(upper).not.toContain("TVA");
     }

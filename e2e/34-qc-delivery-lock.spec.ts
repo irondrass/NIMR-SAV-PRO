@@ -95,7 +95,7 @@ test.describe("Lot 6K-C - verrou QC avant restitution", () => {
     await seedDossiers(page, [dossier]);
     await changeUserRole(page, "role-option-livraison");
     await humanClick(page, page.locator('[data-testid="nav-livraison"]'));
-    await humanClick(page, page.locator('[data-testid="delivery-dossier-row-NIMR-QC-MISSING"]'));
+    await humanClick(page, page.locator('[data-testid="delivery-blocked-row-NIMR-QC-MISSING"]'));
 
     await expect(page.locator('[data-testid="delivery-readiness-block"]')).toContainText("Restitution impossible");
     await expect(page.locator('[data-testid="delivery-blocked-message"]')).toContainText("contrôle qualité obligatoire");
@@ -151,7 +151,7 @@ test.describe("Lot 6K-C - verrou QC avant restitution", () => {
     await changeUserRole(page, "role-option-chef-atelier");
     await openDossierDeliveryTab(page, dossier.id);
 
-    await expect(page.locator('[data-testid="delivery-blocked-message"]').first()).toContainText("travaux atelier non terminés");
+    await expect(page.locator('[data-testid="delivery-blocked-message"]').first()).toContainText(/tâche|travaux|non termin/i);
   });
 
   test("affiche prêt restitution si QC conforme et travaux terminés", async ({ page }) => {

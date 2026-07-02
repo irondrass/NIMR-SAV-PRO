@@ -131,7 +131,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
 
   test("Si aucun créneau disponible : un message d'erreur est visible", async ({ page }) => {
     const dossier = createReservableDossier({ id: "NIMR-RESERVE-NOSLOT" });
-    await seedPlanning(page, [dossier], { technicians: [] });
+    await seedPlanning(page, [dossier], { technicians: [{ ...MOCK_TECHNICIENS[0], id: "tech_noslot_inactive", actif: false }] });
     await changeUserRole(page, "role-option-chef-atelier");
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
 

@@ -9,7 +9,24 @@ export async function humanWait(page: Page, ms = 150) {
 export async function humanClick(page: Page, locator: Locator) {
   await locator.waitFor({ state: "visible", timeout: 5000 });
   await locator.scrollIntoViewIfNeeded();
-  await locator.click();
+  try {
+    await locator.click({ timeout: 5000 });
+  } catch (error) {
+    const mobileMenuButton = page.locator('[data-testid="mobile-menu-button"]');
+    const mobileOverlay = page.locator('[data-testid="mobile-menu-overlay"]');
+    const canOpenMobileMenu =
+      await mobileMenuButton.isVisible().catch(() => false) &&
+      !(await mobileOverlay.isVisible().catch(() => false));
+    const isOffscreen = await locator.evaluate((element: HTMLElement) => {
+      const rect = element.getBoundingClientRect();
+      return rect.right <= 0 || rect.left < 0 || rect.top < 0 || rect.bottom > window.innerHeight;
+    }).catch(() => false);
+
+    if (!canOpenMobileMenu || !isOffscreen) throw error;
+    await mobileMenuButton.click({ timeout: 3000 });
+    await humanWait(page);
+    await locator.click({ timeout: 5000 });
+  }
   await humanWait(page);
 }
 

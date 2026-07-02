@@ -89,6 +89,7 @@ test.describe("Lot 6K-F — tâches atelier depuis devis et réservation", () =>
 
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
     await expect(page.locator('[data-testid="reception-vehicle-model"]')).toHaveValue("DONGFENG BOX EV 430");
+    await humanFill(page, page.locator('[data-testid="reception-mileage"]'), "12000");
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
     await humanFill(page, page.locator('[data-testid="reception-reason"]'), "Contrôle atelier fictif depuis base véhicule");
     await humanClick(page, page.locator('[data-testid="reception-next"]'));

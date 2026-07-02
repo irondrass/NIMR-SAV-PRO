@@ -210,7 +210,7 @@ test.describe("Lot 6K-E - action guards, modales et audit local", () => {
     await seedApp(page, [dossier]);
     await changeUserRole(page, "role-option-livraison");
     await humanClick(page, page.locator('[data-testid="nav-livraison"]'));
-    await humanClick(page, page.locator('[data-testid="delivery-dossier-row-NIMR-GUARD-BLOCKED"]'));
+    await humanClick(page, page.locator('[data-testid="delivery-blocked-row-NIMR-GUARD-BLOCKED"]'));
 
     await expect(page.locator('[data-testid="delivery-blocked-message"]')).toContainText("contrôle qualité obligatoire");
     const entries = await getAuditEntries(page);

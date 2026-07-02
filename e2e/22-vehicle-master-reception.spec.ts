@@ -124,6 +124,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     await expect(deliveryDateInput).toHaveValue("2026-06-15");
     await expect(warrantyBadge).toContainText("Garantie active");
     await expect(lastServiceInput).toHaveValue("Dernier entretien le 2027-06-15 à 15000 km");
+    await page.locator('[data-testid="reception-mileage"]').fill("15000");
 
     // 8. Complete the Guided Reception flow to create the Repair Order
     await humanClick(page, nextBtn); // Step 2 -> Step 3
@@ -299,6 +300,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
 
     // 6. Complete creation to establish an active dossier
     await humanClick(page, nextBtn); // Step 1 -> Step 2
+    await page.locator('[data-testid="reception-mileage"]').fill("15000");
     await humanClick(page, nextBtn); // Step 2 -> Step 3
     const presetComplaint = page.locator('[data-testid="preset-complaint-voyant-moteur"]');
     await humanClick(page, presetComplaint);
@@ -332,6 +334,7 @@ test.describe("Vehicle Master and Guided Reception Assistance", () => {
     await humanClick(page, page.locator('[data-testid="vehicle-overwrite-confirm"]'));
 
     // Advance to final step
+    await page.locator('[data-testid="reception-mileage"]').fill("15100");
     await humanClick(page, nextBtn); // Step 2 -> Step 3
     await humanClick(page, presetComplaint);
     await humanClick(page, nextBtn); // Step 3 -> Step 4

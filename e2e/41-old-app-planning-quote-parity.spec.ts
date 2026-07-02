@@ -77,7 +77,7 @@ test.describe("Old app parity - Planning et Import Devis", () => {
     await expect(taskCards.filter({ hasText: "Peinture et finition PORTE DR" })).toHaveCount(1);
     await expect(taskCards.filter({ hasText: "Peinture mutual" })).toHaveCount(1);
     await expect(taskCards.filter({ hasText: "Finition + lavage" })).toHaveCount(1);
-    await expect(taskCards.filter({ hasText: "Controle qualite" })).toHaveCount(1);
+    await expect(taskCards.filter({ hasText: "Controle qualite" })).toHaveCount(0);
 
     await humanClick(page, page.locator('[data-testid="tab-rdv-planning"]'));
     await humanClick(page, page.locator('[data-testid="reserve-all-workshop-tasks"]'));
@@ -98,6 +98,6 @@ test.describe("Old app parity - Planning et Import Devis", () => {
     expect(persisted.ordresReparation.some((line: any) => line.workshopStageId === "preparation")).toBe(true);
     expect(persisted.ordresReparation.some((line: any) => line.workshopStageId === "paint")).toBe(true);
     expect(persisted.ordresReparation.some((line: any) => line.workshopStageId === "finish")).toBe(true);
-    expect(persisted.ordresReparation.some((line: any) => line.workshopStageId === "quality")).toBe(true);
+    expect(persisted.ordresReparation.some((line: any) => line.workshopStageId === "quality")).toBe(false);
   });
 });

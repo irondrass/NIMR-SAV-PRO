@@ -24,7 +24,6 @@ test.describe("Lot 6E — Hardening métier pré-RC", () => {
     await humanFill(page, page.locator('[data-testid="reception-vin"]'), "VIN-COURT");
     await humanClick(page, page.locator('[data-testid="reception-next"]'));
     await expect(page.locator('[data-testid="reception-warning-message"]')).toContainText(/VIN invalide/i);
-    await humanClick(page, page.locator('[data-testid="reception-previous"]'));
 
     await humanFill(page, page.locator('[data-testid="reception-vin"]'), "");
     await humanFill(page, page.locator('[data-testid="reception-mileage"]'), "-5");
