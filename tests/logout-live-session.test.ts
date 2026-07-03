@@ -9,10 +9,18 @@ const appSource = fs.readFileSync("src/App.tsx", "utf8");
 assert.ok(appSource.includes("e.stopPropagation()"), "Logout click should stop event propagation.");
 
 // Verify the session invalidation flag is set to true on logout
-assert.ok(appSource.includes('localStorage.setItem("nimr-sav-pro-session-invalidated", "true")'), "Session invalidation flag must be set to true on logout.");
+assert.ok(
+  appSource.includes('writeLocalStorageValue("nimr-sav-pro-session-invalidated", "true")') ||
+  appSource.includes('localStorage.setItem("nimr-sav-pro-session-invalidated", "true")'),
+  "Session invalidation flag must be set to true on logout."
+);
 
 // Verify the session invalidation flag is removed on login
-assert.ok(appSource.includes('localStorage.removeItem("nimr-sav-pro-session-invalidated")'), "Session invalidation flag must be removed on successful login.");
+assert.ok(
+  appSource.includes('removeLocalStorageValue("nimr-sav-pro-session-invalidated")') ||
+  appSource.includes('localStorage.removeItem("nimr-sav-pro-session-invalidated")'),
+  "Session invalidation flag must be removed on successful login."
+);
 
 // Verify loadStoredSession checks the invalidated flag
 assert.ok(appSource.includes('const invalidated = localStorage.getItem("nimr-sav-pro-session-invalidated")'), "loadStoredSession must check the invalidation flag.");

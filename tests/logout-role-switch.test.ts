@@ -9,7 +9,10 @@ console.log("Démarrage des tests logout-role-switch...");
 const appSource = fs.readFileSync("src/App.tsx", "utf8");
 const logoutBody = appSource.slice(appSource.indexOf("const handleLogout = () =>"), appSource.indexOf("const handleCreateUser"));
 
-assert.ok(logoutBody.includes("localStorage.removeItem(STORAGE_KEYS.session)"));
+assert.ok(
+  logoutBody.includes("removeLocalStorageValue(STORAGE_KEYS.session)") ||
+  logoutBody.includes("localStorage.removeItem(STORAGE_KEYS.session)")
+);
 for (const forbiddenKey of [
   "STORAGE_KEYS.dossiers",
   "STORAGE_KEYS.techs",

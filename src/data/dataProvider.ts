@@ -28,16 +28,16 @@ export interface LocalCollectionRepositoryOptions<T> {
 }
 
 export interface BackendMigrationReadiness {
-  currentRuntime: "localStorage";
-  preparedTargets: Array<"IndexedDB" | "backend-api">;
+  currentRuntime: "localStorage+IndexedDB";
+  preparedTargets: Array<"IndexedDB" | "backend-api" | "Supabase" | "Google Drive metadata">;
   backendEnabled: false;
   authServerEnabled: false;
   repositories: string[];
 }
 
 export const BACKEND_MIGRATION_READINESS: BackendMigrationReadiness = {
-  currentRuntime: "localStorage",
-  preparedTargets: ["IndexedDB", "backend-api"],
+  currentRuntime: "localStorage+IndexedDB",
+  preparedTargets: ["IndexedDB", "backend-api", "Supabase", "Google Drive metadata"],
   backendEnabled: false,
   authServerEnabled: false,
   repositories: [
@@ -49,6 +49,7 @@ export const BACKEND_MIGRATION_READINESS: BackendMigrationReadiness = {
     "qc",
     "delivery",
     "audit",
+    "fileAttachments",
   ],
 };
 
@@ -65,6 +66,10 @@ export class MemoryStorageLike implements StorageLike {
 
   removeItem(key: string): void {
     this.values.delete(key);
+  }
+
+  keys(): string[] {
+    return [...this.values.keys()];
   }
 }
 
@@ -129,4 +134,3 @@ export function createLocalCollectionRepository<T>(
     },
   };
 }
-

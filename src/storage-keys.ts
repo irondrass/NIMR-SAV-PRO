@@ -21,6 +21,9 @@ export const STORAGE_KEYS = {
   vehicleMaster: "nimr-sav-pro-vehicle-master-v1",
   vehicleMasterLastImport: "nimr-sav-pro-vehicle-master-last-import",
   auditLog: "nimr-sav-pro-audit-log-v1",
+  fileAttachments: "nimr-sav-pro-file-attachments-v1",
+  storageSchemaVersion: "nimr-sav-pro-storage-schema-version",
+  storageMigrationState: "nimr-sav-pro-storage-migration-state-v1",
 } as const;
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

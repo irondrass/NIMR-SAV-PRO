@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from "react";
+import React, { useState } from "react";
 import { History } from "lucide-react";
-import { getAuditTrail } from "../audit-trail";
+import { getAuditTrailPage } from "../audit-trail";
 import { UserRole } from "../types";
 
 interface AuditTrailViewProps {
@@ -30,11 +30,11 @@ function getResultClass(result: string): string {
 }
 
 export default function AuditTrailView({ currentRole, dossierId, limit = 50 }: AuditTrailViewProps) {
+  const [visibleLimit, setVisibleLimit] = useState(limit);
   if (!visibleRoles.has(currentRole)) return null;
 
-  const entries = getAuditTrail()
-    .filter(entry => !dossierId || entry.dossierId === dossierId)
-    .slice(0, limit);
+  const page = getAuditTrailPage({ dossierId, limit: visibleLimit });
+  const entries = page.entries;
 
   return (
     <section data-testid="audit-trail-panel" className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -44,7 +44,7 @@ export default function AuditTrailView({ currentRole, dossierId, limit = 50 }: A
           Audit local
         </h3>
         <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">
-          Consultation
+          {entries.length}/{page.total}
         </span>
       </div>
 
@@ -77,6 +77,16 @@ export default function AuditTrailView({ currentRole, dossierId, limit = 50 }: A
               </div>
             </article>
           ))}
+          {entries.length < page.total && (
+            <button
+              type="button"
+              data-testid="audit-trail-load-more"
+              onClick={() => setVisibleLimit(current => current + limit)}
+              className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[10px] font-black uppercase text-slate-600 hover:border-blue-300 hover:text-blue-700"
+            >
+              Charger plus
+            </button>
+          )}
         </div>
       )}
     </section>

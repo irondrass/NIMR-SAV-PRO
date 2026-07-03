@@ -67,6 +67,18 @@ import {
 } from "./workshop-availability";
 import { logAuditEvent } from "./audit-trail";
 import { canRunGuardedAction } from "./action-guard";
+import { bootstrapLot7Storage, mirrorStorageKeyToIndexedDb } from "./data/storageMigration";
+import {
+  buildStorageDiagnostics,
+  buildSynchronousStorageDiagnostics,
+  StorageDiagnostics,
+} from "./data/storageDiagnostics";
+import {
+  buildDossierSearchIndex,
+  DOSSIER_LIST_PAGE_SIZE,
+  matchesDossierSearch,
+  paginateItems,
+} from "./performance-lot7";
 
 // Views
 import DirectorDashboard from "./components/DirectorDashboard";
@@ -88,6 +100,7 @@ import LivraisonView from "./components/LivraisonView";
 import WarrantyView from "./components/WarrantyView";
 import SatisfactionView from "./components/SatisfactionView";
 import ConfirmModal from "./components/ConfirmModal";
+import StorageDiagnosticsPanel from "./components/StorageDiagnosticsPanel";
 
 // Icons
 import { 
@@ -122,6 +135,7 @@ import {
 function writeLocalStorageValue(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
+    mirrorStorageKeyToIndexedDb(key, value);
   } catch {
     // Local persistence is a convenience layer; the UI remains usable without it.
   }
@@ -129,6 +143,15 @@ function writeLocalStorageValue(key: string, value: string) {
 
 function writeLocalStorageJSON<T>(key: string, value: T) {
   writeLocalStorageValue(key, JSON.stringify(value));
+}
+
+function removeLocalStorageValue(key: string) {
+  try {
+    localStorage.removeItem(key);
+    mirrorStorageKeyToIndexedDb(key, null);
+  } catch {
+    // Storage removal must not block the UI.
+  }
 }
 
 function loadStoredArray<T>(key: string, fallback: T[], itemGuard: (value: unknown) => value is T): T[] {
@@ -150,7 +173,7 @@ function loadStoredSession(): UserSession | null {
   try {
     const invalidated = localStorage.getItem("nimr-sav-pro-session-invalidated");
     if (invalidated === "true") {
-      localStorage.removeItem(STORAGE_KEYS.session);
+      removeLocalStorageValue(STORAGE_KEYS.session);
       return null;
     }
     const rawSession = localStorage.getItem(STORAGE_KEYS.session);
@@ -296,14 +319,21 @@ export default function App() {
   const [vehicleMasterRecords, setVehicleMasterRecords] = useState<VehicleMasterRecord[]>([]);
   const [vehicleMasterLastImport, setVehicleMasterLastImport] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics>(() => buildSynchronousStorageDiagnostics());
+  const [dossierListLimit, setDossierListLimit] = useState(DOSSIER_LIST_PAGE_SIZE);
+
+  const refreshStorageDiagnostics = async () => {
+    const nextDiagnostics = await buildStorageDiagnostics();
+    setStorageDiagnostics(nextDiagnostics);
+  };
 
   const handleUpdateVehicleMaster = (records: VehicleMasterRecord[]) => {
     handleTouchSession();
     setVehicleMasterRecords(records);
-    localStorage.setItem(STORAGE_KEYS.vehicleMaster, JSON.stringify(records));
+    writeLocalStorageJSON(STORAGE_KEYS.vehicleMaster, records);
     const importTime = new Date().toISOString();
     setVehicleMasterLastImport(importTime);
-    localStorage.setItem(STORAGE_KEYS.vehicleMasterLastImport, importTime);
+    writeLocalStorageValue(STORAGE_KEYS.vehicleMasterLastImport, importTime);
     recordAudit({
       module: "vehicules",
       action: "import_referentiel",
@@ -315,9 +345,9 @@ export default function App() {
   const handleClearVehicleMaster = () => {
     handleTouchSession();
     setVehicleMasterRecords([]);
-    localStorage.removeItem(STORAGE_KEYS.vehicleMaster);
+    removeLocalStorageValue(STORAGE_KEYS.vehicleMaster);
     setVehicleMasterLastImport(null);
-    localStorage.removeItem(STORAGE_KEYS.vehicleMasterLastImport);
+    removeLocalStorageValue(STORAGE_KEYS.vehicleMasterLastImport);
     recordAudit({
       module: "vehicules",
       action: "purge_referentiel",
@@ -343,15 +373,6 @@ export default function App() {
 
   // Load initial states or restore from local storage
   useEffect(() => {
-    setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, [], isDossierSAV).map(normalizeDossierForRuntime));
-    setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, [], isReclamationClient));
-    setTechList(loadStoredArray(STORAGE_KEYS.techs, [], isTechnicienResource));
-    setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, [], isActiviteLog));
-    setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
-    setVehicleMasterRecords(loadStoredVehicleMaster(STORAGE_KEYS.vehicleMaster));
-    setVehicleMasterLastImport(localStorage.getItem(STORAGE_KEYS.vehicleMasterLastImport) || null);
-    setHasImportBackup(Boolean(localStorage.getItem(PRE_IMPORT_BACKUP_KEY)));
-
     const defaultAvail: WorkshopAvailabilityConfig = {
       schedule: getDefaultWorkshopSchedule(),
       exceptions: [],
@@ -360,7 +381,21 @@ export default function App() {
       holidays: [],
       shiftProfiles: getDefaultWorkshopShiftProfiles(),
     };
-    setAvailabilityConfig(loadStoredAvailabilityConfig(STORAGE_KEYS.availability, defaultAvail));
+
+    const hydrateFromLocalStorage = () => {
+      setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, [], isDossierSAV).map(normalizeDossierForRuntime));
+      setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, [], isReclamationClient));
+      setTechList(loadStoredArray(STORAGE_KEYS.techs, [], isTechnicienResource));
+      setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, [], isActiviteLog));
+      setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
+      setVehicleMasterRecords(loadStoredVehicleMaster(STORAGE_KEYS.vehicleMaster));
+      setVehicleMasterLastImport(localStorage.getItem(STORAGE_KEYS.vehicleMasterLastImport) || null);
+      setHasImportBackup(Boolean(localStorage.getItem(PRE_IMPORT_BACKUP_KEY)));
+      setAvailabilityConfig(loadStoredAvailabilityConfig(STORAGE_KEYS.availability, defaultAvail));
+      setStorageDiagnostics(buildSynchronousStorageDiagnostics());
+    };
+
+    hydrateFromLocalStorage();
 
     let mounted = true;
     const initializeAuth = async () => {
@@ -377,7 +412,7 @@ export default function App() {
         writeLocalStorageJSON(STORAGE_KEYS.session, touched);
         setActiveTab(getDefaultTabForRole(storedSession!.role));
       } else {
-        localStorage.removeItem(STORAGE_KEYS.session);
+        removeLocalStorageValue(STORAGE_KEYS.session);
         if (storedSession) {
           setSessionExpiredMessage("Session expirée après 30 minutes d'inactivité.");
         }
@@ -386,6 +421,18 @@ export default function App() {
     };
 
     initializeAuth();
+    bootstrapLot7Storage()
+      .then(({ provider }) => {
+        if (!mounted) return;
+        hydrateFromLocalStorage();
+        return buildStorageDiagnostics({ indexedDbProvider: provider });
+      })
+      .then(nextDiagnostics => {
+        if (mounted && nextDiagnostics) setStorageDiagnostics(nextDiagnostics);
+      })
+      .catch(() => {
+        if (mounted) setStorageDiagnostics(buildSynchronousStorageDiagnostics());
+      });
     return () => {
       mounted = false;
     };
@@ -749,9 +796,9 @@ export default function App() {
 
   // Filter application search indexing
   const filteredDossiers = useMemo(() => {
+    const searchIndex = buildDossierSearchIndex(dossiers);
     return dossiers.filter(d => {
-      const textToSearch = `${d.id} ${d.clientNom} ${d.vehiculeImmatriculation} ${d.vehiculeMarque} ${d.vehiculeModele} ${d.clientTelephone}`.toLowerCase();
-      const matchesSearch = textToSearch.includes(globalSearchTerm.toLowerCase());
+      const matchesSearch = matchesDossierSearch(searchIndex, d, globalSearchTerm);
       const matchesOperationalFilter =
         dossierOperationalFilter === "active"
           ? isOperationalActiveDossier(d)
@@ -766,6 +813,15 @@ export default function App() {
     });
   }, [dossiers, globalSearchTerm, dossierOperationalFilter, statusFilter, priorityFilter]);
 
+  useEffect(() => {
+    setDossierListLimit(DOSSIER_LIST_PAGE_SIZE);
+  }, [globalSearchTerm, dossierOperationalFilter, statusFilter, priorityFilter]);
+
+  const paginatedDossiers = useMemo(
+    () => paginateItems(filteredDossiers, dossierListLimit),
+    [filteredDossiers, dossierListLimit]
+  );
+
   const dossierOperationalFilterLabels: Record<DossierOperationalFilter, string> = {
     active: "Actifs",
     ready_for_billing: "Prêts facturation ERP",
@@ -776,6 +832,10 @@ export default function App() {
   const blockedCount = useMemo(() => {
     return dossiers.filter(d => d.statut === DossierStatus.BLOQUE).length;
   }, [dossiers]);
+
+  useEffect(() => {
+    refreshStorageDiagnostics();
+  }, [dossiers, techList, reservations, activityLogs, vehicleMasterRecords]);
 
   const selectedDossier = selectedDossierId ? dossiers.find(d => d.id === selectedDossierId) : null;
   const goToTab = (tab: string) => {
@@ -811,7 +871,7 @@ export default function App() {
     const result = await loginUser(users, username, pin);
     if (result.ok) {
       try {
-        localStorage.removeItem("nimr-sav-pro-session-invalidated");
+        removeLocalStorageValue("nimr-sav-pro-session-invalidated");
       } catch {}
       persistUsers(result.users);
       setCurrentSession(result.session);
@@ -841,8 +901,8 @@ export default function App() {
       });
     }
     try {
-      localStorage.removeItem(STORAGE_KEYS.session);
-      localStorage.setItem("nimr-sav-pro-session-invalidated", "true");
+      removeLocalStorageValue(STORAGE_KEYS.session);
+      writeLocalStorageValue("nimr-sav-pro-session-invalidated", "true");
     } catch {
       // Session removal failure should not keep the UI unlocked in memory.
     }
@@ -1252,15 +1312,18 @@ export default function App() {
             /* Render active tabs */
             <>
               {activeTab === "dashboard" && (
-                <DirectorDashboard 
-                  dossiers={dossiers} 
-                  techniciens={techList}
-                  reservations={reservations}
-                  availabilityConfig={availabilityConfig}
-                  onSelectDossier={(id) => {
-                    setSelectedDossierId(id);
-                  }}
-                />
+                <div className="space-y-4">
+                  <DirectorDashboard
+                    dossiers={dossiers}
+                    techniciens={techList}
+                    reservations={reservations}
+                    availabilityConfig={availabilityConfig}
+                    onSelectDossier={(id) => {
+                      setSelectedDossierId(id);
+                    }}
+                  />
+                  <StorageDiagnosticsPanel diagnostics={storageDiagnostics} currentRole={activeRole} />
+                </div>
               )}
 
               {activeTab === "reception-rapide" && (
@@ -1399,7 +1462,7 @@ export default function App() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
-                                {filteredDossiers.map(doss => (
+                                {paginatedDossiers.visibleItems.map(doss => (
                                   <tr
                                     key={doss.id}
                                     data-testid={`dossier-card-${doss.id}`}
@@ -1439,6 +1502,21 @@ export default function App() {
                                 ))}
                               </tbody>
                             </table>
+                            {paginatedDossiers.hiddenCount > 0 && (
+                              <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600">
+                                <span data-testid="dossier-list-pagination-summary">
+                                  {paginatedDossiers.visibleItems.length} dossiers affichés sur {paginatedDossiers.total}.
+                                </span>
+                                <button
+                                  type="button"
+                                  data-testid="dossier-list-load-more"
+                                  onClick={() => setDossierListLimit(limit => limit + DOSSIER_LIST_PAGE_SIZE)}
+                                  className="rounded-md bg-slate-900 px-3 py-1.5 text-[10px] font-black uppercase text-white transition hover:bg-blue-700"
+                                >
+                                  Charger plus
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

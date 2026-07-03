@@ -11,11 +11,13 @@ import { createWorkshopTaskRepository } from "../src/data/workshopTaskRepository
 import { createReceptionDossier } from "../src/sav-core";
 import { DossierPriority, InterventionType } from "../src/types";
 
-assert.equal(BACKEND_MIGRATION_READINESS.currentRuntime, "localStorage");
+assert.equal(BACKEND_MIGRATION_READINESS.currentRuntime, "localStorage+IndexedDB");
 assert.equal(BACKEND_MIGRATION_READINESS.backendEnabled, false);
 assert.equal(BACKEND_MIGRATION_READINESS.authServerEnabled, false);
 assert.ok(BACKEND_MIGRATION_READINESS.preparedTargets.includes("IndexedDB"));
 assert.ok(BACKEND_MIGRATION_READINESS.preparedTargets.includes("backend-api"));
+assert.ok(BACKEND_MIGRATION_READINESS.preparedTargets.includes("Supabase"));
+assert.ok(BACKEND_MIGRATION_READINESS.preparedTargets.includes("Google Drive metadata"));
 
 const storage = new MemoryStorageLike();
 const dossierRepository = createDossierRepository(storage);
@@ -79,4 +81,3 @@ assert.equal(deliveryRepository.list().length, 1);
 assert.equal(auditRepository.list().length, 1);
 assert.equal(dossierRepository.remove(dossier.id), true);
 assert.equal(dossierRepository.list().length, 0);
-

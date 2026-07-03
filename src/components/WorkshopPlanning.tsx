@@ -82,6 +82,12 @@ import {
   cancelReservation,
   convertReservationToPlanning
 } from "../workshop-reservations";
+import {
+  buildLatestReservationByDossier,
+  filterReservationsForGanttDate,
+  paginateItems,
+  RESERVATION_NEEDS_RENDER_LIMIT,
+} from "../performance-lot7";
 
 interface WorkshopPlanningProps {
   techniciens: TechnicienResource[];
@@ -963,41 +969,26 @@ export default function WorkshopPlanning({
   const showNowLine = isSelectedDateTodayForLine && isTimeInWorkingHoursForLine;
   const nowPct = showNowLine ? (nowMinutesSinceStartForLine / totalGanttMinutes) * 100 : 0;
 
-  // Find all reservations active on the selected date
-  const activeReservationsStr = reservations.filter(res => {
-    if (res.status === "CRENEAU_PROPOSE" || res.status === "RESERVATION_CONFIRMEE") {
-      const hasSegmentOnDate = res.segments && res.segments.length > 0
-        ? res.segments.some(seg => seg.start.split("T")[0] === selectedDateStr)
-        : res.startTime && res.startTime.split("T")[0] === selectedDateStr;
-      if (hasSegmentOnDate) {
-          if (ganttSearchQuery.trim()) {
-            const query = ganttSearchQuery.toLowerCase().trim();
-            const dossier = dossiers.find(d => d.id === res.dossierId);
-            if (dossier) {
-              const matchesImmat = dossier.vehiculeImmatriculation?.toLowerCase().includes(query);
-              const matchesVin = dossier.vehiculeVIN?.toLowerCase().includes(query);
-              const matchesDossier = dossier.id?.toLowerCase().includes(query);
-              const matchesClient = dossier.clientNom?.toLowerCase().includes(query);
-              if (!matchesImmat && !matchesVin && !matchesDossier && !matchesClient) {
-                return false;
-              }
-            } else {
-              return false;
-            }
-          }
-          return true;
-        }
-      }
-      return false;
+  const dossierById = useMemo(() => new Map(dossiers.map(dossier => [dossier.id, dossier])), [dossiers]);
+  const latestReservationByDossier = useMemo(() => buildLatestReservationByDossier(reservations), [reservations]);
+
+  // Find all reservations active on the selected date without rendering off-range Gantt items.
+  const activeReservationsStr = useMemo(() => {
+    const query = ganttSearchQuery.toLowerCase().trim();
+    return filterReservationsForGanttDate(reservations, selectedDateStr).filter(res => {
+      if (!query) return true;
+      const dossier = dossierById.get(res.dossierId);
+      if (!dossier) return false;
+      const text = `${dossier.vehiculeImmatriculation} ${dossier.vehiculeVIN} ${dossier.id} ${dossier.clientNom}`.toLowerCase();
+      return text.includes(query);
     });
+  }, [dossierById, ganttSearchQuery, reservations, selectedDateStr]);
 
   // Construct reservation needs
-  const reservationNeeds = dossiers
+  const reservationNeeds = useMemo(() => dossiers
     .map(dossier => {
       const duration = calculateReservationDuration(dossier);
-      const res = reservations
-        .filter(r => r.dossierId === dossier.id)
-        .sort((a, b) => reservations.indexOf(b) - reservations.indexOf(a))[0];
+      const res = latestReservationByDossier.get(dossier.id);
       const activeReservation = res && res.status !== "ANNULEE" ? res : null;
       
       return {
@@ -1014,7 +1005,12 @@ export default function WorkshopPlanning({
       !item.reservation ||
       item.reservation.status !== "TRANSFORMEE_PLANNING" ||
       item.reservation.source === "planning-suggestion"
-    );
+    ), [dossiers, latestReservationByDossier]);
+
+  const paginatedReservationNeeds = useMemo(
+    () => paginateItems(reservationNeeds, RESERVATION_NEEDS_RENDER_LIMIT),
+    [reservationNeeds]
+  );
 
   const handleSuggestReservation = (dossier: DossierSAV, existingRes: WorkshopReservation | null) => {
     const setFeedback = (type: ReservationFeedback["type"], message: string) => {
@@ -2175,7 +2171,7 @@ export default function WorkshopPlanning({
             {reservationNeeds.length === 0 ? (
               <p className="text-xs text-gray-400 italic">Aucun dossier en attente de réservation.</p>
             ) : (
-              reservationNeeds.map(({ dossier, duration, reservation }) => {
+              paginatedReservationNeeds.visibleItems.map(({ dossier, duration, reservation }) => {
                 const status = reservation ? reservation.status : "A_RESERVER";
                 const isReservedFromSuggestion =
                   status === "TRANSFORMEE_PLANNING" &&
@@ -2432,6 +2428,11 @@ export default function WorkshopPlanning({
                   </div>
                 );
               })
+            )}
+            {paginatedReservationNeeds.hiddenCount > 0 && (
+              <div data-testid="reservation-needs-pagination-summary" className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-600">
+                {paginatedReservationNeeds.visibleItems.length} véhicules affichés sur {paginatedReservationNeeds.total}. Affinez la recherche ou la date pour limiter le planning.
+              </div>
             )}
           </div>
         </div>

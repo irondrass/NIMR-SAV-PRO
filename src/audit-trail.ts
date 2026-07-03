@@ -37,7 +37,8 @@ export interface AuditTrailEntry {
 }
 
 export const AUDIT_TRAIL_STORAGE_KEY = STORAGE_KEYS.auditLog;
-export const MAX_AUDIT_TRAIL_ENTRIES = 100;
+export const MAX_AUDIT_TRAIL_ENTRIES = 8000;
+export const DEFAULT_AUDIT_TRAIL_PAGE_SIZE = 50;
 
 // Memory fallback for environments without localStorage (e.g. Node tests)
 let memoryAuditTrail: AuditTrailEntry[] = [];
@@ -60,6 +61,25 @@ export function getAuditTrail(): AuditTrailEntry[] {
   } catch {
     return memoryAuditTrail;
   }
+}
+
+export function getAuditTrailPage(options?: {
+  dossierId?: string;
+  offset?: number;
+  limit?: number;
+}): { entries: AuditTrailEntry[]; total: number; offset: number; limit: number } {
+  const offset = Math.max(0, options?.offset ?? 0);
+  const limit = Math.max(1, options?.limit ?? DEFAULT_AUDIT_TRAIL_PAGE_SIZE);
+  const filtered = getAuditTrail()
+    .filter(entry => !options?.dossierId || entry.dossierId === options.dossierId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    entries: filtered.slice(offset, offset + limit),
+    total: filtered.length,
+    offset,
+    limit,
+  };
 }
 
 function normalizeSource(source?: string, module?: string, action?: string): AuditTrailSource {
