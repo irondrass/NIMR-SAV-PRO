@@ -97,13 +97,12 @@ test.describe("Lot 6K-B-A — Vehicle-Level Auto Reservation and Delivery ETA", 
     await changeUserRole(page, "role-option-technicien");
     await expect(page.locator('[data-testid="nav-planning"]')).not.toBeVisible();
 
-    // Directeur has consultation only
+    // Directeur has planning rights in Hotfix 6K-H-C
     await changeUserRole(page, "role-option-directeur");
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
     await expect(page.locator('[data-testid="planning-eta-vehicle-select"]')).toBeVisible();
-    await expect(page.locator('[data-testid="planning-manual-dossier"]')).not.toBeVisible();
-    await expect(page.locator('[data-testid="planning-auto-reserve-btn"]')).not.toBeVisible();
-    await expect(page.locator('[data-testid="reservation-suggest-btn"]')).not.toBeVisible();
+    await expect(page.locator('[data-testid="planning-manual-dossier"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planning-auto-reserve-btn"]')).toBeVisible();
   });
 
   test("2. Vehicle collision manually planned on same vehicle", async ({ page }) => {

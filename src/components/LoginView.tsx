@@ -31,6 +31,7 @@ export default function LoginView({ onLogin }: LoginViewProps) {
 
   return (
     <main data-testid="login-page" className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900">
+      <div data-testid="login-screen" className="sr-only">Login Screen</div>
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-md flex-col justify-center">
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-6 flex items-center gap-3">

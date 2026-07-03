@@ -148,6 +148,11 @@ function loadStoredArray<T>(key: string, fallback: T[], itemGuard: (value: unkno
 
 function loadStoredSession(): UserSession | null {
   try {
+    const invalidated = localStorage.getItem("nimr-sav-pro-session-invalidated");
+    if (invalidated === "true") {
+      localStorage.removeItem(STORAGE_KEYS.session);
+      return null;
+    }
     const rawSession = localStorage.getItem(STORAGE_KEYS.session);
     if (!rawSession) return null;
     const parsed = JSON.parse(rawSession);
@@ -361,11 +366,12 @@ export default function App() {
     const initializeAuth = async () => {
       const storedUsers = loadStoredArray(STORAGE_KEYS.users, [], isUser);
       const nextUsers = await ensureDefaultUsers(storedUsers);
-      const storedSession = loadStoredSession();
+      const invalidated = localStorage.getItem("nimr-sav-pro-session-invalidated");
+      const storedSession = invalidated === "true" ? null : loadStoredSession();
       if (!mounted) return;
       setUsers(nextUsers);
       writeLocalStorageJSON(STORAGE_KEYS.users, nextUsers);
-      if (isSessionValid(storedSession, nextUsers)) {
+      if (storedSession && isSessionValid(storedSession, nextUsers)) {
         const touched = touchSession(storedSession!);
         setCurrentSession(touched);
         writeLocalStorageJSON(STORAGE_KEYS.session, touched);
@@ -804,6 +810,9 @@ export default function App() {
   const handleLogin = async (username: string, pin: string): Promise<LoginResult> => {
     const result = await loginUser(users, username, pin);
     if (result.ok) {
+      try {
+        localStorage.removeItem("nimr-sav-pro-session-invalidated");
+      } catch {}
       persistUsers(result.users);
       setCurrentSession(result.session);
       writeLocalStorageJSON(STORAGE_KEYS.session, result.session);
@@ -833,6 +842,7 @@ export default function App() {
     }
     try {
       localStorage.removeItem(STORAGE_KEYS.session);
+      localStorage.setItem("nimr-sav-pro-session-invalidated", "true");
     } catch {
       // Session removal failure should not keep the UI unlocked in memory.
     }
@@ -938,6 +948,12 @@ export default function App() {
       if (now - lastRefresh < 1000) return;
       lastRefresh = now;
 
+      const invalidated = localStorage.getItem("nimr-sav-pro-session-invalidated");
+      const sessionInStore = localStorage.getItem(STORAGE_KEYS.session);
+      if (invalidated === "true" || !sessionInStore || !currentSession) {
+        return;
+      }
+
       if (!isSessionValid(currentSession, users)) {
         expireSession();
         return;
@@ -968,6 +984,21 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [currentSession, users]);
+
+  useEffect(() => {
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEYS.session && !e.newValue) {
+        handleLogout();
+      }
+      if (e.key === "nimr-sav-pro-session-invalidated" && e.newValue === "true") {
+        handleLogout();
+      }
+    };
+    window.addEventListener("storage", handleStorageEvent);
+    return () => {
+      window.removeEventListener("storage", handleStorageEvent);
+    };
+  }, [currentSession]);
 
   if (!authReady) {
     return (
@@ -1005,6 +1036,8 @@ export default function App() {
         <button
           type="button"
           data-testid="mobile-menu-button"
+          aria-label={mobileMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
+          aria-expanded={mobileMenuOpen}
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
         >
@@ -1044,11 +1077,16 @@ export default function App() {
             <div className="space-y-2">
               <div>
                 <span data-testid="current-user" className="font-extrabold text-slate-900 font-display block">{currentUser.displayName}</span>
-                <span data-testid="current-role" className="font-extrabold text-blue-600 font-display">{activeRole}</span>
+                <span data-testid="current-role" className="font-extrabold text-blue-600 font-display">
+                  <span data-testid="current-user-role">{activeRole}</span>
+                </span>
               </div>
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleLogout();
+                }}
                 data-testid="logout-button"
                 className="inline-flex items-center gap-1.5 text-[10px] font-black text-slate-500 underline underline-offset-2 hover:text-rose-700"
               >
@@ -1430,6 +1468,7 @@ export default function App() {
                     writeLocalStorageJSON(STORAGE_KEYS.techs, updated);
                   }}
                   users={users}
+                  currentUser={currentUser}
                 />
               )}
 

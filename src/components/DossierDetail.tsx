@@ -181,6 +181,13 @@ export default function DossierDetail({
   const [deleteTaskReason, setDeleteTaskReason] = useState("");
   const [deleteTaskError, setDeleteTaskError] = useState("");
   const [taskReservationReleasedMessage, setTaskReservationReleasedMessage] = useState("");
+  const [bulkTechSelect, setBulkTechSelect] = useState("");
+  const [techReplacementTarget, setTechReplacementTarget] = useState<{
+    lineId: string;
+    newTechId: string;
+    oldTechId: string;
+  } | null>(null);
+  const [replacementReason, setReplacementReason] = useState("");
 
   // For adding custom logs
   const [newLogText, setNewLogText] = useState("");
@@ -272,6 +279,142 @@ export default function DossierDetail({
       blockReason: event.blockReason,
       source: event.source,
     });
+  };
+
+  const isTechCompatibleForTask = (tech: TechnicienResource, stepId: string, serviceType?: string) => {
+    return isTechnicianCompatibleForStep(tech, stepId, serviceType);
+  };
+
+  const assignTechnicianToTask = (lineId: string, techId: string, replacementReasonStr?: string) => {
+    const line = dossier.ordresReparation.find(l => l.id === lineId);
+    if (!line) return;
+
+    const oldTechId = line.plannedTechnicianId || "";
+    const tech = techniciens.find(t => t.id === techId);
+
+    // 1. Compatibility check
+    const mappedStep = mapRepairLineToPlanningStep(line);
+    const taskStepId = line.workshopStageId || mappedStep.stepId;
+    const serviceType = dossier.stepServiceTypes?.[taskStepId];
+    const isCompatible = tech ? isTechnicianCompatibleForStep(tech, taskStepId, serviceType) : true;
+
+    if (techId && !isCompatible) {
+      logAuditEvent({
+        user: userRole,
+        role: userRole,
+        module: "atelier",
+        action: "tentative_affectation_incompatible",
+        dossierId: dossier.id,
+        commentaire: `Tentative d'affectation d'un compagnon incompatible (${tech?.nom || techId}) à la tâche ${line.designation}`,
+        result: "failed"
+      });
+      setActionFeedback({ type: "failed", message: "Affectation impossible : métier incompatible." });
+      return;
+    }
+
+    // 2. Replacement check with reason/motif
+    if (techId && oldTechId && oldTechId !== techId && !replacementReasonStr) {
+      setTechReplacementTarget({ lineId, newTechId: techId, oldTechId });
+      setReplacementReason("");
+      return; // will open modal
+    }
+
+    // 3. Update work order lines
+    const updatedLines = dossier.ordresReparation.map(l => {
+      if (l.id === lineId) {
+        return {
+          ...l,
+          plannedTechnicianId: techId || undefined,
+        };
+      }
+      return l;
+    });
+
+    const updatedDossier = {
+      ...dossier,
+      ordresReparation: updatedLines,
+    };
+
+    onUpdateDossier(updatedDossier);
+
+    // 4. Log audit events
+    const techName = tech?.nom || techId || "aucun";
+    const oldTech = techniciens.find(t => t.id === oldTechId);
+    const oldTechName = oldTech?.nom || oldTechId || "aucun";
+
+    if (replacementReasonStr) {
+      logAuditEvent({
+        user: userRole,
+        role: userRole,
+        module: "atelier",
+        action: "remplacement_compagnon_avec_motif",
+        dossierId: dossier.id,
+        commentaire: `Remplacement de compagnon sur tâche ${line.designation} (${oldTechName} -> ${techName}). Motif : ${replacementReasonStr}`,
+        result: "success"
+      });
+      setActionFeedback({ type: "success", message: "Remplacement compagnon enregistré avec motif." });
+    } else {
+      logAuditEvent({
+        user: userRole,
+        role: userRole,
+        module: "atelier",
+        action: "affectation_par_tache",
+        dossierId: dossier.id,
+        commentaire: `Affectation du compagnon ${techName} à la tâche ${line.designation} (précédent : ${oldTechName})`,
+        result: "success"
+      });
+      setActionFeedback({ type: "success", message: `Affectation enregistrée pour ${techName}.` });
+    }
+  };
+
+  const handleBulkAssign = (techId: string) => {
+    if (!techId) return;
+    const tech = techniciens.find(t => t.id === techId);
+    if (!tech) return;
+
+    let assignedCount = 0;
+    const updatedLines = dossier.ordresReparation.map(l => {
+      const mappedStep = mapRepairLineToPlanningStep(l);
+      const taskStepId = l.workshopStageId || mappedStep.stepId;
+      const serviceType = dossier.stepServiceTypes?.[taskStepId];
+      // Only assign if not already assigned, and compatible
+      if (!l.plannedTechnicianId && isTechnicianCompatibleForStep(tech, taskStepId, serviceType)) {
+        assignedCount++;
+        return {
+          ...l,
+          plannedTechnicianId: techId,
+        };
+      }
+      return l;
+    });
+
+    if (assignedCount === 0) {
+      setActionFeedback({
+        type: "blocked",
+        message: "Affectation existante conservée. Aucune tâche compatible non affectée n'a été trouvée pour ce compagnon.",
+      });
+      return;
+    }
+
+    const updatedDossier = {
+      ...dossier,
+      ordresReparation: updatedLines,
+    };
+
+    onUpdateDossier(updatedDossier);
+
+    logAuditEvent({
+      user: userRole,
+      role: userRole,
+      module: "atelier",
+      action: "affectation_en_masse_compatible",
+      dossierId: dossier.id,
+      commentaire: `Affectation en masse de ${assignedCount} tâches compatibles au compagnon ${tech.nom}`,
+      result: "success"
+    });
+
+    setBulkTechSelect("");
+    setActionFeedback({ type: "success", message: `${assignedCount} tâche(s) compatible(s) affectée(s) à ${tech.nom}.` });
   };
 
   const setSuccessFeedback = (message: string) => {
@@ -2061,6 +2204,38 @@ export default function DossierDetail({
               </div>
             )}
 
+            {/* Bulk Assignment Panel */}
+            {canUpdateWorkOrders && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 mb-3">
+                <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">Affectation groupée par spécialité</h4>
+                <p className="text-xs text-slate-500">
+                  Affecter toutes les tâches compatibles non affectées en un seul clic à un compagnon.
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <select
+                    data-testid="bulk-assign-tech-select"
+                    className="p-2 bg-white border border-slate-200 rounded-lg font-semibold text-xs focus:outline-none"
+                    value={bulkTechSelect}
+                    onChange={(e) => setBulkTechSelect(e.target.value)}
+                  >
+                    <option value="">-- Choisir un compagnon --</option>
+                    {techniciens.map(t => (
+                      <option key={t.id} value={t.id}>{t.nom} ({t.specialite})</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    data-testid="bulk-assign-tech-button"
+                    onClick={() => handleBulkAssign(bulkTechSelect)}
+                    disabled={!bulkTechSelect}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold rounded-lg text-xs transition duration-200 cursor-pointer"
+                  >
+                    Affecter toutes les tâches compatibles à ce compagnon
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* List RO line items */}
             <div className="space-y-2.5">
               {dossier.ordresReparation.map((line) => {
@@ -2105,9 +2280,10 @@ export default function DossierDetail({
                   <div
                     key={line.id}
                     data-testid={`task-card-${line.id}`}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-neutral-50  border border-neutral-200  rounded-lg text-xs gap-4"
+                    className="flex flex-col p-3.5 bg-neutral-50 border border-neutral-200 rounded-lg text-xs gap-3"
                   >
-                    <div className="space-y-1">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full">
+                      <div className="space-y-1">
                       <span data-testid="workshop-task-card" className="font-bold text-slate-800  font-display uppercase text-[11px]">{line.designation}</span>
                       <div className="flex flex-wrap items-center gap-4 text-slate-400 text-[11px] font-semibold">
                         <span>Estimation: <span className="text-stone-700  font-bold font-mono">{formatRepairOrderDuration(line.tempsEstime)}</span></span>
@@ -2335,6 +2511,71 @@ export default function DossierDetail({
                         )
                       )}
                     </div>
+                    </div>
+
+                    {/* Assignment Panel */}
+                    {canUpdateWorkOrders && (
+                      <div className="mt-2 pt-2 border-t border-slate-200 w-full flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-lg">
+                        <div className="space-y-1">
+                          <div>
+                            <span className="text-[10px] text-gray-500 font-bold uppercase block">Métier planning :</span>
+                            <span className="font-extrabold text-slate-800" data-testid={`task-trade-${line.id}`}>
+                              {mapRepairLineToPlanningStep(line).label} ({serviceType || mapRepairLineToPlanningStep(line).serviceType})
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-gray-500 font-bold uppercase block">Statut affectation :</span>
+                            <span className="font-bold text-slate-700" data-testid={`task-assignment-status-${line.id}`}>
+                              {assignedTechnicianId ? `Affecté à ${getTechnicianName(assignedTechnicianId)}` : "Aucun technicien compatible affecté."}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {(() => {
+                            const compatibleTechs = techniciens.filter(t => isTechCompatibleForTask(t, stepId, serviceType));
+                            if (compatibleTechs.length === 0) {
+                              return (
+                                <span className="text-rose-600 font-bold text-[10px]" data-testid={`no-tech-compatible-${line.id}`}>
+                                  Aucune ressource compatible configurée pour cette tâche.
+                                </span>
+                              );
+                            }
+                            return (
+                              <>
+                                <select
+                                  data-testid={`task-assign-select-${line.id}`}
+                                  className="p-1.5 bg-white border border-slate-200 rounded font-semibold text-[10px] focus:outline-none"
+                                  value={line.plannedTechnicianId || ""}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    assignTechnicianToTask(line.id, val);
+                                  }}
+                                >
+                                  <option value="">-- Choisir compagnon --</option>
+                                  {compatibleTechs.map(t => (
+                                    <option key={t.id} value={t.id}>{t.nom}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  data-testid={`task-assign-btn-${line.id}`}
+                                  onClick={() => {
+                                    const selectEl = document.querySelector(`[data-testid="task-assign-select-${line.id}"]`) as HTMLSelectElement;
+                                    if (selectEl) {
+                                      assignTechnicianToTask(line.id, selectEl.value);
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded text-[10px]"
+                                >
+                                  Affecter
+                                </button>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -3986,6 +4227,63 @@ export default function DossierDetail({
           onConfirm={handleQuoteImportConfirm}
           onCancel={() => setShowQuoteImport(false)}
         />
+      )}
+
+      {techReplacementTarget && (
+        <div data-testid="replacement-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xl">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-900 font-display">Confirmer le remplacement du compagnon</h3>
+              <p className="mt-1 font-semibold text-slate-500">
+                Vous vous apprêtez à remplacer le compagnon <strong>{getTechnicianName(techReplacementTarget.oldTechId)}</strong> par <strong>{getTechnicianName(techReplacementTarget.newTechId)}</strong>.
+              </p>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="font-black uppercase text-slate-600 block">Motif du remplacement (Obligatoire)</span>
+              <textarea
+                data-testid="replacement-reason-input"
+                value={replacementReason}
+                onChange={(e) => setReplacementReason(e.target.value)}
+                className="min-h-24 w-full rounded-lg border border-slate-200 bg-white p-2 font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                placeholder="Ex: Indisponibilité temporaire, réaffectation urgence..."
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                data-testid="replacement-cancel"
+                onClick={() => {
+                  setTechReplacementTarget(null);
+                  setReplacementReason("");
+                }}
+                className="rounded-lg bg-slate-100 px-4 py-2 font-black text-slate-700 hover:bg-slate-200 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                data-testid="replacement-confirm"
+                disabled={!replacementReason.trim()}
+                onClick={() => {
+                  if (replacementReason.trim()) {
+                    assignTechnicianToTask(
+                      techReplacementTarget.lineId,
+                      techReplacementTarget.newTechId,
+                      replacementReason.trim()
+                    );
+                    setTechReplacementTarget(null);
+                    setReplacementReason("");
+                  }
+                }}
+                className="rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 font-black text-white cursor-pointer"
+              >
+                Confirmer le remplacement
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

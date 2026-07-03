@@ -111,7 +111,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
 
     const card = page.locator('[data-testid="reservation-need-card"]').filter({ hasText: dossier.id });
-    await humanClick(page, card.locator('[data-testid="planning-reserve-button"]'));
+    await humanClick(page, card.locator('[data-testid="planning-suggest-btn"]'));
 
     await expectReserveClickFeedback(card);
     await expect(card.locator('[data-testid="planning-reservation-success"]')).toContainText("Suggestion de créneau affichée");
@@ -136,7 +136,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
 
     const card = page.locator('[data-testid="reservation-need-card"]').filter({ hasText: dossier.id });
-    await humanClick(page, card.locator('[data-testid="planning-reserve-button"]'));
+    await humanClick(page, card.locator('[data-testid="planning-suggest-btn"]'));
 
     await expect(card.locator('[data-testid="planning-reservation-error"]')).toContainText(
       "Réservation impossible : aucun créneau disponible."
@@ -161,7 +161,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
 
     const card = page.locator('[data-testid="reservation-need-card"]').filter({ hasText: dossier.id });
-    await humanClick(page, card.locator('[data-testid="planning-reserve-button"]'));
+    await humanClick(page, card.locator('[data-testid="planning-suggest-btn"]'));
 
     await expect(card.locator('[data-testid="planning-reservation-error"]')).toContainText(
       "Réservation impossible : durée non validée."
@@ -177,6 +177,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
     const card = page.locator('[data-testid="reservation-need-card"]').filter({ hasText: dossier.id });
     await expect(card).toBeVisible();
     await expect(card.locator('[data-testid="planning-reserve-button"]')).toHaveCount(0);
+    await expect(card.locator('[data-testid="planning-suggest-btn"]')).toHaveCount(0);
   });
 
   test("Le clic ne reste jamais sans feedback", async ({ page }) => {
@@ -186,7 +187,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
 
     const card = page.locator('[data-testid="reservation-need-card"]').filter({ hasText: dossier.id });
-    await humanClick(page, card.locator('[data-testid="planning-reserve-button"]'));
+    await humanClick(page, card.locator('[data-testid="planning-suggest-btn"]'));
 
     await expectReserveClickFeedback(card);
   });
@@ -198,7 +199,7 @@ test.describe("Hotfix Planning - bouton À réserver avec feedback visible", () 
     await humanClick(page, page.locator('[data-testid="nav-planning"]'));
 
     const card = page.locator('[data-testid="reservation-need-card"]').filter({ hasText: dossier.id });
-    await card.locator('[data-testid="planning-reserve-button"]').dblclick();
+    await card.locator('[data-testid="planning-suggest-btn"]').dblclick();
     await expect(card.locator('[data-testid="planning-reservation-feedback"]')).toBeVisible();
 
     const reservationCount = await page.evaluate(({ key, dossierId }) => {

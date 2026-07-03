@@ -22,6 +22,7 @@ import {
   buildVehicleAutoReservationPlan,
   reserveSuggestedWorkshopSlot
 } from "../sav-core";
+import { logAuditEvent } from "../audit-trail";
 import { 
   isWorkshopClosed,
   isTechnicianAbsent,
@@ -94,6 +95,7 @@ interface WorkshopPlanningProps {
   onUpdateAvailabilityConfig?: (updated: WorkshopAvailabilityConfig) => void;
   onUpdateTechnicians?: (updated: TechnicienResource[]) => void;
   users?: any[];
+  currentUser?: User | null;
 }
 
 const GANTT_LANE_HEIGHT = 56;
@@ -247,7 +249,8 @@ export default function WorkshopPlanning({
   availabilityConfig,
   onUpdateAvailabilityConfig,
   onUpdateTechnicians,
-  users = []
+  users = [],
+  currentUser
 }: WorkshopPlanningProps) {
   const [filterZone, setFilterZone] = useState<string>("Toutes");
   const [filterBay, setFilterBay] = useState<string>("Toutes");
@@ -339,6 +342,13 @@ export default function WorkshopPlanning({
   const [taskSheetTarget, setTaskSheetTarget] = useState<{ dossier: DossierSAV; line: RepairOrderLine } | null>(null);
   const [autoPlanningError, setAutoPlanningError] = useState("");
   const [autoPlanningSuccess, setAutoPlanningSuccess] = useState("");
+  const [lastAutoReservedDetails, setLastAutoReservedDetails] = useState<{
+    technician: string;
+    bay: string;
+    date: string;
+    time: string;
+    eta: string;
+  } | null>(null);
   const [selectedVehicleDossierId, setSelectedVehicleDossierId] = useState("");
   const [autoPlanningWarning, setAutoPlanningWarning] = useState("");
   const [showShiftResetConfirm, setShowShiftResetConfirm] = useState(false);
@@ -578,7 +588,7 @@ export default function WorkshopPlanning({
 
   // Suggest slot
   const handleSuggestSlot = () => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) return;
     if (!selectedTargetForSuggest) {
       setSuggestionError("Aucune tâche non planifiée disponible pour suggestion.");
       setSuggestion(null);
@@ -605,8 +615,8 @@ export default function WorkshopPlanning({
       }
 
       const previousFingerprint = suggestion
-        ? `${suggestion.technicianId}-${suggestion.bayId}-${suggestion.startTime}-${suggestion.endTime}`
-        : "";
+         ? `${suggestion.technicianId}-${suggestion.bayId}-${suggestion.startTime}-${suggestion.endTime}`
+         : "";
       const nextFingerprint = `${candidates[0].technicianId}-${candidates[0].bayId}-${candidates[0].startTime}-${candidates[0].endTime}`;
       setSuggestion(candidates[0]);
       setSuggestions(candidates);
@@ -626,7 +636,7 @@ export default function WorkshopPlanning({
 
   // Apply suggestion
   const handleApplySuggestion = (selectedSuggestion = suggestion) => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) return;
     if (!selectedTargetForSuggest || !selectedSuggestion) return;
     if (!canRunGuardedAction(`planning-apply-suggestion:${selectedTargetForSuggest.dossier.id}:${selectedTargetForSuggest.line.id}`)) return;
 
@@ -730,7 +740,7 @@ export default function WorkshopPlanning({
   const isManualSaveBlocked = manualWarnings.length > 0;
 
   const handleSaveManualPlanning = () => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) return;
     if (!activeManualDossier || !manualTaskId || !manualTechId || !manualBayId) return;
     if (!canRunGuardedAction(`planning-manual-save:${activeManualDossier.id}:${manualTaskId}`)) return;
 
@@ -786,12 +796,13 @@ export default function WorkshopPlanning({
   };
 
   const handleAutoReserve = (vehicleDossierId: string) => {
-    if (activeRole !== UserRole.CHEF_ATELIER || !vehicleDossierId) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole) || !vehicleDossierId) return;
     if (!canRunGuardedAction(`planning-auto-reserve:${vehicleDossierId}`)) return;
 
     setAutoPlanningError("");
     setAutoPlanningSuccess("");
     setAutoPlanningWarning("");
+    setLastAutoReservedDetails(null);
 
     if (!availabilityConfig) {
       setAutoPlanningError("Aucun créneau disponible dans la période sélectionnée.");
@@ -828,6 +839,45 @@ export default function WorkshopPlanning({
     setAutoPlanningSuccess(
       `${result.createdReservations.length} tâche(s) du véhicule réservée(s) automatiquement.`
     );
+
+    // Set confirmation details
+    const firstRes = result.createdReservations[0];
+    const techName = techniciens.find(t => t.id === firstRes.technicianId)?.nom || firstRes.technicianId;
+    const bayName = DEFAULT_WORKSHOP_BAYS.find(b => b.id === firstRes.bayId)?.name || firstRes.bayId;
+    const startDateObj = new Date(firstRes.startTime!);
+    const dateStr = startDateObj.toLocaleDateString("fr-FR");
+    const timeStr = startDateObj.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    const etaInfo = getVehicleETAInfo(result.dossiers || dossiers, vehicleDossierId, result.reservations);
+    const etaStr = etaInfo.etaDateTime ? new Date(etaInfo.etaDateTime).toLocaleString("fr-FR") : "Non définie";
+
+    setLastAutoReservedDetails({
+      technician: techName,
+      bay: bayName,
+      date: dateStr,
+      time: timeStr,
+      eta: etaStr
+    });
+
+    logAuditEvent({
+      user: currentUser?.displayName || activeRole,
+      role: activeRole,
+      module: "planning",
+      action: "reservation_automatique",
+      dossierId: vehicleDossierId,
+      commentaire: `Réservation automatique réussie. Technicien : ${techName}, Baie : ${bayName}, Date : ${dateStr} à ${timeStr}. Nouvelle ETA : ${etaStr}`,
+      result: "success"
+    });
+
+    logAuditEvent({
+      user: currentUser?.displayName || activeRole,
+      role: activeRole,
+      module: "planning",
+      action: "eta_recalculee",
+      dossierId: vehicleDossierId,
+      commentaire: `Recalcul ETA après réservation automatique. Nouvelle ETA : ${etaStr}`,
+      result: "success"
+    });
+
     setShowSavedIndicator(true);
     setTimeout(() => setShowSavedIndicator(false), 3000);
   };
@@ -974,7 +1024,7 @@ export default function WorkshopPlanning({
       }));
     };
 
-    if (activeRole !== UserRole.CHEF_ATELIER) {
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) {
       setFeedback("error", "Action refusée : votre rôle ne permet pas cette opération.");
       return;
     }
@@ -1031,6 +1081,16 @@ export default function WorkshopPlanning({
       
       onUpdateReservations(nextRes);
       setFeedback("success", "Suggestion de créneau affichée. Utilisez Réserver ce créneau pour confirmer.");
+
+      logAuditEvent({
+        user: currentUser?.displayName || activeRole,
+        role: activeRole,
+        module: "planning",
+        action: "proposition_creneau",
+        dossierId: dossier.id,
+        commentaire: `Proposition de créneau affichée pour le dossier ${dossier.id}.`,
+        result: "success"
+      });
     } catch (err: any) {
       setFeedback("error", formatReservationFailure([], err.message || "Erreur de suggestion."));
     }
@@ -1044,7 +1104,7 @@ export default function WorkshopPlanning({
       }));
     };
 
-    if (activeRole !== UserRole.CHEF_ATELIER) {
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) {
       setFeedback("error", "Action refusée : votre rôle ne permet pas cette opération.");
       return;
     }
@@ -1059,7 +1119,7 @@ export default function WorkshopPlanning({
   };
 
   const handleCancelReservation = (res: WorkshopReservation) => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) return;
     if (!canRunGuardedAction(`reservation-cancel:${res.reservationId}`)) return;
     const cancelled = cancelReservation(res, getSystemTime());
     const nextRes = reservations.map(r => r.reservationId === res.reservationId ? cancelled : r);
@@ -1078,7 +1138,7 @@ export default function WorkshopPlanning({
       }));
     };
 
-    if (activeRole !== UserRole.CHEF_ATELIER) {
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) {
       setFeedback("error", "Action refusée : votre rôle ne permet pas cette opération.");
       return;
     }
@@ -1103,7 +1163,7 @@ export default function WorkshopPlanning({
     line: RepairOrderLine,
     overrides: { technicianId?: string; bayId?: string; start?: Date } = {}
   ) => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) return;
     const currentStart = overrides.start || (line.planningStart ? new Date(line.planningStart) : selectedDate);
     const durationMinutes = line.planningStart && line.planningEnd
       ? Math.max(15, Math.round((new Date(line.planningEnd).getTime() - new Date(line.planningStart).getTime()) / 60000))
@@ -1124,7 +1184,7 @@ export default function WorkshopPlanning({
   };
 
   const handleSaveReschedule = () => {
-    if (activeRole !== UserRole.CHEF_ATELIER) return;
+    if (![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)) return;
     if (!rescheduleTarget || !rescheduleTechId || !rescheduleBayId || !rescheduleDate || !rescheduleStart) return;
     if (!canRunGuardedAction(`planning-reschedule:${rescheduleTarget.dossierId}:${rescheduleTarget.lineId}`)) return;
     const dossier = dossiers.find(current => current.id === rescheduleTarget.dossierId);
@@ -1855,7 +1915,18 @@ export default function WorkshopPlanning({
                   <p data-testid="auto-planning-success" className="text-xs font-bold text-emerald-600">{autoPlanningSuccess}</p>
                 )}
 
-                {activeRole === UserRole.CHEF_ATELIER && (
+                {lastAutoReservedDetails && (
+                  <div data-testid="auto-reserve-confirmation" className="p-3 bg-emerald-50 border border-emerald-250 rounded-xl space-y-1 text-emerald-800 text-[11px] font-semibold mt-2">
+                    <div className="font-black uppercase text-[10px] text-emerald-900">Confirmation de réservation automatique :</div>
+                    <div>Compagnon : <strong data-testid="conf-tech">{lastAutoReservedDetails.technician}</strong></div>
+                    <div>Baie : <strong data-testid="conf-bay">{lastAutoReservedDetails.bay}</strong></div>
+                    <div>Date : <strong data-testid="conf-date">{lastAutoReservedDetails.date}</strong></div>
+                    <div>Heure : <strong data-testid="conf-time">{lastAutoReservedDetails.time}</strong></div>
+                    <div>Nouvelle ETA : <strong data-testid="conf-eta">{lastAutoReservedDetails.eta}</strong></div>
+                  </div>
+                )}
+
+                {[UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole) && (
                   <button
                     onClick={() => handleAutoReserve(selectedVehicleDossierId)}
                     data-testid="planning-auto-reserve-btn"
@@ -1873,7 +1944,7 @@ export default function WorkshopPlanning({
       </div>
 
       {/* Manual Planning Form & Collision warning panel */}
-        {activeRole === UserRole.CHEF_ATELIER && (
+        {[UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole) && (
           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-xs space-y-4">
             <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-1.5 font-display">
             <Settings className="w-4.5 h-4.5 text-gray-600" />
@@ -2262,57 +2333,99 @@ export default function WorkshopPlanning({
                       </div>
                     )}
 
-                    {activeRole === UserRole.CHEF_ATELIER && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {/* À réserver button */}
-                      {(status === "A_RESERVER" || status === "CRENEAU_PROPOSE") && (
-                        <button
-                          onClick={() => handleSuggestReservation(dossier, reservation)}
-                          disabled={!perm.canSuggestReservation(activeRole)}
-                          data-testid="planning-reserve-button"
-                          className="px-2 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
-                        >
-                          <Sparkles className="w-3 h-3" />
-                          <span data-testid="reservation-suggest-btn">À réserver</span>
-                        </button>
+                    {[UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole) && (
+                    <div className="flex flex-col gap-1.5 pt-1 w-full">
+                      {status === "A_RESERVER" && (
+                        <div className="flex flex-col gap-1.5 w-full mt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleAutoReserve(dossier.id)}
+                            disabled={![UserRole.CHEF_ATELIER, UserRole.DIRECTEUR_SAV].includes(activeRole)}
+                            data-testid="planning-reserve-button"
+                            className="w-full px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-extrabold transition flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            Réserver automatiquement
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSuggestReservation(dossier, reservation)}
+                            disabled={!perm.canSuggestReservation(activeRole)}
+                            data-testid="planning-suggest-btn"
+                            className="w-full px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-extrabold transition flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span data-testid="reservation-suggest-btn">Proposer créneau</span>
+                          </button>
+                        </div>
                       )}
 
-                      {/* Réserver le créneau button */}
                       {status === "CRENEAU_PROPOSE" && (
-                        <button
-                          onClick={() => handleConfirmReservation(reservation!)}
-                          disabled={!perm.canConfirmReservation(activeRole) || validationErrors.length > 0}
-                          data-testid="reservation-confirm-btn"
-                          className="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
-                        >
-                          <Check className="w-3 h-3" />
-                          <span data-testid="planning-confirm-slot">Réserver ce créneau</span>
-                        </button>
+                        <div className="flex flex-wrap gap-1.5 pt-1 w-full">
+                          <button
+                            type="button"
+                            onClick={() => handleSuggestReservation(dossier, reservation)}
+                            disabled={!perm.canSuggestReservation(activeRole)}
+                            data-testid="planning-suggest-btn"
+                            className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Calendar className="w-3 h-3" />
+                            <span data-testid="reservation-suggest-btn">Recalculer créneau</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmReservation(reservation!)}
+                            disabled={!perm.canConfirmReservation(activeRole) || validationErrors.length > 0}
+                            data-testid="reservation-confirm-btn"
+                            className="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span data-testid="planning-confirm-slot">Réserver ce créneau</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleConvertReservation(reservation!)}
+                            disabled={!perm.canConvertReservationToPlanning(activeRole) || validationErrors.length > 0}
+                            data-testid="reservation-convert-btn"
+                            className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Clock className="w-3 h-3" />
+                            Planifier
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelReservation(reservation!)}
+                            disabled={!perm.canCancelReservation(activeRole)}
+                            data-testid="reservation-cancel-btn"
+                            className="px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            Annuler
+                          </button>
+                        </div>
                       )}
 
-                      {/* Transformer button */}
-                      {(status === "CRENEAU_PROPOSE" || status === "RESERVATION_CONFIRMEE") && (
-                        <button
-                          onClick={() => handleConvertReservation(reservation!)}
-                          disabled={!perm.canConvertReservationToPlanning(activeRole) || validationErrors.length > 0}
-                          data-testid="reservation-convert-btn"
-                          className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
-                        >
-                          <Clock className="w-3 h-3" />
-                          Planifier
-                        </button>
-                      )}
-
-                      {/* Annuler button */}
-                      {(status === "CRENEAU_PROPOSE" || status === "RESERVATION_CONFIRMEE") && (
-                        <button
-                          onClick={() => handleCancelReservation(reservation!)}
-                          disabled={!perm.canCancelReservation(activeRole)}
-                          data-testid="reservation-cancel-btn"
-                          className="px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
-                        >
-                          Annuler
-                        </button>
+                      {status === "RESERVATION_CONFIRMEE" && (
+                        <div className="flex flex-wrap gap-1.5 pt-1 w-full">
+                          <button
+                            type="button"
+                            onClick={() => handleConvertReservation(reservation!)}
+                            disabled={!perm.canConvertReservationToPlanning(activeRole) || validationErrors.length > 0}
+                            data-testid="reservation-convert-btn"
+                            className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Clock className="w-3 h-3" />
+                            Planifier
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelReservation(reservation!)}
+                            disabled={!perm.canCancelReservation(activeRole)}
+                            data-testid="reservation-cancel-btn"
+                            className="px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-extrabold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            Annuler
+                          </button>
+                        </div>
                       )}
                     </div>
                     )}
