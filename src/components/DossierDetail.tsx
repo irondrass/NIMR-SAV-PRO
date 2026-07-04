@@ -66,6 +66,8 @@ import { getTaskStatusVisual } from "../task-status-visual";
 import { PILOT_SIGNATURE_NOTICE } from "../rc-notices";
 import { logAuditEvent, AuditTrailResult, AuditTrailSource } from "../audit-trail";
 import { canRunGuardedAction } from "../action-guard";
+import { resolveBackendRuntimeConfig } from "../data/backendMode";
+import { createFileAttachmentRepository } from "../data/fileAttachmentRepository";
 import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
 import {
   buildDossierPlanningOverview,
@@ -110,7 +112,8 @@ import {
   RotateCcw,
   CheckCircle2,
   FileCheck,
-  Printer
+  Printer,
+  Download
 } from "lucide-react";
 import { StatusBadge, PriorityBadge, LicencePlate, FuelIndicator, MiniProgress, InterventionTypeBadge } from "./UIParts";
 
@@ -234,6 +237,9 @@ export default function DossierDetail({
 
   const planningOverview = buildDossierPlanningOverview(dossier, reservations || []);
   const workshopStageSummaryRows = buildWorkshopStageDurationSummary(dossier, reservations || []);
+  const backendConfig = resolveBackendRuntimeConfig();
+  const secureFileAttachments = createFileAttachmentRepository().listByDossier(dossier.id);
+  const canDownloadSecureFiles = backendConfig.backendEnabled;
   const canEditDossierPlanning = userRole === UserRole.CHEF_ATELIER;
   const planningEtaInfo = getVehicleETAInfo(dossiers, dossier.id, reservations || []);
   const planningValidatedRows = planningOverview.steps.flatMap(step =>
@@ -524,6 +530,34 @@ export default function DossierDetail({
     const endDate = new Date(end);
     if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return "Non réservé";
     return `${startDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} - ${endDate.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const formatSecureFileSize = (size: number) => {
+    if (size < 1024) return `${size} o`;
+    if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} Ko`;
+    return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
+  };
+
+  const handleSecureFileDownload = async (attachmentId: string) => {
+    if (!canDownloadSecureFiles || !backendConfig.supabaseUrl) {
+      setActionFeedback({
+        type: "blocked",
+        message: "Téléchargement disponible après activation Backend v2.0 / Google Drive sécurisé.",
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendConfig.supabaseUrl}/functions/v1/drive-download`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dossierId: dossier.id, attachmentId }),
+      });
+      if (!response.ok) throw new Error("Drive download rejected by backend.");
+      setActionFeedback({ type: "success", message: "Demande de téléchargement transmise au backend sécurisé." });
+    } catch {
+      setActionFeedback({ type: "failed", message: "Téléchargement impossible via le backend sécurisé." });
+    }
   };
 
   const resetPlanningStepMessages = () => {
@@ -3159,6 +3193,58 @@ export default function DossierDetail({
                 ))}
               </div>
             )}
+
+            <section data-testid="secure-file-metadata-panel" className="rounded-lg border border-slate-200 bg-white p-4 text-xs shadow-sm">
+              <div className="flex flex-col gap-2 border-b border-slate-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h4 className="font-black uppercase text-slate-800">Fichiers sécurisés Backend v2</h4>
+                  <p data-testid="secure-file-download-notice" className="mt-1 font-semibold text-slate-500">
+                    Téléchargement disponible après activation Backend v2.0 / Google Drive sécurisé.
+                  </p>
+                </div>
+                <span data-testid="backend-mode-badge" className="w-fit rounded border border-slate-200 bg-slate-50 px-2 py-1 font-black uppercase text-slate-600">
+                  {backendConfig.mode}
+                </span>
+              </div>
+
+              {secureFileAttachments.length === 0 ? (
+                <p data-testid="secure-file-empty-state" className="pt-3 font-semibold text-slate-400">
+                  Aucune métadonnée fichier enregistrée pour ce dossier.
+                </p>
+              ) : (
+                <div className="mt-3 divide-y divide-slate-100">
+                  {secureFileAttachments.map((attachment) => (
+                    <div key={attachment.id} data-testid={`secure-file-row-${attachment.id}`} className="grid gap-3 py-3 md:grid-cols-[1fr_auto] md:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <FileText className="h-4 w-4 text-slate-400" />
+                          <span className="truncate font-black text-slate-900">{attachment.fileName}</span>
+                          <span className="rounded bg-blue-50 px-2 py-0.5 font-black uppercase text-blue-700">{attachment.category}</span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 font-semibold text-slate-500">
+                          <span>{attachment.mimeType}</span>
+                          <span>{formatSecureFileSize(attachment.size)}</span>
+                          <span>{new Date(attachment.createdAt).toLocaleString("fr-FR")}</span>
+                          <span>Ajouté par {attachment.uploadedBy}</span>
+                          <span>{attachment.status}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid={`secure-file-download-${attachment.id}`}
+                        disabled={!canDownloadSecureFiles}
+                        onClick={() => void handleSecureFileDownload(attachment.id)}
+                        className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-slate-200 bg-slate-900 px-3 py-2 font-black text-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                        title={canDownloadSecureFiles ? "Télécharger via Backend v2" : "Backend v2 / Google Drive sécurisé non actif"}
+                      >
+                        <Download className="h-4 w-4" />
+                        Télécharger
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
         )}
 

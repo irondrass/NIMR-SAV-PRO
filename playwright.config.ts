@@ -37,9 +37,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173/NIMR-SAV-PRO/",
-    reuseExistingServer: false,
-    timeout: 120 * 1000,
+    command: "node scripts/cleanup-playwright-preview.mjs && npm run build && node scripts/serve-playwright-preview.mjs",
+    url: "http://127.0.0.1:4173/__nimr_playwright_health",
+    reuseExistingServer: !process.env.CI,
+    timeout: 180 * 1000,
+    stdout: "pipe",
+    stderr: "pipe",
   },
 });
