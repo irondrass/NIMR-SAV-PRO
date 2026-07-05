@@ -16,6 +16,7 @@
     "test:e2e:shard2": "npm run test:e2e:clean && npx playwright test --shard=2/3 --reporter=line",
     "test:e2e:shard3": "npm run test:e2e:clean && npx playwright test --shard=3/3 --reporter=line",
     "check:no-secrets": "node scripts/check-no-secrets.mjs",
+    "backend:v2:check": "node scripts/backend-v2-check.mjs",
     "qa:agent": "tsx tests/qa-agent.test.ts",
     "test:qa": "npm run lint && npm test && npm run build && npm run test:e2e"
   },

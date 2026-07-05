@@ -12,7 +12,7 @@ export interface SupabaseUserProfile {
   id: string;
   full_name: string | null;
   email: string | null;
-  role: BackendBusinessRole;
+  role?: BackendBusinessRole | string | null;
   active: boolean;
 }
 
@@ -27,9 +27,20 @@ export interface SupabaseAuthProviderOptions {
   client?: SupabaseAuthClientLike;
 }
 
+export class SupabaseAuthRoleError extends Error {
+  reason: "missing-role" | "unknown-role";
+
+  constructor(reason: "missing-role" | "unknown-role", role?: string | null) {
+    super(reason === "missing-role" ? "Role Supabase absent." : `Role backend inconnu: ${role}`);
+    this.name = "SupabaseAuthRoleError";
+    this.reason = reason;
+  }
+}
+
 export function mapSupabaseProfileToLocalUser(profile: SupabaseUserProfile, now = new Date()): User {
+  if (!profile.role) throw new SupabaseAuthRoleError("missing-role", profile.role);
   const role = toAppRole(profile.role);
-  if (!role) throw new Error(`Role backend inconnu: ${profile.role}`);
+  if (!role) throw new SupabaseAuthRoleError("unknown-role", profile.role);
   const timestamp = now.toISOString();
   return {
     id: profile.id,
@@ -67,7 +78,20 @@ export function createSupabaseAuthProvider(options: SupabaseAuthProviderOptions 
         await client!.signOut();
         return { ok: false, reason: "disabled-user", message: "Utilisateur inactif." };
       }
-      const user = mapSupabaseProfileToLocalUser(profile);
+      let user: User;
+      try {
+        user = mapSupabaseProfileToLocalUser(profile);
+      } catch (error) {
+        await client!.signOut();
+        if (error instanceof SupabaseAuthRoleError) {
+          return {
+            ok: false,
+            reason: error.reason,
+            message: error.reason === "missing-role" ? "Rôle Supabase absent : accès refusé." : "Rôle Supabase non autorisé : accès refusé.",
+          };
+        }
+        throw error;
+      }
       currentSession = {
         userId: user.id,
         displayName: user.displayName,
@@ -75,7 +99,7 @@ export function createSupabaseAuthProvider(options: SupabaseAuthProviderOptions 
         loginAt: new Date().toISOString(),
         lastActivityAt: new Date().toISOString(),
       };
-      return { ok: true, user, session: currentSession, backendRole: profile.role };
+      return { ok: true, user, session: currentSession, backendRole: profile.role as BackendBusinessRole };
     },
     async logout() {
       if (client && shouldAttemptSupabase(config)) await client.signOut();

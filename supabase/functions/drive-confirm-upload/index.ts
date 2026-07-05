@@ -26,6 +26,9 @@ Deno.serve(async (request: Request) => {
   return json(501, {
     function: FUNCTION_NAME,
     status: "prepared-only",
-    nextStep: "Verify Drive file, insert file_attachments metadata, and create audit_event server-side.",
+    googleDriveReal: "not-active",
+    publicDriveUrl: false,
+    requiredControls: ["authenticated_user", "role_allowed", "dossier_access", "ownership_check", "file_metadata", "audit_logs"],
+    nextStep: "Verify Drive file ownership, insert file_metadata only, and create audit_logs server-side.",
   });
 });

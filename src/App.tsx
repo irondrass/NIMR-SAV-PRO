@@ -101,6 +101,8 @@ import WarrantyView from "./components/WarrantyView";
 import SatisfactionView from "./components/SatisfactionView";
 import ConfirmModal from "./components/ConfirmModal";
 import StorageDiagnosticsPanel from "./components/StorageDiagnosticsPanel";
+import BackendDiagnosticsPanel from "./components/BackendDiagnosticsPanel";
+import { buildBackendDiagnostics } from "./data/backendDiagnostics";
 
 // Icons
 import { 
@@ -320,6 +322,7 @@ export default function App() {
   const [vehicleMasterLastImport, setVehicleMasterLastImport] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [storageDiagnostics, setStorageDiagnostics] = useState<StorageDiagnostics>(() => buildSynchronousStorageDiagnostics());
+  const backendDiagnostics = useMemo(() => buildBackendDiagnostics(), []);
   const [dossierListLimit, setDossierListLimit] = useState(DOSSIER_LIST_PAGE_SIZE);
 
   const refreshStorageDiagnostics = async () => {
@@ -1060,6 +1063,23 @@ export default function App() {
     };
   }, [currentSession]);
 
+  if (backendDiagnostics.environment === "production") {
+    return (
+      <div data-testid="backend-production-block" className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+        <div className="w-full max-w-xl rounded-lg border border-rose-300/30 bg-white p-6 text-slate-950 shadow-xl">
+          <div className="mb-2 text-xs font-black uppercase tracking-wide text-rose-700">NO GO production</div>
+          <h1 className="font-display text-2xl font-black">Production réelle non autorisée</h1>
+          <p className="mt-3 text-sm font-bold text-slate-700">
+            Production large réelle interdite tant que Supabase réel, RLS réel, Edge Functions et Google Drive OAuth réel ne sont pas validés.
+          </p>
+          <div data-testid="backend-production-mode" className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs font-black uppercase text-slate-700">
+            Mode demandé : {backendDiagnostics.mode} · Environnement : {backendDiagnostics.environment}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm font-bold text-slate-600">
@@ -1323,6 +1343,7 @@ export default function App() {
                     }}
                   />
                   <StorageDiagnosticsPanel diagnostics={storageDiagnostics} currentRole={activeRole} />
+                  <BackendDiagnosticsPanel diagnostics={backendDiagnostics} currentRole={activeRole} />
                 </div>
               )}
 

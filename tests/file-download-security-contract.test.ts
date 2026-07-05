@@ -15,4 +15,9 @@ const modeSource = fs.readFileSync("src/data/backendMode.ts", "utf8");
 assert.match(modeSource, /local-only/);
 assert.match(modeSource, /shouldAttemptSupabase/);
 
+const driveDownloadSource = fs.readFileSync("supabase/functions/drive-download/index.ts", "utf8");
+assert.match(driveDownloadSource, /file_metadata/);
+assert.match(driveDownloadSource, /audit_logs/);
+assert.match(driveDownloadSource, /publicDriveUrl:\s*false/);
+
 console.log("file-download-security-contract.test.ts OK");

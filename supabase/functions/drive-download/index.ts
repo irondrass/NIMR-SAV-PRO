@@ -26,6 +26,9 @@ Deno.serve(async (request: Request) => {
   return json(501, {
     function: FUNCTION_NAME,
     status: "prepared-only",
-    nextStep: "Verify dossier rights, verify file_attachments row, stream or return a temporary backend URL, and audit the download.",
+    googleDriveReal: "not-active",
+    publicDriveUrl: false,
+    requiredControls: ["authenticated_user", "role_allowed", "dossier_access", "file_metadata", "ownership_check", "audit_logs"],
+    nextStep: "Verify dossier rights, verify file_metadata row, stream via backend only, and create an audit_logs entry for every access.",
   });
 });

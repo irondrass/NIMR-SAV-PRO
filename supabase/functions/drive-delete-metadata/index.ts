@@ -26,6 +26,9 @@ Deno.serve(async (request: Request) => {
   return json(501, {
     function: FUNCTION_NAME,
     status: "prepared-only",
-    nextStep: "Mark metadata deleted, keep binary deletion disabled until a later controlled phase, and audit the action.",
+    googleDriveReal: "not-active",
+    binaryDeletion: false,
+    requiredControls: ["authenticated_user", "role_allowed", "dossier_access", "file_metadata", "audit_logs"],
+    nextStep: "Mark file_metadata deleted, keep binary deletion disabled until a later controlled phase, and audit the action.",
   });
 });
