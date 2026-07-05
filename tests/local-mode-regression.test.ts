@@ -45,12 +45,18 @@ const hybrid = createHybridDataProvider(repository, {
   },
 }, {
   mode: "local-only",
+  environment: "local",
   supabaseUrl: null,
   supabaseAnonKey: null,
+  supabaseConfigured: false,
   backendEnabled: false,
   backendReady: false,
+  productionBlocked: false,
+  authProvider: "local",
+  googleDriveStatus: "not-configured",
   missing: [],
   warnings: [],
+  errors: [],
 });
 
 assert.equal(hybrid.shouldUseRemote, false);

@@ -29,4 +29,12 @@ assert.match(doc, /rollback/i);
 assert.match(doc, /protocole pilote|Pilot Protocol/i);
 assert.match(doc, /No real client data|No GO real migration|NO GO real migration/i);
 
+const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+assert.equal(packageJson.scripts["backend:v2:check"], "node scripts/backend-v2-check.mjs");
+
+const checkScript = fs.readFileSync("scripts/backend-v2-check.mjs", "utf8");
+assert.match(checkScript, /dry-run OK/);
+assert.match(checkScript, /upload: skipped by design/);
+assert.doesNotMatch(checkScript, /supabase\s+db\s+push|insert\s+into\s+public/i);
+
 console.log("backend-migration-strategy.test.ts OK");

@@ -6,6 +6,7 @@
 import { BackendRuntimeConfig, resolveBackendRuntimeConfig, shouldAttemptSupabase } from "./backendMode";
 
 export type SupabaseTableName =
+  | "profiles"
   | "users_profile"
   | "user_roles"
   | "clients"
@@ -14,10 +15,13 @@ export type SupabaseTableName =
   | "repair_order_lines"
   | "workshop_tasks"
   | "technician_resources"
+  | "reservations"
   | "workshop_reservations"
   | "quality_controls"
   | "deliveries"
+  | "audit_logs"
   | "audit_events"
+  | "file_metadata"
   | "file_attachments"
   | "app_settings";
 
@@ -37,6 +41,7 @@ export interface SupabaseProviderOptions {
 }
 
 export const SUPABASE_BACKEND_TABLES: SupabaseTableName[] = [
+  "profiles",
   "users_profile",
   "user_roles",
   "clients",
@@ -45,10 +50,13 @@ export const SUPABASE_BACKEND_TABLES: SupabaseTableName[] = [
   "repair_order_lines",
   "workshop_tasks",
   "technician_resources",
+  "reservations",
   "workshop_reservations",
   "quality_controls",
   "deliveries",
+  "audit_logs",
   "audit_events",
+  "file_metadata",
   "file_attachments",
   "app_settings",
 ];
@@ -65,18 +73,120 @@ export const SUPABASE_EDGE_FUNCTIONS = [
   "drive-delete-metadata",
 ] as const;
 
-export class BackendNotEnabledError extends Error {
+export type SupabaseProviderErrorCode =
+  | "backend-disabled"
+  | "not-configured"
+  | "missing-url"
+  | "missing-anon-key"
+  | "network-error"
+  | "rls-error"
+  | "session-expired";
+
+export class SupabaseProviderError extends Error {
+  code: SupabaseProviderErrorCode;
+  status?: number;
+
+  constructor(code: SupabaseProviderErrorCode, message: string, status?: number) {
+    super(message);
+    this.name = "SupabaseProviderError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export class BackendNotEnabledError extends SupabaseProviderError {
   constructor(mode: string) {
-    super(`Backend Supabase inactive for mode ${mode}.`);
+    super("backend-disabled", `Backend Supabase inactive for mode ${mode}.`);
     this.name = "BackendNotEnabledError";
   }
 }
 
+export function classifySupabaseResponse(status: number): SupabaseProviderErrorCode {
+  if (status === 401) return "session-expired";
+  if (status === 403) return "rls-error";
+  return "network-error";
+}
+
+function assertSupabaseConfig(config: BackendRuntimeConfig) {
+  if (!config.supabaseUrl) {
+    throw new SupabaseProviderError("missing-url", "VITE_SUPABASE_URL is required when backend-enabled is requested.");
+  }
+  if (!config.supabaseAnonKey) {
+    throw new SupabaseProviderError("missing-anon-key", "VITE_SUPABASE_ANON_KEY is required when backend-enabled is requested.");
+  }
+  if (!config.supabaseConfigured) {
+    throw new SupabaseProviderError("not-configured", "Supabase is not configured for this runtime.");
+  }
+}
+
+function encodeFilterValue(value: string): string {
+  return encodeURIComponent(value.replace(/"/g, ""));
+}
+
+export function createSupabaseRestClient(config = resolveBackendRuntimeConfig()): SupabaseClientLike {
+  assertSupabaseConfig(config);
+  const supabaseUrl = config.supabaseUrl!.replace(/\/$/, "");
+  const anonKey = config.supabaseAnonKey!;
+
+  const send = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+    const headers = new Headers(init.headers);
+    headers.set("apikey", anonKey);
+    headers.set("authorization", `Bearer ${anonKey}`);
+    headers.set("content-type", "application/json");
+    headers.set("accept", "application/json");
+
+    let response: Response;
+    try {
+      response = await fetch(`${supabaseUrl}${path}`, { ...init, headers });
+    } catch (error) {
+      throw new SupabaseProviderError("network-error", error instanceof Error ? error.message : "Supabase network error.");
+    }
+
+    if (!response.ok) {
+      const code = classifySupabaseResponse(response.status);
+      throw new SupabaseProviderError(code, `Supabase request failed with HTTP ${response.status}.`, response.status);
+    }
+    if (response.status === 204) return undefined as T;
+    return await response.json() as T;
+  };
+
+  return {
+    async request<T>(request: SupabaseRequest): Promise<T> {
+      const tablePath = `/rest/v1/${request.table}`;
+      if (request.operation === "list") {
+        return send<T>(`${tablePath}?select=*`);
+      }
+      if (request.operation === "get") {
+        const id = (request.payload as { id?: string } | undefined)?.id ?? "";
+        const rows = await send<T[]>(`${tablePath}?id=eq.${encodeFilterValue(id)}&select=*&limit=1`);
+        return (rows[0] ?? null) as T;
+      }
+      if (request.operation === "insert") {
+        return send<T>(tablePath, { method: "POST", body: JSON.stringify(request.payload) });
+      }
+      if (request.operation === "update") {
+        const payload = request.payload as { id?: string; patch?: unknown };
+        return send<T>(`${tablePath}?id=eq.${encodeFilterValue(payload.id ?? "")}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload.patch ?? {}),
+        });
+      }
+      if (request.operation === "delete") {
+        const id = (request.payload as { id?: string } | undefined)?.id ?? "";
+        await send<void>(`${tablePath}?id=eq.${encodeFilterValue(id)}`, { method: "DELETE" });
+        return true as T;
+      }
+      return send<T>("/rest/v1/rpc/not_configured", { method: "POST", body: JSON.stringify(request.payload ?? {}) });
+    },
+  };
+}
+
 export function createSupabaseProvider(options: SupabaseProviderOptions = {}) {
   const config = options.config ?? resolveBackendRuntimeConfig();
-  const client = options.client;
+  const client = options.client ?? (config.backendEnabled ? createSupabaseRestClient(config) : undefined);
 
   const assertEnabled = () => {
+    if (config.mode === "backend-enabled") assertSupabaseConfig(config);
     if (!shouldAttemptSupabase(config) || !client) {
       throw new BackendNotEnabledError(config.mode);
     }
