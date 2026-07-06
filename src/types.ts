@@ -51,7 +51,8 @@ export enum DossierStatus {
   LIVRE = "Livré",
   CLOTURE = "Clôturé opérationnellement",
   PRET_FACTURATION = "Prêt pour facturation ERP",
-  ANNULE = "Annulé"
+  ANNULE = "Annulé",
+  QUARANTAINE = "Quarantaine données"
 }
 
 export enum DossierPriority {

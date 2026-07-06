@@ -34,6 +34,7 @@ import { createComplaint } from "./complaints-workflow";
 import { normalizePlateNumber, sanitizeFreeText, validateDeliveryRestitutionStatus, validateTechnicianDiagnostic } from "./field-validations";
 import { canReleaseBlock } from "./permissions";
 import { WARRANTY_LOCAL_ATTACHMENT_NOTICE } from "./rc-notices";
+import { MOCK_TECHNICIENS } from "./data";
 import {
   validateAvailabilityForSlot,
   isTechnicianAbsent,
@@ -539,17 +540,22 @@ export function getDossierOperationalBucket(dossier: DossierSAV): DossierOperati
   return "active";
 }
 
-export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
-  return {
+export interface NormalizedDossier extends DossierSAV {
+  integrityWarnings?: string[];
+  suggestedStatus?: DossierStatus;
+}
+
+export function normalizeDossierForRuntime(dossier: DossierSAV): NormalizedDossier {
+  const normalized: NormalizedDossier = {
     ...dossier,
-    photosAvant: dossier.photosAvant.map(photo => ({
+    photosAvant: (dossier.photosAvant || []).map(photo => ({
       ...photo,
       title: photo.title || "Photo dossier",
       date: photo.date || new Date().toISOString(),
       takenBy: photo.takenBy || "Utilisateur NIMR",
       category: normalizePhotoCategory(photo.category),
     })),
-    ordresReparation: dossier.ordresReparation.map(line => ({
+    ordresReparation: (dossier.ordresReparation || []).map(line => ({
       ...line,
       status: normalizeRepairOrderStatus(line.status),
       history: line.history ?? [],
@@ -561,6 +567,64 @@ export function normalizeDossierForRuntime(dossier: DossierSAV): DossierSAV {
     historiqueLogs: dossier.historiqueLogs ?? [],
     operationalTraces: dossier.operationalTraces ?? [],
   };
+
+  if (normalized.statut === DossierStatus.PRET_A_LIVRER) {
+    const hasOpenTasks = !normalized.ordresReparation.every(isRepairOrderDone);
+    const qcStatus = getDossierQCStatus(normalized).status;
+    const isBlocked = Boolean(normalized.bloqueRaison?.trim());
+
+    if (hasOpenTasks) {
+      normalized.suggestedStatus = DossierStatus.EN_TRAVAUX;
+      normalized.integrityWarnings = ["Dossier incohérent : prêt à livrer incompatible avec travaux ouverts"];
+    } else if (qcStatus !== "conforme") {
+      normalized.suggestedStatus = DossierStatus.CONTROLE_QUALITE;
+      normalized.integrityWarnings = ["Dossier incohérent : prêt à livrer incompatible avec QC non conforme"];
+    } else if (isBlocked) {
+      normalized.suggestedStatus = DossierStatus.BLOQUE;
+      normalized.integrityWarnings = ["Dossier incohérent : prêt à livrer incompatible avec dossier bloqué"];
+    }
+  }
+
+  return normalized;
+}
+
+export function applyDossierIntegrityAudit(
+  dossier: DossierSAV,
+  userRole: UserRole,
+  now = new Date()
+): { dossier: DossierSAV; modified: boolean } {
+  const norm = normalizeDossierForRuntime(dossier);
+  if (!norm.suggestedStatus) {
+    return { dossier, modified: false };
+  }
+
+  const warning = norm.integrityWarnings?.[0] || "Correction incohérence statut.";
+  
+  const traceExists = (dossier.operationalTraces || []).some(
+    trace => trace.type === ("integrity_check_failure" as any) && trace.message === warning
+  );
+
+  if (traceExists && dossier.statut === norm.suggestedStatus) {
+    return { dossier, modified: false };
+  }
+
+  let updated = {
+    ...dossier,
+    statut: norm.suggestedStatus,
+    dateDernierStatut: now.toISOString(),
+  };
+
+  if (!traceExists) {
+    updated = appendDossierOperationalTrace(
+      updated,
+      "integrity_check_failure" as any,
+      userRole,
+      warning,
+      now
+    );
+  }
+
+  return { dossier: updated, modified: true };
 }
 
 export function addPhotoToDossier(dossier: DossierSAV, photo: DossierPhotoInput, now = new Date()): DossierSAV {
@@ -597,7 +661,13 @@ export function removePhotoFromDossier(dossier: DossierSAV, photoId: string, now
   };
 }
 
-export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, lineId: string, now = new Date()): TaskMutationResult {
+export function startRepairOrder(
+  dossiers: DossierSAV[],
+  dossierId: string,
+  lineId: string,
+  now = new Date(),
+  technicians?: TechnicienResource[]
+): TaskMutationResult {
   return mutateRepairOrder(dossiers, dossierId, lineId, now, ({ dossier, line, normalizedDossiers }) => {
     const status = normalizeRepairOrderStatus(line.status);
     if (isRepairOrderDone(line)) {
@@ -610,6 +680,17 @@ export function startRepairOrder(dossiers: DossierSAV[], dossierId: string, line
     const assignedTechnicianId = line.plannedTechnicianId || dossier.technicienId;
     if (!assignedTechnicianId) {
       return { ok: false, error: "Affecter un technicien avant de démarrer la tâche." };
+    }
+
+    const techList = technicians || MOCK_TECHNICIENS;
+    const tech = techList.find(t => t.id === assignedTechnicianId);
+    if (tech) {
+      if (tech.actif === false) {
+        return { ok: false, error: "Affectation impossible : le technicien affecté est inactif." };
+      }
+      if (!isTechnicianCompatibleForStep(tech, line.id, dossier.stepServiceTypes?.[line.id])) {
+        return { ok: false, error: "Affectation impossible : métier incompatible." };
+      }
     }
 
     const activeLineInDossier = dossier.ordresReparation.find(
@@ -2696,15 +2777,16 @@ export function detectTechnicianCollision(
   techId: string,
   start: Date,
   end: Date,
-  ignoreTaskId?: string
+  ignoreTaskId?: string | string[]
 ): boolean {
   if (!techId) return false;
   const requestedSegments = buildPlanningSegments(start, end);
+  const ignoredTaskIds = new Set(Array.isArray(ignoreTaskId) ? ignoreTaskId : ignoreTaskId ? [ignoreTaskId] : []);
 
   for (const dossier of dossiers) {
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
-      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (ignoredTaskIds.has(line.id)) continue;
       if (isRepairOrderDone(line)) continue;
       if (line.plannedTechnicianId === techId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
@@ -2721,15 +2803,16 @@ export function detectBayCollision(
   bayId: string,
   start: Date,
   end: Date,
-  ignoreTaskId?: string
+  ignoreTaskId?: string | string[]
 ): boolean {
   if (!bayId) return false;
   const requestedSegments = buildPlanningSegments(start, end);
+  const ignoredTaskIds = new Set(Array.isArray(ignoreTaskId) ? ignoreTaskId : ignoreTaskId ? [ignoreTaskId] : []);
 
   for (const dossier of dossiers) {
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
-      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (ignoredTaskIds.has(line.id)) continue;
       if (isRepairOrderDone(line)) continue;
       if (line.plannedBayId === bayId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
@@ -3110,7 +3193,8 @@ function hasVehiclePlanningCollision(
 export function getVehicleETAInfo(
   dossiers: DossierSAV[],
   targetDossierId: string,
-  reservations: WorkshopReservation[] = []
+  reservations: WorkshopReservation[] = [],
+  technicians?: TechnicienResource[]
 ): {
   etaDateTime?: string;
   technicalEndDateTime?: string;
@@ -3140,23 +3224,64 @@ export function getVehicleETAInfo(
     };
   }
 
+  const techList = technicians || MOCK_TECHNICIENS;
+
   const allActiveTasks = activeVehicleDossiers
     .flatMap(dossier => dossier.ordresReparation)
     .filter(task => !isRepairOrderDone(task));
   const activeReservations = getActiveVehicleReservations(reservations, vehicleDossierIdSet);
   const reservedTaskIds = new Set(activeReservations.flatMap(reservation => reservation.taskIds));
-  const plannedTasks = allActiveTasks.filter(task =>
-    Boolean(task.planningStart && task.planningEnd) || reservedTaskIds.has(task.id)
-  );
-  const unplannedTasks = allActiveTasks.filter(task =>
-    (!task.planningStart || !task.planningEnd) && !reservedTaskIds.has(task.id)
-  );
+
+  const plannedTasks = allActiveTasks.filter(task => {
+    const isPlanned = Boolean(task.planningStart && task.planningEnd) || reservedTaskIds.has(task.id);
+    if (!isPlanned) return false;
+
+    const parentDossier = activeVehicleDossiers.find(d => d.ordresReparation.some(line => line.id === task.id));
+    const reservationForTask = activeReservations.find(r => r.taskIds.includes(task.id));
+    const assignedTechId = task.plannedTechnicianId || reservationForTask?.technicianId || parentDossier?.technicienId;
+    if (!assignedTechId) return false;
+
+    const tech = techList.find(t => t.id === assignedTechId);
+    if (!tech || tech.actif === false || !isTechnicianCompatibleForStep(tech, task.id, parentDossier?.stepServiceTypes?.[task.id])) {
+      return false;
+    }
+    return true;
+  });
+
+  const unplannedTasks = allActiveTasks.filter(task => {
+    const isPlanned = Boolean(task.planningStart && task.planningEnd) || reservedTaskIds.has(task.id);
+    if (!isPlanned) return true;
+
+    const parentDossier = activeVehicleDossiers.find(d => d.ordresReparation.some(line => line.id === task.id));
+    const reservationForTask = activeReservations.find(r => r.taskIds.includes(task.id));
+    const assignedTechId = task.plannedTechnicianId || reservationForTask?.technicianId || parentDossier?.technicienId;
+    if (!assignedTechId) return true;
+
+    const tech = techList.find(t => t.id === assignedTechId);
+    if (!tech || tech.actif === false || !isTechnicianCompatibleForStep(tech, task.id, parentDossier?.stepServiceTypes?.[task.id])) {
+      return true;
+    }
+    return false;
+  });
+
   const unvalidatedDurationTasks = allActiveTasks.filter(task =>
     !task.tempsEstime || task.tempsEstime <= 0 || !task.isEstimatedDurationValidated
   );
   const hasUnreservedBlockedTask = unplannedTasks.some(task => normalizeRepairOrderStatus(task.status) === "blocked");
   const isVehicleBlocked = activeVehicleDossiers.some(dossier => dossier.statut === DossierStatus.BLOQUE);
   const hasCollision = hasVehiclePlanningCollision(allActiveTasks, activeReservations);
+  const hasIncompatibleOrMissingTechForReservation = allActiveTasks.some(task => {
+    const isPlanned = Boolean(task.planningStart && task.planningEnd) || reservedTaskIds.has(task.id);
+    if (!isPlanned) return false;
+
+    const parentDossier = activeVehicleDossiers.find(d => d.ordresReparation.some(line => line.id === task.id));
+    const reservationForTask = activeReservations.find(r => r.taskIds.includes(task.id));
+    const assignedTechId = task.plannedTechnicianId || reservationForTask?.technicianId || parentDossier?.technicienId;
+    if (!assignedTechId) return true;
+
+    const tech = techList.find(t => t.id === assignedTechId);
+    return !tech || tech.actif === false || !isTechnicianCompatibleForStep(tech, task.id, parentDossier?.stepServiceTypes?.[task.id]);
+  });
 
   let reliability: "Élevée" | "Moyenne" | "Faible";
   const blockingReasons: string[] = [];
@@ -3173,12 +3298,16 @@ export function getVehicleETAInfo(
   if (unplannedTasks.length > 0) {
     blockingReasons.push("Certaines tâches du véhicule ne sont pas réservées.");
   }
+  if (hasIncompatibleOrMissingTechForReservation) {
+    blockingReasons.push("Réservé mais non affecté ou technicien incompatible.");
+  }
 
   if (
     unvalidatedDurationTasks.length > 0 ||
     isVehicleBlocked ||
     hasUnreservedBlockedTask ||
-    hasCollision
+    hasCollision ||
+    hasIncompatibleOrMissingTechForReservation
   ) {
     reliability = "Faible";
   } else if (unplannedTasks.length > 0) {
@@ -3719,4 +3848,67 @@ export function buildVehicleAutoReservationPlan(
       ? "Attention : certaines tâches déjà planifiées ou réservées violent l'ordre logique conseillé."
       : undefined,
   };
+}
+
+export function synchronizeDossiersWithReservations(
+  dossiers: DossierSAV[],
+  reservations: WorkshopReservation[]
+): DossierSAV[] {
+  return dossiers.map(dossier => {
+    let changed = false;
+    const updatedLines = dossier.ordresReparation.map(line => {
+      const res = (reservations || []).find(r => 
+        r.dossierId === dossier.id && 
+        r.taskIds.includes(line.id)
+      );
+      if (res && res.status === "RESERVATION_CONFIRMEE") {
+        let nextTechId = line.plannedTechnicianId;
+        let nextBayId = line.plannedBayId;
+        let nextStart = line.planningStart;
+        let nextEnd = line.planningEnd;
+        let nextDate = line.planningDate;
+
+        if (res.technicianId && res.technicianId !== line.plannedTechnicianId) {
+          nextTechId = res.technicianId;
+          changed = true;
+        }
+        if (res.bayId && res.bayId !== line.plannedBayId) {
+          nextBayId = res.bayId;
+          changed = true;
+        }
+        if (res.startTime && res.startTime !== line.planningStart) {
+          nextStart = res.startTime;
+          changed = true;
+        }
+        if (res.endTime && res.endTime !== line.planningEnd) {
+          nextEnd = res.endTime;
+          changed = true;
+        }
+        if (res.desiredDate && res.desiredDate !== line.planningDate) {
+          nextDate = res.desiredDate;
+          changed = true;
+        }
+
+        if (changed) {
+          return {
+            ...line,
+            plannedTechnicianId: nextTechId,
+            plannedBayId: nextBayId,
+            planningStart: nextStart,
+            planningEnd: nextEnd,
+            planningDate: nextDate,
+          };
+        }
+      }
+      return line;
+    });
+
+    if (changed) {
+      return {
+        ...dossier,
+        ordresReparation: updatedLines,
+      };
+    }
+    return dossier;
+  });
 }

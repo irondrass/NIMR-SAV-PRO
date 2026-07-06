@@ -2,14 +2,28 @@ import { test, expect } from "@playwright/test";
 import { changeUserRole, humanClick } from "./helpers/human-actions";
 import { createMockDossier } from "./helpers/test-data-creator";
 import { STORAGE_KEYS } from "../src/storage-keys";
-import { DossierStatus } from "../src/types";
+import { ChecklistQualite, DossierStatus } from "../src/types";
+
+const qcConforme: ChecklistQualite = {
+  essaiEffectue: true,
+  defautRepare: true,
+  aucunVoyantAllume: true,
+  niveauxVerifies: true,
+  serrageSecurite: true,
+  propreteVehicule: true,
+  documentsPrets: true,
+  photosApresOk: true,
+  validationGlobale: "valide",
+  dateValidation: "2026-06-15T10:00:00.000Z",
+  validePar: "Contrôle Qualité",
+};
 
 test.describe("Lot 4A - Kanban Board visual", () => {
   const dossiers = [
     createMockDossier({ id: "NIMR-K-001", clientNom: "Client K1", statut: DossierStatus.VEHICULE_RECU }),
     createMockDossier({ id: "NIMR-K-002", clientNom: "Client K2", statut: DossierStatus.EN_TRAVAUX }),
     createMockDossier({ id: "NIMR-K-003", clientNom: "Client K3", statut: DossierStatus.BLOQUE, bloqueRaison: "Panne d'outillage" }),
-    createMockDossier({ id: "NIMR-K-004", clientNom: "Client K4", statut: DossierStatus.PRET_A_LIVRER }),
+    createMockDossier({ id: "NIMR-K-004", clientNom: "Client K4", statut: DossierStatus.PRET_A_LIVRER, checklistQC: qcConforme }),
   ];
 
   test.beforeEach(async ({ page }) => {

@@ -125,6 +125,29 @@ function makeDossierBlockedForDelivery(): DossierSAV {
   });
 }
 
+function makeDossierQcRefusedForDelivery(): DossierSAV {
+  return createMockDossier({
+    id: "NIMR-P0-DELIVERY-QC-REFUSED",
+    clientNom: "Client QC Refusé",
+    vehiculeImmatriculation: "703 TU 4303",
+    vehiculeVIN: "P0DELIVERYQCBLK01",
+    statut: DossierStatus.NON_RETIRE,
+    ordresReparation: [doneTask],
+    checklistQC: {
+      ...qcValid,
+      validationGlobale: "refuse" as const,
+    },
+    livraison: {
+      controleQualiteOk: false,
+      clientInforme: false,
+      dateLivraisonPrevue: "2026-07-02T14:00:00.000Z",
+      remarquesLivraison: "",
+      confirmationReceptionClient: false,
+      clotureInterne: false,
+    },
+  });
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -132,11 +155,17 @@ function makeDossierBlockedForDelivery(): DossierSAV {
 async function seedDossiers(page: Page, dossiers: DossierSAV[]) {
   await page.goto("/");
   await page.evaluate(
-    ({ keys, dossiersValue, techniciansValue }) => {
+    async ({ keys, dossiersValue, techniciansValue }) => {
       localStorage.clear();
       localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
       localStorage.setItem(keys.techs, JSON.stringify(techniciansValue));
       localStorage.setItem(keys.reservations, JSON.stringify([]));
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
     },
     {
       keys: STORAGE_KEYS,
@@ -216,14 +245,10 @@ test.describe("43 — Terrain P0/P1 corrections", () => {
       await humanClick(page, page.locator('[data-testid="tab-quality-control"]'));
     }
 
-    // Attempt to validate QC with open tasks
-    await humanClick(page, page.locator('[data-testid="btn-qc-validate"]'));
-    await humanClick(page, page.locator('[data-testid="modal-qc-validate-confirm"]'));
-
-    // Expect error about QC being impossible due to open tasks
-    await expect(
-      page.locator("body")
-    ).toContainText(/QC impossible|tâches? (atelier )?non terminée?s?|travaux.*ouverts/i);
+    // Verify QC is blocked: button is disabled and warning is shown
+    await expect(page.locator('[data-testid="btn-qc-validate"]')).toBeDisabled();
+    await expect(page.locator('[data-testid="qc-blocked-warning"]')).toBeVisible();
+    await expect(page.locator('[data-testid="qc-blocked-warning"]')).toContainText("Validation bloquée");
   });
 
   // ─── 2. Livraison ne liste pas un faux prêt ──────────────────────────────
@@ -253,7 +278,7 @@ test.describe("43 — Terrain P0/P1 corrections", () => {
   // ─── 3. Dossier bloqué visible dans Bloqués livraison ────────────────────
 
   test("Dossier bloqué visible dans la liste bloqués livraison", async ({ page }) => {
-    const blockedDossier = makeDossierBlockedForDelivery();
+    const blockedDossier = makeDossierQcRefusedForDelivery();
     await seedDossiers(page, [blockedDossier]);
     await loginLivraison(page);
 

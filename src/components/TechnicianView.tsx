@@ -14,7 +14,8 @@ import {
   normalizeRepairOrderStatus,
   pauseRepairOrder,
   shouldShowDossierForTechnician,
-  startRepairOrder
+  startRepairOrder,
+  isTechnicianCompatibleForStep
 } from "../sav-core";
 import { fileToCameraPhoto } from "../photo-utils";
 import { validateStructuredTechnicianDiagnostic } from "../field-validations";
@@ -99,7 +100,8 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
     currentUserLabel.toLowerCase().includes(t.nom.toLowerCase())
   );
 
-  const activeTechId = canSimulate ? selectedTechId : (matchedTech ? matchedTech.id : null);
+  const showDropdown = canSimulate || activeRole === UserRole.TECHNICIEN;
+  const activeTechId = showDropdown ? selectedTechId : (matchedTech ? matchedTech.id : null);
   const activeTech = activeTechId ? techniciens.find(t => t.id === activeTechId) : null;
   const finishDiagnosticGate = validateStructuredTechnicianDiagnostic({
     cause: finishCause,
@@ -167,7 +169,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
     }
 
     const result =
-      action === "start" ? startRepairOrder(dossiers, dossierId, lineId) :
+      action === "start" ? startRepairOrder(dossiers, dossierId, lineId, new Date(), techniciens) :
       pauseRepairOrder(dossiers, dossierId, lineId);
 
     if (result.ok === false) {
@@ -277,13 +279,12 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
   return (
     <div className="max-w-md mx-auto space-y-6">
       
-      {/* Simulation Tech Switcher */}
-      {canSimulate ? (
+      {showDropdown ? (
         <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm space-y-2 border border-slate-800">
           <div className="flex items-center justify-between text-xs">
             <span className="font-bold tracking-wider text-slate-400 flex items-center gap-1">
               <Smartphone className="w-4 h-4 text-emerald-400" />
-              VUE TABLETTE COMPAGNON / TECHNICIEN
+              {canSimulate ? "VUE TABLETTE COMPAGNON / TECHNICIEN" : "VOTRE COMPAGNON / PROFIL"}
             </span>
             <span className="bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded text-[9px] uppercase border border-emerald-500/30">
               CONNECTÉ
@@ -291,7 +292,9 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
           </div>
           
           <div>
-            <label className="block text-[10px] uppercase font-bold text-slate-400 pb-1">Choisir Compagnon (Simulateur d'Accès) :</label>
+            <label className="block text-[10px] uppercase font-bold text-slate-400 pb-1">
+              {canSimulate ? "Choisir Compagnon (Simulateur d'Accès) :" : "Sélectionner votre profil technicien :"}
+            </label>
             <select
               data-testid="companion-simulator-select"
               className="w-full p-2 bg-slate-800 text-white border-2 border-slate-700 rounded font-bold text-xs"
@@ -302,7 +305,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                 setSuccessMsg(null);
               }}
             >
-              {techniciens.map(t => (
+              {techniciens.filter(t => t.actif !== false).map(t => (
                 <option key={t.id} value={t.id}>
                   {t.nom} — {t.specialite} ({t.zoneAffectee})
                 </option>
@@ -384,7 +387,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
         ) : (
           <div className="space-y-4 text-xs font-semibold">
             {techTasks.map(task => {
-              const visibleTechnicianTasks = getVisibleTechnicianTasks(task, selectedTechId);
+              const visibleTechnicianTasks = getVisibleTechnicianTasks(task, activeTechId!);
               // Check if this dossier has any active (in_progress) task
               const hasInProgressTask = visibleTechnicianTasks.some(
                 line => normalizeRepairOrderStatus(line.status) === "in_progress"
@@ -456,7 +459,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                           );
                           const activeDossierForTechnician = dossiers.find(current =>
                             current.id !== task.id &&
-                            getVisibleTechnicianTasks(current, selectedTechId).some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
+                            getVisibleTechnicianTasks(current, activeTechId!).some(order => normalizeRepairOrderStatus(order.status) === "in_progress")
                           );
                           const startBlockedMessage = status === "blocked"
                             ? "Lever le blocage avant de reprendre la tâche."

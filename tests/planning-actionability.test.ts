@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildVehicleAutoReservationPlan, getVehicleETAInfo } from "../src/sav-core";
-import { DossierSAV, DossierStatus, DossierPriority, RepairOrderLine, UserRole, WorkshopAvailabilityConfig, WorkshopReservation, AtelierZone, InterventionType } from "../src/types";
+import { DossierSAV, DossierStatus, DossierPriority, RepairOrderLine, UserRole, WorkshopAvailabilityConfig, WorkshopReservation, AtelierZone, InterventionType, TechnicienResource } from "../src/types";
 
 console.log("Démarrage du test: planning-actionability...");
 
@@ -101,24 +101,26 @@ const availabilityConfig: WorkshopAvailabilityConfig = {
   holidays: [],
 };
 
+const testTechs: TechnicienResource[] = [
+  {
+    id: "tech_meca",
+    nom: "Meca Guy",
+    specialite: "Mécanicien",
+    disponibilite: "disponible",
+    compétences: [],
+    zoneAffectee: AtelierZone.MECANIQUE_RAPIDE,
+    absencesConges: [],
+    capaciteJournaliere: 8,
+    chargeActuelle: 0,
+  }
+];
+
 const result = buildVehicleAutoReservationPlan({
   dossiers: [dossier],
   reservations: [],
   targetDossierId: dossier.id,
   selectedDate: new Date("2026-07-03T08:00:00.000Z"),
-  technicians: [
-    {
-      id: "tech_meca",
-      nom: "Meca Guy",
-      specialite: "Mécanicien",
-      disponibilite: "disponible",
-      compétences: [],
-      zoneAffectee: AtelierZone.MECANIQUE_RAPIDE,
-      absencesConges: [],
-      capaciteJournaliere: 8,
-      chargeActuelle: 0,
-    }
-  ],
+  technicians: testTechs,
   workshopBays: [{ id: "bay_1", name: "Pont 1", zone: AtelierZone.MECANIQUE_RAPIDE }],
   availabilityConfig,
 }, new Date("2026-07-03T08:00:00.000Z"));
@@ -131,7 +133,7 @@ if (result.ok) {
   assert.equal(updatedDossier?.statut, DossierStatus.TRAVAUX_PLANIFIES, "Dossier status should be TRAVAUX_PLANIFIES.");
 
   // Verify ETA becomes defined
-  const etaInfo = getVehicleETAInfo(result.dossiers, dossier.id, result.reservations);
+  const etaInfo = getVehicleETAInfo(result.dossiers, dossier.id, result.reservations, testTechs);
   assert.ok(etaInfo.etaDateTime, "ETA date time should be defined after planning.");
   assert.equal(etaInfo.reliability, "Élevée", "Reliability should be high when all tasks are planned.");
 }

@@ -830,7 +830,8 @@ export function buildOperationalKpis(
     "Livré": 0,
     "Clôturé opérationnellement": 0,
     "Prêt pour facturation ERP": 0,
-    "Annulé": 0
+    "Annulé": 0,
+    "Quarantaine données": 0
   };
 
   let activeDossiersCount = 0;

@@ -30,17 +30,26 @@ const doneTask = {
 
 async function seedApp(page: Page, dossiers: DossierSAV[], reservations: WorkshopReservation[] = []) {
   await page.goto("/");
-  await page.evaluate(({ keys, dossiersValue, reservationsValue, techsValue }) => {
-    localStorage.clear();
-    localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
-    localStorage.setItem(keys.reservations, JSON.stringify(reservationsValue));
-    localStorage.setItem(keys.techs, JSON.stringify(techsValue));
-  }, {
-    keys: STORAGE_KEYS,
-    dossiersValue: dossiers,
-    reservationsValue: reservations,
-    techsValue: MOCK_TECHNICIENS,
-  });
+  await page.evaluate(
+    async ({ keys, dossiersValue, reservationsValue, techsValue }) => {
+      localStorage.clear();
+      localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
+      localStorage.setItem(keys.reservations, JSON.stringify(reservationsValue));
+      localStorage.setItem(keys.techs, JSON.stringify(techsValue));
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+    },
+    {
+      keys: STORAGE_KEYS,
+      dossiersValue: dossiers,
+      reservationsValue: reservations,
+      techsValue: MOCK_TECHNICIENS,
+    }
+  );
   await page.reload();
 }
 
@@ -205,6 +214,7 @@ test.describe("Lot 6K-E - action guards, modales et audit local", () => {
   test("4. Livraison bloquée affiche un message clair et journalise la tentative", async ({ page }) => {
     const dossier = readyDossier({
       id: "NIMR-GUARD-BLOCKED",
+      statut: DossierStatus.NON_RETIRE,
       checklistQC: { ...qcValid, validationGlobale: "en_attente", dateValidation: undefined, validePar: undefined },
     });
     await seedApp(page, [dossier]);

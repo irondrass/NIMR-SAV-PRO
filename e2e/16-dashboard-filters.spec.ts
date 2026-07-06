@@ -2,7 +2,21 @@ import { test, expect } from "@playwright/test";
 import { changeUserRole, humanClick, humanSelect } from "./helpers/human-actions";
 import { createMockDossier } from "./helpers/test-data-creator";
 import { STORAGE_KEYS } from "../src/storage-keys";
-import { DossierPriority, DossierStatus } from "../src/types";
+import { ChecklistQualite, DossierPriority, DossierStatus } from "../src/types";
+
+const qcConforme: ChecklistQualite = {
+  essaiEffectue: true,
+  defautRepare: true,
+  aucunVoyantAllume: true,
+  niveauxVerifies: true,
+  serrageSecurite: true,
+  propreteVehicule: true,
+  documentsPrets: true,
+  photosApresOk: true,
+  validationGlobale: "valide",
+  dateValidation: "2026-06-15T10:00:00.000Z",
+  validePar: "Contrôle Qualité",
+};
 
 test.describe("Lot 5 - Dashboard Directeur SAV avec filtres", () => {
   const dossiers = [
@@ -23,6 +37,7 @@ test.describe("Lot 5 - Dashboard Directeur SAV avec filtres", () => {
       clientNom: "Client Crit2",
       statut: DossierStatus.PRET_A_LIVRER,
       priorite: DossierPriority.VEHICULE_IMMOBILISE,
+      checklistQC: qcConforme,
     }),
   ];
 

@@ -27,7 +27,7 @@ import {
   DashboardTone,
 } from "../dashboard-kpis";
 import { buildAgingAlerts, filterAgingAlerts } from "../aging-alerts";
-import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource, WorkshopReservation, WorkshopAvailabilityConfig } from "../types";
+import { DossierPriority, DossierSAV, DossierStatus, TechnicienResource, WorkshopReservation, WorkshopAvailabilityConfig, UserRole } from "../types";
 import { LicencePlate, PriorityBadge } from "./UIParts";
 import { CLIENT_SIDE_SECURITY_NOTICE } from "../rc-notices";
 
@@ -38,6 +38,7 @@ interface DirectorDashboardProps {
   availabilityConfig?: WorkshopAvailabilityConfig;
   onSelectDossier: (id: string) => void;
   onExportBackup?: () => void;
+  userRole?: UserRole;
 }
 
 const periodLabels: Record<DashboardPeriod, string> = {
@@ -57,7 +58,7 @@ const toneClasses: Record<DashboardTone, { border: string; bg: string; text: str
   violet: { border: "border-violet-200", bg: "bg-violet-50", text: "text-violet-900", icon: "text-violet-600" },
 };
 
-export default function DirectorDashboard({ dossiers, techniciens, reservations, availabilityConfig, onSelectDossier, onExportBackup }: DirectorDashboardProps) {
+export default function DirectorDashboard({ dossiers, techniciens, reservations, availabilityConfig, onSelectDossier, onExportBackup, userRole }: DirectorDashboardProps) {
   const [period, setPeriod] = useState<DashboardPeriod>("all");
   const [status, setStatus] = useState<DossierStatus | "all">("all");
   const [technicianId, setTechnicianId] = useState<string | "all">("all");
@@ -123,9 +124,12 @@ export default function DirectorDashboard({ dossiers, techniciens, reservations,
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-700">
-                Directeur SAV
+                {userRole === UserRole.LECTURE_SEULE ? "Lecture seule" : "Directeur SAV"}
               </span>
               <span className="text-xs font-semibold text-slate-500">NIMR SAV PRO v1.1.1</span>
+              <span data-testid="pilot-warning-badge-dashboard" className="px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-black uppercase rounded border border-amber-300 animate-pulse">
+                Données pilote / recette
+              </span>
             </div>
             <h1 className="font-display text-2xl font-black text-slate-950">Dashboard KPI opérationnel</h1>
             <p className="max-w-3xl text-sm font-medium text-slate-600">

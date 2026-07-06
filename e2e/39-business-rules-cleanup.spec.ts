@@ -48,23 +48,34 @@ function task(id: string, overrides: Partial<RepairOrderLine> = {}): RepairOrder
 }
 
 async function seed(page: Page, dossiers: DossierSAV[], reservations: WorkshopReservation[] = []) {
-  await page.addInitScript(({ keys, dossiersValue, reservationsValue }) => {
-    localStorage.clear();
-    localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
-    localStorage.setItem(keys.reservations, JSON.stringify(reservationsValue));
-    localStorage.setItem(keys.techs, JSON.stringify([{
-      id: "tech_01",
-      nom: "Technicien Atelier 01",
-      specialite: "Mécanique",
-      zoneAffectee: "Grands Travaux Mécaniques",
-      disponibilite: "disponible",
-      chargeActuelle: 0,
-    }]));
-  }, { keys: STORAGE_KEYS, dossiersValue: dossiers, reservationsValue: reservations });
+  await page.goto("/");
+  await page.evaluate(
+    async ({ keys, dossiersValue, reservationsValue }) => {
+      localStorage.clear();
+      localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
+      localStorage.setItem(keys.reservations, JSON.stringify(reservationsValue));
+      localStorage.setItem(keys.techs, JSON.stringify([{
+        id: "tech_01",
+        nom: "Technicien Atelier 01",
+        specialite: "Mécanique",
+        zoneAffectee: "Grands Travaux Mécaniques",
+        disponibilite: "disponible",
+        chargeActuelle: 0,
+      }]));
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+    },
+    { keys: STORAGE_KEYS, dossiersValue: dossiers, reservationsValue: reservations }
+  );
+  await page.reload();
 }
 
 async function loginChef(page: Page) {
-  await page.goto("/");
+  // Now page is already loaded at "/" and seeded, just check login screen
   await expect(page.locator('[data-testid="login-page"]')).toBeVisible();
   await page.locator('[data-testid="login-username"]').fill("chefatelier");
   await page.locator('[data-testid="login-pin"]').fill("2222");
@@ -105,13 +116,21 @@ test.describe("Lot 6K-G - règles métier atelier", () => {
     await loginChef(page);
     await openRepairOrders(page, dossierId);
 
-    await page.locator('[data-testid="delete-workshop-task-button"][data-task-id="task-reserved"]').click();
-    await expect(page.locator('[data-testid="delete-task-blocked-message"]').first()).toContainText("Libérez d’abord la réservation planning");
+    // 1. Verify delete button is disabled
+    const deleteBtn = page.locator('[data-testid="delete-workshop-task-button"][data-task-id="task-reserved"]');
+    await expect(deleteBtn).toBeDisabled();
 
+    // 2. Verify blocking warning message is visible
+    const warningMsg = page.locator('[data-testid="delete-warning"]');
+    await expect(warningMsg).toBeVisible();
+    await expect(warningMsg).toContainText("Libérer la réservation avant suppression");
+
+    // 3. Click release reservation
     await page.locator('[data-testid="release-task-reservation-button"][data-task-id="task-reserved"]').click();
     await expect(page.locator('[data-testid="task-reservation-released-message"]')).toContainText("Réservation atelier libérée");
 
-    await page.locator('[data-testid="delete-workshop-task-button"][data-task-id="task-reserved"]').click();
+    // 4. Click delete button (now enabled)
+    await deleteBtn.click();
     await expect(page.locator('[data-testid="delete-task-confirm-modal"]')).toBeVisible();
     await page.locator('[data-testid="delete-task-reason"]').fill("Erreur de saisie atelier");
     await page.locator('[data-testid="delete-task-confirm"]').click();

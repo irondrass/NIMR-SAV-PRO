@@ -6,7 +6,7 @@
 import React, { useRef, useState } from "react";
 import StandardReasonModal from "./StandardReasonModal";
 import { DossierSAV, UserRole, DossierStatus } from "../types";
-import { getDossierQCStatus, submitQualityControl } from "../sav-core";
+import { getDossierQCStatus, submitQualityControl, isRepairOrderDone } from "../sav-core";
 import { sanitizeFreeText } from "../field-validations";
 import { canAcceptQC, canRefuseQC } from "../permissions";
 import { logAuditEvent } from "../audit-trail";
@@ -59,8 +59,9 @@ export default function ControleQualiteView({
   const [documentsPrets, setDocumentsPrets] = useState(false);
   const [photosApresOk, setPhotosApresOk] = useState(false);
 
-  // Sync selected dossier
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId);
+  const openTasksCount = selectedDossier ? selectedDossier.ordresReparation.filter(t => !isRepairOrderDone(t)).length : 0;
+  const isQcBlocked = openTasksCount > 0;
 
   const recordQCAudit = (action: string, summary: string, result: "success" | "blocked" | "failed" = "success", blockReason?: string) => {
     if (!selectedDossier) return;
@@ -134,6 +135,10 @@ export default function ControleQualiteView({
     setValidationError(null);
     setSuccessMsg(null);
     if (!selectedDossier) return;
+    if (isQcBlocked) {
+      setValidationError(`QC impossible : des tâches atelier sont encore ouvertes. (Nombre : ${openTasksCount})`);
+      return;
+    }
     if (!canAcceptQC(currentUser.role)) {
       const message = "Action refusée : votre rôle ne permet pas cette opération.";
       setValidationError(message);
@@ -407,6 +412,13 @@ export default function ControleQualiteView({
                     </div>
                   )}
 
+                  {isQcBlocked && (
+                    <div data-testid="qc-blocked-warning" className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs font-bold rounded-lg mb-4 flex items-center gap-1.5 animate-pulse">
+                      <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                      <span>Validation bloquée : des tâches atelier sont encore ouvertes ({openTasksCount}).</span>
+                    </div>
+                  )}
+
                   {/* 8 point grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {[
@@ -469,7 +481,7 @@ export default function ControleQualiteView({
                     <button
                     data-testid="btn-qc-validate"
                     onClick={handleValidateQC}
-                    disabled={isSubmittingQC}
+                    disabled={isSubmittingQC || isQcBlocked}
                     className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold rounded-xl text-xs md:text-sm shadow-xs transition duration-150 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     <span data-testid="qc-approve-button" className="sr-only">Valider QC conforme</span>

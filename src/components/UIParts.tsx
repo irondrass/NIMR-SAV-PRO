@@ -75,6 +75,9 @@ export function StatusBadge({ status }: { status: DossierStatus }) {
     case DossierStatus.PRET_FACTURATION:
       style = "bg-violet-100 text-violet-800 border-violet-200 font-semibold";
       break;
+    case DossierStatus.QUARANTAINE:
+      style = "bg-orange-100 text-orange-850 border-orange-300 font-black animate-pulse";
+      break;
   }
 
   return (
