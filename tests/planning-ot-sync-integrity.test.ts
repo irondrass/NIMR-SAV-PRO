@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { synchronizeDossiersWithReservations, getVehicleETAInfo } from "../src/sav-core";
 import { DossierSAV, DossierStatus, RepairOrderLine, WorkshopReservation, AtelierZone } from "../src/types";
 
+import { makeTestDossier } from "./test-fixtures";
+
 console.log("Running planning-ot-sync-integrity.test.ts...");
 
 const taskLine: RepairOrderLine = {
@@ -12,7 +14,7 @@ const taskLine: RepairOrderLine = {
   status: "pending",
 };
 
-const dossier: DossierSAV = {
+const dossier = makeTestDossier({
   id: "DOS-TEST-1",
   statut: DossierStatus.EN_TRAVAUX,
   ordresReparation: [taskLine],
@@ -25,7 +27,7 @@ const dossier: DossierSAV = {
   dateDernierStatut: new Date().toISOString(),
   historiqueLogs: [],
   operationalTraces: [],
-};
+});
 
 const reservation: WorkshopReservation = {
   reservationId: "res-1",

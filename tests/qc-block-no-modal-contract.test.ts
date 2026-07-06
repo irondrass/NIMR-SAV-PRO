@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { isRepairOrderDone } from "../src/sav-core";
 import { DossierSAV, DossierStatus, RepairOrderLine } from "../src/types";
 
+import { makeTestDossier } from "./test-fixtures";
+
 console.log("Running qc-block-no-modal-contract.test.ts...");
 
 const openTask: RepairOrderLine = {
@@ -12,7 +14,7 @@ const openTask: RepairOrderLine = {
   status: "in_progress",
 };
 
-const dossier: DossierSAV = {
+const dossier = makeTestDossier({
   id: "DOS-TEST-1",
   statut: DossierStatus.EN_TRAVAUX,
   ordresReparation: [openTask],
@@ -22,7 +24,7 @@ const dossier: DossierSAV = {
   dateDernierStatut: new Date().toISOString(),
   historiqueLogs: [],
   operationalTraces: [],
-};
+});
 
 const hasOpenTasks = !dossier.ordresReparation.every(isRepairOrderDone);
 assert.equal(hasOpenTasks, true, "Should detect open tasks");

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { applyDossierIntegrityAudit } from "../src/sav-core";
 import { DossierSAV, DossierStatus, RepairOrderLine, UserRole } from "../src/types";
 
+import { makeTestDossier } from "./test-fixtures";
+
 console.log("Running dossier-integrity-quarantine.test.ts...");
 
 const openTask: RepairOrderLine = {
@@ -12,7 +14,7 @@ const openTask: RepairOrderLine = {
   status: "in_progress",
 };
 
-const dossierIncoherent: DossierSAV = {
+const dossierIncoherent = makeTestDossier({
   id: "DOS-INC-1",
   statut: DossierStatus.PRET_A_LIVRER,
   ordresReparation: [openTask],
@@ -22,7 +24,7 @@ const dossierIncoherent: DossierSAV = {
   dateDernierStatut: new Date().toISOString(),
   historiqueLogs: [],
   operationalTraces: [],
-};
+});
 
 const auditResult = applyDossierIntegrityAudit(dossierIncoherent, UserRole.DIRECTEUR_SAV);
 assert.equal(auditResult.modified, true);

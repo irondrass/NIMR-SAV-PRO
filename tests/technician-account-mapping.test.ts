@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { startRepairOrder, isTechnicianCompatibleForStep } from "../src/sav-core";
 import { DossierSAV, DossierStatus, RepairOrderLine, TechnicienResource, AtelierZone } from "../src/types";
 
+import { makeTestDossier } from "./test-fixtures";
+
 console.log("Running technician-account-mapping.test.ts...");
 
 const mockTechnicians: TechnicienResource[] = [
@@ -11,7 +13,11 @@ const mockTechnicians: TechnicienResource[] = [
     specialite: "Diagnostic Électrique / Hybride",
     actif: true,
     zoneAffectee: AtelierZone.ELECTRICITE_DIAG,
-    shiftProfileId: "shift_default",
+    disponibilite: "disponible",
+    compétences: [],
+    absencesConges: [],
+    capaciteJournaliere: 8,
+    chargeActuelle: 0,
   },
   {
     id: "tech_02",
@@ -19,7 +25,11 @@ const mockTechnicians: TechnicienResource[] = [
     specialite: "Diagnostic Électrique / Hybride",
     actif: false, // inactive
     zoneAffectee: AtelierZone.ELECTRICITE_DIAG,
-    shiftProfileId: "shift_default",
+    disponibilite: "disponible",
+    compétences: [],
+    absencesConges: [],
+    capaciteJournaliere: 8,
+    chargeActuelle: 0,
   }
 ];
 
@@ -31,7 +41,7 @@ const taskLine: RepairOrderLine = {
   status: "pending",
 };
 
-const dossier: DossierSAV = {
+const dossier = makeTestDossier({
   id: "DOS-TEST-1",
   statut: DossierStatus.EN_TRAVAUX,
   ordresReparation: [taskLine],
@@ -44,7 +54,7 @@ const dossier: DossierSAV = {
   dateDernierStatut: new Date().toISOString(),
   historiqueLogs: [],
   operationalTraces: [],
-};
+});
 
 // Test active compatibility check
 assert.equal(isTechnicianCompatibleForStep(mockTechnicians[0], "task-elec-1", "electrique"), true);

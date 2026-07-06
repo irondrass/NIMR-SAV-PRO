@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildVehicleAutoReservationPlan, getVehicleETAInfo } from "../src/sav-core";
-import { DossierSAV, DossierStatus, DossierPriority, RepairOrderLine, UserRole, WorkshopAvailabilityConfig, WorkshopReservation, AtelierZone, InterventionType } from "../src/types";
+import { DossierSAV, DossierStatus, DossierPriority, RepairOrderLine, UserRole, WorkshopAvailabilityConfig, WorkshopReservation, AtelierZone, InterventionType, TechnicienResource } from "../src/types";
 
 console.log("Démarrage du test: planning-actionability...");
 
@@ -101,7 +101,7 @@ const availabilityConfig: WorkshopAvailabilityConfig = {
   holidays: [],
 };
 
-const testTechs = [
+const testTechs: TechnicienResource[] = [
   {
     id: "tech_meca",
     nom: "Meca Guy",
