@@ -41,13 +41,22 @@ test.describe("Rôle : Livraison", () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.evaluate(({ keyDossiers, valDossiers }) => {
-      localStorage.clear();
-      localStorage.setItem(keyDossiers, JSON.stringify(valDossiers));
-    }, {
-      keyDossiers: STORAGE_KEYS.dossiers,
-      valDossiers: [dossierNoQc, dossierReady]
-    });
+    await page.evaluate(
+      async ({ keyDossiers, valDossiers }) => {
+        localStorage.clear();
+        localStorage.setItem(keyDossiers, JSON.stringify(valDossiers));
+        await new Promise<void>((resolve) => {
+          const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
+          req.onsuccess = () => resolve();
+          req.onerror = () => resolve();
+          req.onblocked = () => resolve();
+        });
+      },
+      {
+        keyDossiers: STORAGE_KEYS.dossiers,
+        valDossiers: [dossierNoQc, dossierReady]
+      }
+    );
     await page.reload();
     await changeUserRole(page, "role-option-livraison");
   });

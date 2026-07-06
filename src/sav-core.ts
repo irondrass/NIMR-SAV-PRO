@@ -2777,15 +2777,16 @@ export function detectTechnicianCollision(
   techId: string,
   start: Date,
   end: Date,
-  ignoreTaskId?: string
+  ignoreTaskId?: string | string[]
 ): boolean {
   if (!techId) return false;
   const requestedSegments = buildPlanningSegments(start, end);
+  const ignoredTaskIds = new Set(Array.isArray(ignoreTaskId) ? ignoreTaskId : ignoreTaskId ? [ignoreTaskId] : []);
 
   for (const dossier of dossiers) {
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
-      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (ignoredTaskIds.has(line.id)) continue;
       if (isRepairOrderDone(line)) continue;
       if (line.plannedTechnicianId === techId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
@@ -2802,15 +2803,16 @@ export function detectBayCollision(
   bayId: string,
   start: Date,
   end: Date,
-  ignoreTaskId?: string
+  ignoreTaskId?: string | string[]
 ): boolean {
   if (!bayId) return false;
   const requestedSegments = buildPlanningSegments(start, end);
+  const ignoredTaskIds = new Set(Array.isArray(ignoreTaskId) ? ignoreTaskId : ignoreTaskId ? [ignoreTaskId] : []);
 
   for (const dossier of dossiers) {
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
-      if (ignoreTaskId && line.id === ignoreTaskId) continue;
+      if (ignoredTaskIds.has(line.id)) continue;
       if (isRepairOrderDone(line)) continue;
       if (line.plannedBayId === bayId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {

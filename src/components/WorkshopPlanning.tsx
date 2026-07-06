@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile, User } from "../types";
 import { 
@@ -333,6 +333,7 @@ export default function WorkshopPlanning({
   const [manualBayId, setManualBayId] = useState("");
   const [manualStartHour, setManualStartHour] = useState("08");
   const [manualStartMin, setManualStartMin] = useState("00");
+  const manualAutoSlotInitializedRef = useRef(false);
 
   // Visual saved feedback indicator
   const [showSavedIndicator, setShowSavedIndicator] = useState(false);
@@ -508,8 +509,11 @@ export default function WorkshopPlanning({
   }, [manualBayId]);
 
   useEffect(() => {
-    if (manualTaskId && availabilityConfig) {
+    if (manualDossierId && manualTaskId && availabilityConfig) {
+      if (manualAutoSlotInitializedRef.current) return;
       const task = pendingManualTasks.find(t => t.id === manualTaskId);
+      if (!task) return;
+      manualAutoSlotInitializedRef.current = true;
       const durationMinutes = task ? Math.ceil(task.tempsEstime * 60) || 60 : 60;
       const nextSlot = findNextAvailableWorkingSlot({
         durationMinutes,
@@ -529,7 +533,7 @@ export default function WorkshopPlanning({
         setSelectedDate(nextSlot.startTime);
       }
     }
-  }, [manualTaskId, manualTechId, manualBayId, availabilityConfig]);
+  }, [manualDossierId, manualTaskId, manualTechId, manualBayId, pendingManualTasks, availabilityConfig]);
 
   const activeDossiersList = useMemo(
     () => dossiers.filter(isDossierActive),

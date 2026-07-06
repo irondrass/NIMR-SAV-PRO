@@ -3592,9 +3592,9 @@ export default function DossierDetail({
             </div>
 
             {/* Complete Handover section */}
-            {dossier.statut === DossierStatus.PRET_A_LIVRER && canShowDeliveryButton ? (
+            {([DossierStatus.PRET_A_LIVRER, DossierStatus.NON_RETIRE, DossierStatus.CONTROLE_QUALITE].includes(dossier.statut)) && canShowDeliveryButton ? (
               <div className="space-y-4">
-                {dossier.statut === DossierStatus.PRET_A_LIVRER && canDeliverVehicle && (
+                {([DossierStatus.PRET_A_LIVRER, DossierStatus.NON_RETIRE].includes(dossier.statut)) && canDeliverVehicle && (
                   <div className="p-4 bg-blue-50/20  border border-blue-200/40 rounded-lg space-y-3 text-xs">
                     <span className="font-bold text-blue-800  block uppercase font-display">Acceptation / signature simple client lors de la remise des clés :</span>
 

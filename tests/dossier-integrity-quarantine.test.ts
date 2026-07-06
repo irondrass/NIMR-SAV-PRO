@@ -34,4 +34,34 @@ assert.ok(auditResult.dossier.operationalTraces?.some(
   trace.message.includes("travaux ouverts")
 ));
 
+const dossierCoherent = makeTestDossier({
+  id: "DOS-READY-1",
+  statut: DossierStatus.PRET_A_LIVRER,
+  ordresReparation: [
+    {
+      ...openTask,
+      id: "task-done-1",
+      status: "done",
+      tempsPasse: 2,
+    },
+  ],
+  checklistQC: {
+    essaiEffectue: true,
+    defautRepare: true,
+    aucunVoyantAllume: true,
+    niveauxVerifies: true,
+    serrageSecurite: true,
+    propreteVehicule: true,
+    documentsPrets: true,
+    photosApresOk: true,
+    validationGlobale: "valide",
+    dateValidation: "2026-06-15T10:00:00.000Z",
+    validePar: "Contrôle Qualité",
+  },
+});
+
+const coherentAuditResult = applyDossierIntegrityAudit(dossierCoherent, UserRole.DIRECTEUR_SAV);
+assert.equal(coherentAuditResult.modified, false);
+assert.equal(coherentAuditResult.dossier.statut, DossierStatus.PRET_A_LIVRER);
+
 console.log("dossier-integrity-quarantine.test.ts passed!");

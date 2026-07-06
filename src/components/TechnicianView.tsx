@@ -305,7 +305,7 @@ export default function TechnicianView({ dossiers, techniciens, onUpdateDossier,
                 setSuccessMsg(null);
               }}
             >
-              {techniciens.map(t => (
+              {techniciens.filter(t => t.actif !== false).map(t => (
                 <option key={t.id} value={t.id}>
                   {t.nom} — {t.specialite} ({t.zoneAffectee})
                 </option>

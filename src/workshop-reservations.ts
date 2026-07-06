@@ -60,12 +60,13 @@ export function detectTechnicianCollisionWithReservations(
   techId: string,
   start: Date,
   end: Date,
-  ignoreDossierId?: string
+  ignoreDossierId?: string,
+  ignoreTaskIds: string[] = []
 ): boolean {
   if (!techId) return false;
   
   // 1. Collision avec le planning existant
-  if (detectTechnicianCollision(dossiers, techId, start, end)) {
+  if (detectTechnicianCollision(dossiers, techId, start, end, ignoreTaskIds)) {
     return true;
   }
   
@@ -94,12 +95,13 @@ export function detectBayCollisionWithReservations(
   bayId: string,
   start: Date,
   end: Date,
-  ignoreDossierId?: string
+  ignoreDossierId?: string,
+  ignoreTaskIds: string[] = []
 ): boolean {
   if (!bayId) return false;
   
   // 1. Collision avec le planning existant
-  if (detectBayCollision(dossiers, bayId, start, end)) {
+  if (detectBayCollision(dossiers, bayId, start, end, ignoreTaskIds)) {
     return true;
   }
   
@@ -664,7 +666,8 @@ export function validateReservationSlot(
           reservation.technicianId!,
           s,
           e,
-          reservation.dossierId
+          reservation.dossierId,
+          reservation.taskIds
         );
       });
       if (hasTechColl) {
@@ -690,7 +693,8 @@ export function validateReservationSlot(
           reservation.bayId!,
           s,
           e,
-          reservation.dossierId
+          reservation.dossierId,
+          reservation.taskIds
         );
       });
       if (hasBayColl) {

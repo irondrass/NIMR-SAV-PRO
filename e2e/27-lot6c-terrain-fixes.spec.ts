@@ -146,7 +146,7 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
     await expect(page.locator('[data-testid="gantt-hour-18"]')).not.toBeVisible();
   });
 
-  test("Technicien : ne voit pas le sélecteur compagnon et avertissement si profil non associé", async ({ page }) => {
+  test("Technicien : voit le sélecteur compagnon/profil autorisé et ne voit pas les modules Direction/Chef Atelier", async ({ page }) => {
     const mockUser = {
       id: "user_technicien_unknown",
       username: "tech_unknown",
@@ -165,29 +165,65 @@ test.describe("NIMR-SAV-PRO Lot 6C — Corrections terrain persistantes post-ré
       lastActivityAt: new Date().toISOString()
     };
 
+    const tech1 = {
+      id: "tech_01",
+      nom: "Technicien Actif 1",
+      specialite: "Mécanique générale / Diagnostic",
+      disponibilite: "disponible" as const,
+      compétences: ["Entretien standard"],
+      zoneAffectee: "Mécanique Rapide" as const,
+      absencesConges: [],
+      capaciteJournaliere: 8,
+      chargeActuelle: 0,
+      actif: true
+    };
+
+    const tech2 = {
+      id: "tech_02",
+      nom: "Technicien Inactif",
+      specialite: "Électricité",
+      disponibilite: "disponible" as const,
+      compétences: ["Électricité"],
+      zoneAffectee: "Électricité / Diagnostic" as const,
+      absencesConges: [],
+      capaciteJournaliere: 8,
+      chargeActuelle: 0,
+      actif: false
+    };
+
     await page.goto("/");
-    await page.evaluate(({ usersKey, usersVal, sessionKey, sessionVal }) => {
+    await page.evaluate(({ usersKey, usersVal, sessionKey, sessionVal, techKey, techVal }) => {
       localStorage.clear();
       localStorage.setItem(usersKey, JSON.stringify(usersVal));
       localStorage.setItem(sessionKey, JSON.stringify(sessionVal));
+      localStorage.setItem(techKey, JSON.stringify(techVal));
+      // Clear IndexedDB database if it exists
+      const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
     }, {
       usersKey: STORAGE_KEYS.users,
       usersVal: [mockUser],
       sessionKey: STORAGE_KEYS.session,
-      sessionVal: mockSession
+      sessionVal: mockSession,
+      techKey: STORAGE_KEYS.techs,
+      techVal: [tech1, tech2]
     });
     await page.reload();
 
     await humanClick(page, page.locator('[data-testid="nav-technician"]'));
 
-    // 1. Companion selector must NOT be visible
+    // 1. Companion selector must be visible
     const companionSelector = page.locator('[data-testid="companion-simulator-select"]');
-    await expect(companionSelector).not.toBeVisible();
+    await expect(companionSelector).toBeVisible();
 
-    // 2. Unmatched profile message must be visible
-    const unmatchedMsg = page.locator('[data-testid="no-technician-profile-message"]');
-    await expect(unmatchedMsg).toBeVisible();
-    await expect(unmatchedMsg).toContainText("Aucun profil technicien associé à ce compte.");
+    // 2. Select option check: only contains active/authorized technicians
+    const options = companionSelector.locator('option');
+    await expect(options).toHaveCount(1);
+    await expect(options.first()).toContainText("Technicien Actif 1");
+
+    // 3. Direction/Chef Atelier modules must NOT be visible
+    await expect(page.locator('[data-testid="nav-dashboard"]')).not.toBeVisible();
+    await expect(page.locator('[data-testid="nav-planning"]')).not.toBeVisible();
+    await expect(page.locator('[data-testid="nav-chef-atelier"]')).not.toBeVisible();
   });
 
   test("Technicien : bouton Démarrer désactivé ne déclenche rien", async ({ page }) => {

@@ -11,10 +11,20 @@ import {
 
 async function seedDossiers(page: Page, dossiers: DossierSAV[]) {
   await page.goto("/");
-  await page.evaluate(({ key, value }) => {
-    localStorage.clear();
-    localStorage.setItem(key, JSON.stringify(value));
-  }, { key: STORAGE_KEYS.dossiers, value: dossiers });
+  await page.evaluate(
+    async ({ key, value }) => {
+      localStorage.clear();
+      localStorage.setItem(key, JSON.stringify(value));
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+    },
+    { key: STORAGE_KEYS.dossiers, value: dossiers }
+  );
+  await page.reload();
 }
 
 async function drawSimpleSignature(page: Page) {
@@ -32,7 +42,7 @@ function readyWithoutQcDossier(): DossierSAV {
   const base = createMockDossier({
     id: "NIMR-6I-NO-QC",
     clientNom: "Client Sans QC",
-    statut: DossierStatus.PRET_A_LIVRER,
+    statut: DossierStatus.NON_RETIRE,
     vehiculeKilometrage: 18000,
   });
   return {

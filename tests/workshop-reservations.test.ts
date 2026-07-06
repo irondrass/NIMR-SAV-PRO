@@ -462,4 +462,48 @@ console.log("▶ Running tests/workshop-reservations.test.ts...");
   console.log("✔ Réservation de 52h (multi-jours) OK");
 }
 
+// 13. une réservation confirmée synchronisée sur la tâche reste convertible
+{
+  const dossier = mockDossier({
+    id: "NIMR-2026-CONVERTIBLE",
+    ordresReparation: [
+      { id: "t_convert", designation: "Task convertible", tempsEstime: 2.0, tempsPasse: 0, status: "pending", estimateSource: "manual", isEstimatedDurationValidated: true }
+    ]
+  });
+
+  const need = createReservationNeed(dossier, new Date("2026-06-15T07:00:00"));
+  assert.ok(need);
+
+  const proposed = suggestReservationSlot({
+    reservation: need,
+    dossiers: [dossier],
+    reservations: [],
+    technicians: [mockTech],
+    workshopBays: [mockBay]
+  }, new Date("2026-06-15T07:00:00"));
+  const confirmed = confirmReservation(proposed, new Date("2026-06-15T07:10:00"));
+  const syncedDossier = {
+    ...dossier,
+    ordresReparation: dossier.ordresReparation.map(line => line.id === "t_convert" ? {
+      ...line,
+      planningStart: confirmed.startTime,
+      planningEnd: confirmed.endTime,
+      planningSegments: confirmed.segments,
+      plannedTechnicianId: confirmed.technicianId,
+      plannedBayId: confirmed.bayId,
+    } : line),
+  };
+
+  const validation = validateReservationSlot({
+    reservation: confirmed,
+    dossiers: [syncedDossier],
+    reservations: [confirmed],
+    technicians: [mockTech],
+    workshopBays: [mockBay]
+  }, new Date("2026-06-15T07:15:00"));
+
+  assert.ok(validation.allowed, `Validation failed: ${validation.codes.join(", ")}`);
+  console.log("✔ Réservation confirmée synchronisée reste convertible OK");
+}
+
 console.log("✔ All workshop-reservations tests completed successfully!");

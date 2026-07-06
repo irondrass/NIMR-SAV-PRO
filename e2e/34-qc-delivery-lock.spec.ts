@@ -38,10 +38,19 @@ async function seedDossiers(page: Page, dossiers: DossierSAV[]) {
     window.print = () => undefined;
   });
   await page.goto("/");
-  await page.evaluate(({ keys, dossiersValue }) => {
-    localStorage.clear();
-    localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
-  }, { keys: STORAGE_KEYS, dossiersValue: dossiers });
+  await page.evaluate(
+    async ({ keys, dossiersValue }) => {
+      localStorage.clear();
+      localStorage.setItem(keys.dossiers, JSON.stringify(dossiersValue));
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase("nimr-sav-pro-local-db");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+    },
+    { keys: STORAGE_KEYS, dossiersValue: dossiers }
+  );
   await page.reload();
 }
 
@@ -76,6 +85,7 @@ test.describe("Lot 6K-C - verrou QC avant restitution", () => {
   test("bloque la livraison si QC manquant", async ({ page }) => {
     const dossier = deliveryDossier({
       id: "NIMR-QC-MISSING",
+      statut: DossierStatus.NON_RETIRE,
       checklistQC: {
         ...qcValid,
         essaiEffectue: false,
