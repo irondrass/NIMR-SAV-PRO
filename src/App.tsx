@@ -46,7 +46,9 @@ import {
   normalizeDossierForRuntime,
   parseStoredArray,
   validateBackupPayload,
-  isWorkshopReservation
+  isWorkshopReservation,
+  applyDossierIntegrityAudit,
+  synchronizeDossiersWithReservations
 } from "./sav-core";
 import {
   buildImportSummary,
@@ -447,6 +449,25 @@ export default function App() {
       setActiveTab(getDefaultTabForRole(activeRole));
     }
   }, [activeRole, activeTab]);
+
+  useEffect(() => {
+    if (dossiers.length === 0) return;
+    const synced = synchronizeDossiersWithReservations(dossiers, reservations || []);
+    let changed = false;
+    const audited = synced.map(d => {
+      const auditResult = applyDossierIntegrityAudit(d, activeRole);
+      if (auditResult.modified) {
+        changed = true;
+        return auditResult.dossier;
+      }
+      return d;
+    });
+    const hasSyncChanges = JSON.stringify(synced) !== JSON.stringify(dossiers);
+    if (hasSyncChanges || changed) {
+      setDossiers(audited);
+      writeLocalStorageJSON(STORAGE_KEYS.dossiers, audited);
+    }
+  }, [dossiers, reservations, activeRole]);
 
   // Update theme class on mount / change - forced to light
   useEffect(() => {
@@ -1108,10 +1129,13 @@ export default function App() {
     <div className="min-h-screen w-full overflow-x-hidden bg-slate-50 font-sans text-slate-800 transition duration-150 flex flex-col md:flex-row antialiased">
 
       {/* Mobile top bar */}
-      <div className="md:hidden flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3 shadow-sm sticky top-0 z-50">
+      <div className="md:hidden flex items-center justify-between bg-white border-b border-gray-200 px-4 h-12 shadow-sm fixed top-0 left-0 right-0 z-50">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-md bg-blue-600 flex items-center justify-center text-white font-extrabold text-[10px]">SAV</div>
           <span className="text-xs font-black text-slate-900 uppercase tracking-wider">{APP_NAME}</span>
+          <span data-testid="pilot-warning-badge-mobile" className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[8px] font-black uppercase rounded border border-amber-300 animate-pulse">
+            Données pilote / recette
+          </span>
         </div>
         <button
           type="button"
@@ -1125,6 +1149,9 @@ export default function App() {
         </button>
       </div>
 
+      {/* Spacer for fixed top bar on mobile */}
+      <div className="h-12 md:hidden flex-shrink-0" />
+
       {/* Mobile overlay backdrop */}
       {mobileMenuOpen && (
         <div
@@ -1137,7 +1164,7 @@ export default function App() {
       {/* 1. Lateral Left Sidebar Navigation */}
       <aside className={`${
         mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-      } md:translate-x-0 fixed md:relative z-50 md:z-auto w-64 h-full md:h-auto bg-white border-r border-gray-200 text-gray-800 p-5 flex flex-col justify-between shrink-0 font-sans shadow-xs transition-transform duration-200 overflow-y-auto`}>
+      } md:translate-x-0 fixed md:relative z-50 md:z-auto w-64 h-screen md:h-auto top-0 left-0 bg-white border-r border-gray-200 text-gray-800 p-5 flex flex-col justify-between shrink-0 font-sans shadow-xs transition-transform duration-200 overflow-y-auto`}>
         <div className="space-y-6">
           
           {/* Logo Branding - Humble, Literal - Geometric Balance styled */}
@@ -1147,7 +1174,10 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xs font-black text-slate-900 tracking-widest uppercase mb-0.5 leading-none font-display">{APP_NAME}</h1>
-              <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold block">v{APP_VERSION} · Atelier & Restitutions</span>
+              <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold block mb-1">v{APP_VERSION} · Atelier & Restitutions</span>
+              <span data-testid="pilot-warning-badge-sidebar" className="inline-block px-2 py-0.5 bg-amber-100 text-amber-800 text-[9px] font-black uppercase rounded border border-amber-300 animate-pulse">
+                Données pilote / recette
+              </span>
             </div>
           </div>
 
@@ -1338,6 +1368,7 @@ export default function App() {
                     techniciens={techList}
                     reservations={reservations}
                     availabilityConfig={availabilityConfig}
+                    userRole={activeRole}
                     onSelectDossier={(id) => {
                       setSelectedDossierId(id);
                     }}

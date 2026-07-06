@@ -193,10 +193,16 @@ export function distributeOldAppLaborHours(
   const normalized = normalizeOldAppEstimateText(operation);
   const cleanDetail = removeOldAppKnownOperationPrefix(operation);
 
-  if (/\b(GEOMETRIE|PARALLELISME|REGLAGE\s+TRAIN|ALIGNEMENT\s+TRAIN|ALIGNEMENT\s+ROUES)\b/.test(normalized)) {
-    return [makeOldAppAllocation("mechanical", operation, hours)];
+  // 1. PEINTURE ET FINITION (compound)
+  if (/\bPEINTURE\s+ET\s+F(?:I)?NITION\b/.test(normalized)) {
+    const [prep, paint] = splitOldAppPlanningHours(hours, [0.5, 0.5]);
+    return [
+      makeOldAppAllocation("prep", `PREPARATION ${cleanDetail}`, prep),
+      makeOldAppAllocation("paint", `PEINTURE ${cleanDetail}`, paint),
+    ];
   }
 
+  // 2. D/P ET PREPARATION (compound)
   if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
     const [body, reassembly] = splitOldAppPlanningHours(hours, [0.5, 0.5]);
     return [
@@ -204,12 +210,39 @@ export function distributeOldAppLaborHours(
       makeOldAppAllocation("reassembly", `REMONTAGE ${cleanDetail}`, reassembly),
     ];
   }
-  if (/\bPEINTURE\s+ET\s+F(?:I)?NITION\b/.test(normalized)) {
-    const [prep, paint] = splitOldAppPlanningHours(hours, [0.5, 0.5]);
-    return [
-      makeOldAppAllocation("prep", `PREPARATION ${cleanDetail}`, prep),
-      makeOldAppAllocation("paint", `PEINTURE ${cleanDetail}`, paint),
-    ];
+
+  // 3. Lavage / Nettoyage final / Lavage final -> finition/lavage (finish)
+  if (/\b(LAVAGE|NETTOYAGE)\b/.test(normalized)) {
+    return [makeOldAppAllocation("finish", operation, hours)];
+  }
+
+  // 4. Préparation peinture -> préparation (prep)
+  if (/\bPREPARATION\s+PEINTURE\b/.test(normalized)) {
+    return [makeOldAppAllocation("prep", operation, hours)];
+  }
+
+  // 5. Peinture / vernis -> peinture (paint)
+  if (/\b(PEINTURE|VERNIS)\b/.test(normalized)) {
+    return [makeOldAppAllocation("paint", operation, hours)];
+  }
+
+  // 6. Démontage / dépose / D/P -> démontage/tôlerie (body)
+  if (/\b(DEMONTAGE|DEPOSE|D\s*\/\s*P)\b/.test(normalized)) {
+    return [makeOldAppAllocation("body", operation, hours)];
+  }
+
+  // 7. Remontage / repose -> remontage (reassembly)
+  if (/\b(REMONTAGE|REPOSE)\b/.test(normalized)) {
+    return [makeOldAppAllocation("reassembly", operation, hours)];
+  }
+
+  // 8. Diagnostic électrique -> électricité (electrical)
+  if (/\b(DIAGNOSTIC\s+ELECTRIQUE|DIAG\s+ELECTRIQUE)\b/.test(normalized)) {
+    return [makeOldAppAllocation("electrical", operation, hours)];
+  }
+
+  if (/\b(GEOMETRIE|PARALLELISME|REGLAGE\s+TRAIN|ALIGNEMENT\s+TRAIN|ALIGNEMENT\s+ROUES)\b/.test(normalized)) {
+    return [makeOldAppAllocation("mechanical", operation, hours)];
   }
   if (/\bDRESSAGE\b/.test(normalized)) {
     const [body, prep, paint] = splitOldAppPlanningHours(hours, [1 / 3, 1 / 3, 1 / 3]);

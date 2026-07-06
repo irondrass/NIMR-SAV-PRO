@@ -1244,7 +1244,7 @@ export default function DossierDetail({
 
   const handleStartROLine = (lineId: string) => {
     if (!canRunGuardedAction(`task-start:${dossier.id}:${lineId}`)) return;
-    applyTaskMutation(startRepairOrder(dossiers, dossier.id, lineId));
+    applyTaskMutation(startRepairOrder(dossiers, dossier.id, lineId, new Date(), techniciens));
   };
 
   const handlePauseROLine = (lineId: string) => {
@@ -2443,15 +2443,23 @@ export default function DossierDetail({
                               Annuler administrativement
                             </button>
                           ) : status !== "cancelled" ? (
-                            <button
-                              type="button"
-                              data-testid="delete-workshop-task-button"
-                              data-task-id={line.id}
-                              onClick={() => handleOpenDeleteTaskModal(line, "delete")}
-                              className="p-1 px-2.5 bg-white text-rose-700 border border-rose-200 rounded font-bold text-[10px] hover:bg-rose-50 cursor-pointer"
-                            >
-                              Supprimer tâche
-                            </button>
+                            <div className="flex flex-col items-end gap-1">
+                              {(deletionReadiness.canReleaseReservation || status === "in_progress") && (
+                                <span className="text-[10px] text-rose-600 font-bold" data-testid="delete-warning">
+                                  Libérer la réservation avant suppression
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                data-testid="delete-workshop-task-button"
+                                data-task-id={line.id}
+                                disabled={deletionReadiness.canReleaseReservation || status === "in_progress"}
+                                onClick={() => handleOpenDeleteTaskModal(line, "delete")}
+                                className="p-1 px-2.5 bg-white text-rose-700 border border-rose-200 rounded font-bold text-[10px] hover:bg-rose-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                Supprimer tâche
+                              </button>
+                            </div>
                           ) : null}
                         </div>
                       )}
@@ -3514,7 +3522,7 @@ export default function DossierDetail({
         {activeTab === "deliveries" && (
           <div className="space-y-6">
             <div className="border-b pb-2">
-              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Clôture et Restitution d'Véhicules</h3>
+              <h3 className="font-bold text-sm text-slate-800 ">Protocole de Clôture et Restitution des véhicules</h3>
               <p className="text-slate-400 text-xs">Validation de conformité d'exploitation avec acceptation simple client pour pilote interne</p>
             </div>
 

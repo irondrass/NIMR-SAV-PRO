@@ -37,7 +37,8 @@ import {
   formatCapacityHours,
   ShiftProfileDraft,
   summarizeShiftProfileDraft,
-  validateShiftProfileDraft
+  validateShiftProfileDraft,
+  findNextAvailableWorkingSlot
 } from "../workshop-availability";
 import { 
   Calendar, 
@@ -505,6 +506,30 @@ export default function WorkshopPlanning({
       setManualBayId(DEFAULT_WORKSHOP_BAYS[0].id);
     }
   }, [manualBayId]);
+
+  useEffect(() => {
+    if (manualTaskId && availabilityConfig) {
+      const task = pendingManualTasks.find(t => t.id === manualTaskId);
+      const durationMinutes = task ? Math.ceil(task.tempsEstime * 60) || 60 : 60;
+      const nextSlot = findNextAvailableWorkingSlot({
+        durationMinutes,
+        startDate: getSystemTime(),
+        technicianId: manualTechId || undefined,
+        bayId: manualBayId || undefined,
+        dossiers,
+        reservations: reservations || [],
+        config: availabilityConfig,
+        ignoreTaskId: manualTaskId
+      });
+      if (nextSlot) {
+        const hStr = String(nextSlot.startTime.getHours()).padStart(2, "0");
+        const mStr = String(nextSlot.startTime.getMinutes() >= 30 ? "30" : "00");
+        setManualStartHour(hStr);
+        setManualStartMin(mStr);
+        setSelectedDate(nextSlot.startTime);
+      }
+    }
+  }, [manualTaskId, manualTechId, manualBayId, availabilityConfig]);
 
   const activeDossiersList = useMemo(
     () => dossiers.filter(isDossierActive),
@@ -2630,7 +2655,13 @@ export default function WorkshopPlanning({
                 let statusLabel = "Disponible";
                 let statusColor = "bg-green-500 text-white";
 
-                if (isAbsent) {
+                if (selectedDate.getDay() === 0) {
+                  statusLabel = "Indisponible — atelier fermé";
+                  statusColor = "bg-slate-500 text-white";
+                } else if (isClosed) {
+                  statusLabel = "Hors horaires atelier";
+                  statusColor = "bg-slate-500 text-white";
+                } else if (isAbsent) {
                   statusLabel = "Absent";
                   statusColor = "bg-red-600 text-white";
                 } else if (isNonDisponible) {
@@ -2937,7 +2968,13 @@ export default function WorkshopPlanning({
             let bayStatusLabel = "Libre maintenant";
             let bayStatusColor = "bg-green-500 text-white";
 
-            if (isBayUnav) {
+            if (selectedDate.getDay() === 0) {
+              bayStatusLabel = "Indisponible — atelier fermé";
+              bayStatusColor = "bg-slate-500 text-white";
+            } else if (isClosedDay) {
+              bayStatusLabel = "Hors horaires atelier";
+              bayStatusColor = "bg-slate-500 text-white";
+            } else if (isBayUnav) {
               bayStatusLabel = "Indisponible";
               bayStatusColor = "bg-red-600 text-white";
             } else if (hasBaySegmentCoveringNow) {
