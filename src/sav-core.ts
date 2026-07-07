@@ -28,6 +28,9 @@ import {
   WorkshopBay,
   WorkshopReservation,
   WorkshopAvailabilityConfig,
+  User,
+  AtelierMetier,
+  MaterialCategory,
 } from "./types";
 import { mapRepairLineToPlanningStep } from "./workshop-planning-steps";
 import { createComplaint } from "./complaints-workflow";
@@ -61,6 +64,7 @@ export interface BackupPayload {
   techList: TechnicienResource[];
   activityLogs: ActiviteLog[];
   reservations?: WorkshopReservation[];
+  baysList?: WorkshopBay[];
 }
 
 export interface ReceptionPhotoInput {
@@ -1010,6 +1014,14 @@ export function isTechnicianCompatibleForStep(tech: TechnicienResource, stepId: 
 }
 
 export function isBayCompatibleForStep(bay: WorkshopBay, stepId: string, serviceType?: string): boolean {
+  const isActif = bay.actif !== undefined ? bay.actif : true;
+  const isPlanifiable = bay.planifiable !== undefined ? bay.planifiable : true;
+  if (!isActif || !isPlanifiable) return false;
+
+  if (bay.type === "MATERIAL" || bay.categorie !== undefined) {
+    return isMaterialResourceCompatibleForTask(bay, serviceType || stepId);
+  }
+
   const effectiveService = serviceType && serviceType !== "auto" ? serviceType : null;
   
   if (effectiveService) {
@@ -1297,24 +1309,26 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
       // Sort technicians:
       // 1. Compatibility
       // 2. Workload
-      const sortedTechs = [...technicians].sort((left, right) => {
-        if (input.dossierId) {
-          const dossier = input.dossiers.find(d => d.id === input.dossierId);
-          if (dossier) {
-            const compLeft = isTechnicianCompatible(left, dossier.typeDossier);
-            const compRight = isTechnicianCompatible(right, dossier.typeDossier);
-            if (compLeft && !compRight) return -1;
-            if (!compLeft && compRight) return 1;
+      const sortedTechs = [...technicians]
+        .filter(t => t.actif !== false && t.planifiable !== false)
+        .sort((left, right) => {
+          if (input.dossierId) {
+            const dossier = input.dossiers.find(d => d.id === input.dossierId);
+            if (dossier) {
+              const compLeft = isTechnicianCompatible(left, dossier.typeDossier);
+              const compRight = isTechnicianCompatible(right, dossier.typeDossier);
+              if (compLeft && !compRight) return -1;
+              if (!compLeft && compRight) return 1;
+            }
           }
-        }
-        let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers, input.reservations);
-        let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers, input.reservations);
-        if (dayOffset === 0) {
-          loadLeft = Math.max(loadLeft, left.chargeActuelle || 0);
-          loadRight = Math.max(loadRight, right.chargeActuelle || 0);
-        }
-        return loadLeft - loadRight;
-      });
+          let loadLeft = calculateTechnicianDailyLoad(left.id, dateStr, input.dossiers, input.reservations);
+          let loadRight = calculateTechnicianDailyLoad(right.id, dateStr, input.dossiers, input.reservations);
+          if (dayOffset === 0) {
+            loadLeft = Math.max(loadLeft, left.chargeActuelle || 0);
+            loadRight = Math.max(loadRight, right.chargeActuelle || 0);
+          }
+          return loadLeft - loadRight;
+        });
 
       // Check each technician and bay
       for (const tech of sortedTechs) {
@@ -1337,13 +1351,14 @@ export function suggestWorkshopSlot(input: WorkshopSlotSuggestionInput, now: Dat
         }
 
         // 3. Find compatible bay and check collision
-        const compatibleBays = input.workshopBays.filter(
+        const activeBays = input.workshopBays.filter(b => b.actif !== false && b.planifiable !== false);
+        const compatibleBays = activeBays.filter(
           bay => !bay.zone || bay.zone === tech.zoneAffectee
         );
-        const baysToTry = compatibleBays.length > 0 ? compatibleBays : input.workshopBays;
+        const baysToTry = compatibleBays.length > 0 ? compatibleBays : activeBays;
 
         for (const bay of baysToTry) {
-          if (!detectBayCollision(input.dossiers, bay.id, timeCursor, endTime) && 
+          if (!detectBayCollision(input.dossiers, bay.id, timeCursor, endTime, undefined, input.workshopBays) &&
               !isSlotOverlappingActiveReservations(input.reservations, undefined, bay.id, timeCursor, endTime, input.dossierId)) {
             const segments = buildPlanningSegments(timeCursor, endTime);
             
@@ -1451,6 +1466,8 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     const tech = input.technicians.find(t => t.id === input.technicianId);
     if (!tech) {
       pushIssue("planning-tech-not-found");
+    } else if (tech.actif === false || tech.planifiable === false) {
+      pushIssue("technician-absent");
     } else if (!isTechnicianPlanifiableResource(tech)) {
       pushIssue("technician-absent");
     } else if (dossier) {
@@ -1458,7 +1475,7 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
       if (line) {
         const stepId = line.workshopStageId || mapRepairLineToPlanningStep(line).stepId;
         const serviceType = dossier.stepServiceTypes?.[stepId];
-        if (!isTechnicianCompatibleForStep(tech, stepId, serviceType)) {
+        if (!isHumanResourceCompatibleForTask(tech, serviceType || stepId)) {
           pushIssue("planning-tech-incompatible");
         }
       }
@@ -1469,12 +1486,14 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
     const bay = input.workshopBays.find(b => b.id === input.bayId);
     if (!bay) {
       pushIssue("planning-bay-not-found");
+    } else if (bay.actif === false || bay.planifiable === false) {
+      pushIssue("planning-collision-bay");
     } else if (dossier) {
       const line = dossier.ordresReparation.find(l => l.id === input.lineId);
       if (line) {
         const stepId = line.workshopStageId || mapRepairLineToPlanningStep(line).stepId;
         const serviceType = dossier.stepServiceTypes?.[stepId];
-        if (!isBayCompatibleForStep(bay, stepId, serviceType)) {
+        if (!isMaterialResourceCompatibleForTask(bay, serviceType || stepId)) {
           pushIssue("planning-collision-bay");
         }
       }
@@ -1524,7 +1543,7 @@ export function validatePlanningAssignment(input: PlanningAssignmentInput, now: 
   if (isSlotOverlappingActiveReservations(input.reservations, input.technicianId, undefined, start, end, input.dossierId)) {
     pushIssue("planning-collision-tech");
   }
-  if (detectBayCollision(input.dossiers, input.bayId, start, end, input.lineId)) {
+  if (detectBayCollision(input.dossiers, input.bayId, start, end, input.lineId, input.workshopBays)) {
     pushIssue("planning-collision-bay");
   }
   if (isSlotOverlappingActiveReservations(input.reservations, undefined, input.bayId, start, end, input.dossierId)) {
@@ -2092,9 +2111,10 @@ export function createBackupPayload(
   reclamations: ReclammationClient[],
   techList: TechnicienResource[],
   activityLogs: ActiviteLog[],
-  reservations?: WorkshopReservation[]
+  reservations?: WorkshopReservation[],
+  baysList?: WorkshopBay[]
 ): BackupPayload {
-  return { dossiers, reclamations, techList, activityLogs, reservations };
+  return { dossiers, reclamations, techList, activityLogs, reservations, baysList };
 }
 
 export function parseStoredArray<T>(
@@ -2129,6 +2149,7 @@ export function validateBackupPayload(value: unknown): { ok: true; data: Partial
     ["techList", isTechnicienResource],
     ["activityLogs", isActiviteLog],
     ["reservations", isWorkshopReservation],
+    ["baysList", isWorkshopBay],
   ] as const;
 
   for (const [key, guard] of candidates) {
@@ -2275,6 +2296,393 @@ export function isTechnicienResource(value: unknown): value is TechnicienResourc
     isNumber(value.capaciteJournaliere) &&
     isNumber(value.chargeActuelle)
   );
+}
+
+export function isWorkshopBay(value: unknown): value is WorkshopBay {
+  if (!isRecord(value)) return false;
+  return (
+    isString(value.id) &&
+    isString(value.name)
+  );
+}
+
+export function mapZoneToCategory(zone?: AtelierZone): MaterialCategory {
+  if (!zone) return MaterialCategory.ZONE_FINITION_REMONTAGE;
+  switch (zone) {
+    case AtelierZone.MECANIQUE_RAPIDE: return MaterialCategory.PONT_SERVICE_RAPIDE;
+    case AtelierZone.GRANDS_TRAVAUX: return MaterialCategory.PONT_GRAND_TRAVAUX;
+    case AtelierZone.ELECTRICITE_DIAG: return MaterialCategory.ZONE_DIAGNOSTIC_ELECTRIQUE;
+    case AtelierZone.CARROSSERIE: return MaterialCategory.ZONE_TOLERIE;
+    case AtelierZone.PREPARATION: return MaterialCategory.ZONE_PREPARATION_CARROSSERIE;
+    case AtelierZone.PEINTURE: return MaterialCategory.CABINE_PEINTURE;
+    case AtelierZone.CONTROLE_QUALITE: return MaterialCategory.ZONE_QC;
+    case AtelierZone.LAVAGE_FINITION: return MaterialCategory.ZONE_LAVAGE;
+    default: return MaterialCategory.ZONE_FINITION_REMONTAGE;
+  }
+}
+
+export function normalizeWorkshopBay(bay: WorkshopBay): WorkshopBay {
+  return {
+    ...bay,
+    nom: bay.nom || bay.name,
+    type: bay.type || "MATERIAL",
+    categorie: bay.categorie || mapZoneToCategory(bay.zone),
+    actif: bay.actif !== undefined ? bay.actif : true,
+    planifiable: bay.planifiable !== undefined ? bay.planifiable : true,
+    capaciteVehicules: bay.capaciteVehicules !== undefined ? bay.capaciteVehicules : 1,
+    compatibleTaskTypes: bay.compatibleTaskTypes || [],
+    compatibleMetiers: bay.compatibleMetiers || [],
+    localisation: bay.localisation || "Atelier",
+    indisponibilites: bay.indisponibilites || [],
+  };
+}
+
+export function normalizeTechnicienResource(tech: TechnicienResource): TechnicienResource {
+  return {
+    ...tech,
+    displayName: tech.displayName || tech.nom,
+    type: tech.type || "HUMAN",
+    actif: tech.actif !== undefined ? tech.actif : true,
+    planifiable: tech.planifiable !== undefined ? tech.planifiable : true,
+  };
+}
+
+export function getActivePlanifiableHumanResources(techs: TechnicienResource[]): TechnicienResource[] {
+  return techs.filter(t => (t.actif !== false) && (t.planifiable !== false));
+}
+
+export function getActivePlanifiableMaterialResources(bays: WorkshopBay[]): WorkshopBay[] {
+  return bays.filter(b => (b.actif !== false) && (b.planifiable !== false));
+}
+
+export function isHumanResourceCompatibleForTask(tech: TechnicienResource, taskType?: string): boolean {
+  if (tech.actif === false) return false;
+  if (tech.planifiable === false) return false;
+  if (!taskType) return true;
+
+  const requiredMetiers: AtelierMetier[] = [];
+  const normalizedType = taskType.toLowerCase();
+  if (normalizedType.includes("quick") || normalizedType.includes("rapid") || normalizedType.includes("oil")) {
+    requiredMetiers.push(AtelierMetier.MECANIQUE_RAPIDE, AtelierMetier.MECANIQUE_GRAND_TRAVAUX);
+  } else if (normalizedType.includes("mech") || normalizedType.includes("mecan") || normalizedType.includes("mécan") || normalizedType.includes("grand") || normalizedType.includes("moteur")) {
+    requiredMetiers.push(AtelierMetier.MECANIQUE_GRAND_TRAVAUX);
+  } else if (normalizedType.includes("elec") || normalizedType.includes("diag")) {
+    requiredMetiers.push(AtelierMetier.ELECTRICITE_DIAGNOSTIC);
+  } else if (normalizedType.includes("tole") || normalizedType.includes("body") || normalizedType.includes("carrosserie") || normalizedType.includes("reassembly")) {
+    requiredMetiers.push(AtelierMetier.TOLERIE);
+  } else if (normalizedType.includes("paint") || normalizedType.includes("peint")) {
+    requiredMetiers.push(AtelierMetier.PEINTURE, AtelierMetier.PREPARATION_PEINTURE);
+  } else if (normalizedType.includes("prep")) {
+    requiredMetiers.push(AtelierMetier.PREPARATION_PEINTURE, AtelierMetier.PEINTURE);
+  } else if (normalizedType.includes("qc") || normalizedType.includes("qualite") || normalizedType.includes("qualité") || normalizedType.includes("quality")) {
+    requiredMetiers.push(AtelierMetier.QC);
+  } else if (normalizedType.includes("wash") || normalizedType.includes("lavage") || normalizedType.includes("finish") || normalizedType.includes("finition")) {
+    requiredMetiers.push(AtelierMetier.LAVAGE_PREPARATION, AtelierMetier.LIVRAISON);
+  } else if (normalizedType.includes("deliv") || normalizedType.includes("livr")) {
+    requiredMetiers.push(AtelierMetier.LIVRAISON);
+  }
+
+  if (tech.metierPrincipal) {
+    const candidateMetiers = [tech.metierPrincipal, ...(tech.metiersSecondaires || [])];
+    if (requiredMetiers.length > 0) {
+      return requiredMetiers.some(m => candidateMetiers.includes(m));
+    }
+  }
+
+  return isTechnicianCompatibleForStep(tech, taskType, taskType);
+}
+
+export function isMaterialResourceCompatibleForTask(bay: WorkshopBay, taskType?: string): boolean {
+  const isActif = bay.actif !== undefined ? bay.actif : true;
+  const isPlanifiable = bay.planifiable !== undefined ? bay.planifiable : true;
+  if (!isActif || !isPlanifiable) return false;
+  if (!taskType) return true;
+
+  const normalizedType = taskType.toLowerCase();
+
+  if (bay.compatibleTaskTypes && bay.compatibleTaskTypes.length > 0) {
+    if (bay.compatibleTaskTypes.some(t => normalizedType.includes(t.toLowerCase()))) {
+      return true;
+    }
+  }
+
+  const requiredCategories: MaterialCategory[] = [];
+  if (normalizedType.includes("quick") || normalizedType.includes("rapid") || normalizedType.includes("oil")) {
+    requiredCategories.push(MaterialCategory.PONT_SERVICE_RAPIDE, MaterialCategory.PONT_MOBILE);
+  } else if (normalizedType.includes("mech") || normalizedType.includes("mecan") || normalizedType.includes("mécan") || normalizedType.includes("grand") || normalizedType.includes("moteur")) {
+    requiredCategories.push(MaterialCategory.PONT_GRAND_TRAVAUX, MaterialCategory.PONT_MOBILE);
+  } else if (normalizedType.includes("diag") && (normalizedType.includes("elec") || normalizedType.includes("diagnostic"))) {
+    requiredCategories.push(MaterialCategory.ZONE_DIAGNOSTIC_ELECTRIQUE);
+  } else if (normalizedType.includes("elec") || normalizedType.includes("diagnostic")) {
+    requiredCategories.push(MaterialCategory.ZONE_DIAGNOSTIC_ELECTRIQUE, MaterialCategory.ZONE_REPARATION_ELECTRIQUE);
+  } else if (normalizedType.includes("tole") || normalizedType.includes("body-disassembly") || normalizedType.includes("reassembly")) {
+    requiredCategories.push(MaterialCategory.ZONE_TOLERIE);
+  } else if (normalizedType.includes("paint") || normalizedType.includes("peint")) {
+    requiredCategories.push(MaterialCategory.CABINE_PEINTURE);
+  } else if (normalizedType.includes("prep") || normalizedType.includes("preparation")) {
+    requiredCategories.push(MaterialCategory.ZONE_PREPARATION_CARROSSERIE);
+  } else if (normalizedType.includes("qc") || normalizedType.includes("qualite") || normalizedType.includes("qualité") || normalizedType.includes("quality")) {
+    requiredCategories.push(MaterialCategory.ZONE_QC);
+  } else if (normalizedType.includes("wash") || normalizedType.includes("lavage") || normalizedType.includes("finish") || normalizedType.includes("finition")) {
+    requiredCategories.push(MaterialCategory.ZONE_LAVAGE);
+  } else if (normalizedType.includes("deliv") || normalizedType.includes("livr")) {
+    requiredCategories.push(MaterialCategory.ZONE_LIVRAISON);
+  }
+
+  if (bay.categorie) {
+    if (requiredCategories.length > 0) {
+      return requiredCategories.includes(bay.categorie);
+    }
+  }
+
+  if (bay.zone) {
+    switch (bay.zone) {
+      case AtelierZone.MECANIQUE_RAPIDE:
+        return normalizedType.includes("quick") || normalizedType.includes("oil") || normalizedType.includes("mechanical");
+      case AtelierZone.GRANDS_TRAVAUX:
+        return normalizedType.includes("mechanical") || normalizedType.includes("grand");
+      case AtelierZone.ELECTRICITE_DIAG:
+        return normalizedType.includes("elec") || normalizedType.includes("diag");
+      case AtelierZone.CARROSSERIE:
+        return normalizedType.includes("body") || normalizedType.includes("tole") || normalizedType.includes("reassembly");
+      case AtelierZone.PREPARATION:
+        return normalizedType.includes("prep") || normalizedType.includes("paint");
+      case AtelierZone.PEINTURE:
+        return normalizedType.includes("paint");
+      case AtelierZone.CONTROLE_QUALITE:
+        return normalizedType.includes("qual");
+      case AtelierZone.LAVAGE_FINITION:
+        return normalizedType.includes("finish") || normalizedType.includes("wash") || normalizedType.includes("restitution");
+    }
+  }
+
+  return true;
+}
+
+export function canManageResourceRepository(userRole: UserRole, scope: "users" | "humans" | "materials"): boolean {
+  if (userRole === UserRole.DIRECTEUR_SAV) return true;
+  if (userRole === UserRole.CHEF_ATELIER) {
+    return scope === "humans" || scope === "materials";
+  }
+  return false;
+}
+
+export interface ResourceIssue {
+  code: string;
+  message: string;
+  severity: "warning" | "error" | "info";
+}
+
+export function detectResourceRepositoryIssues(
+  users: User[],
+  companions: TechnicienResource[],
+  materials: WorkshopBay[],
+  reservations: WorkshopReservation[] = [],
+  dossiers: DossierSAV[] = []
+): ResourceIssue[] {
+  const issues: ResourceIssue[] = [];
+
+  // Check baysList empty fallback
+  if (materials.length === 0) {
+    issues.push({
+      code: "BAYSLIST_EMPTY_FALLBACK",
+      message: "baysList vide ou corrompu : fallback activé.",
+      severity: "warning"
+    });
+  }
+
+  // 1. Technicien actif sans ressource atelier liée
+  for (const u of users) {
+    if (u.active && u.role === UserRole.TECHNICIEN) {
+      const linkedHr = companions.find(c => c.id === u.linkedHumanResourceId || c.userId === u.id);
+      if (!linkedHr) {
+        issues.push({
+          code: "TECH_ACTIVE_NO_HR",
+          message: "Technicien actif sans ressource atelier liée.",
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  // 2. Ressource humaine active sans compte lié
+  for (const c of companions) {
+    const isActif = c.actif !== false;
+    if (isActif) {
+      const linkedUser = users.find(u => u.id === c.linkedUserId || u.linkedHumanResourceId === c.id);
+      if (!linkedUser) {
+        issues.push({
+          code: "HR_ACTIVE_NO_USER",
+          message: "Ressource humaine active sans compte lié.",
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  // 3. Utilisateur lié à une ressource inactive
+  for (const u of users) {
+    if (u.active && u.linkedHumanResourceId) {
+      const hr = companions.find(c => c.id === u.linkedHumanResourceId);
+      if (hr && hr.actif === false) {
+        issues.push({
+          code: "USER_LINKED_TO_INACTIVE_HR",
+          message: "Utilisateur lié à une ressource inactive.",
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  // 4. Ressource matérielle active sans compatibilité définie
+  for (const m of materials) {
+    const isActif = m.actif !== false;
+    if (isActif) {
+      const hasCompat = (m.compatibleTaskTypes && m.compatibleTaskTypes.length > 0) ||
+                        (m.compatibleMetiers && m.compatibleMetiers.length > 0) ||
+                        m.zone;
+      if (!hasCompat) {
+        issues.push({
+          code: "MATERIAL_ACTIVE_NO_COMPATIBILITY",
+          message: "Ressource matérielle active sans compatibilité définie.",
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  // 5. Ressource matérielle inactive utilisée dans une réservation future
+  for (const m of materials) {
+    if (m.actif === false) {
+      // Check dossiers
+      let used = false;
+      for (const d of dossiers) {
+        if (d.statut === DossierStatus.PRET_A_LIVRER || d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.CLOTURE) continue;
+        if (d.ordresReparation.some(line => line.plannedBayId === m.id && !isRepairOrderDone(line))) {
+          used = true;
+          break;
+        }
+      }
+      // Check reservations
+      if (!used) {
+        for (const r of reservations) {
+          if (r.bayId === m.id && r.status !== "ANNULEE" && r.status !== "TRANSFORMEE_PLANNING") {
+            used = true;
+            break;
+          }
+        }
+      }
+      if (used) {
+        issues.push({
+          code: "MATERIAL_INACTIVE_USED_FUTURE",
+          message: "Ressource matérielle inactive utilisée dans une réservation future.",
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  // 6. Tâche peinture sans cabine active
+  const activePaintCabin = materials.find(m => m.actif !== false && m.categorie === MaterialCategory.CABINE_PEINTURE);
+  if (!activePaintCabin) {
+    issues.push({
+      code: "PAINT_TASK_NO_CABIN",
+      message: "Tâche peinture sans cabine active.",
+      severity: "error"
+    });
+  }
+
+  // 7. Tâche diagnostic électrique sans zone diagnostic active
+  const activeDiagZone = materials.find(m => m.actif !== false && (m.categorie === MaterialCategory.ZONE_DIAGNOSTIC_ELECTRIQUE || m.categorie === MaterialCategory.ZONE_REPARATION_ELECTRIQUE));
+  if (!activeDiagZone) {
+    issues.push({
+      code: "ELEC_TASK_NO_ZONE",
+      message: "Tâche diagnostic électrique sans zone diagnostic active.",
+      severity: "error"
+    });
+  }
+
+  // 8. Tâche grand travaux sans pont grand travaux actif
+  const activeGtPont = materials.find(m => m.actif !== false && m.categorie === MaterialCategory.PONT_GRAND_TRAVAUX);
+  if (!activeGtPont) {
+    issues.push({
+      code: "GT_TASK_NO_PONT",
+      message: "Tâche grand travaux sans pont grand travaux actif.",
+      severity: "error"
+    });
+  }
+
+  // 9. Ressource dupliquée par nom
+  const checkDuplicateNames = (list: { nom?: string; name?: string; username?: string; id: string }[], label: string) => {
+    const names = new Map<string, string[]>();
+    for (const item of list) {
+      const name = (item.nom || item.name || item.username || "").toLowerCase().trim();
+      if (name) {
+        if (!names.has(name)) names.set(name, []);
+        names.get(name)!.push(item.id);
+      }
+    }
+    for (const [name, ids] of names.entries()) {
+      if (ids.length > 1) {
+        issues.push({
+          code: "RESOURCE_DUPLICATE_NAME",
+          message: "Ressource dupliquée.",
+          severity: "warning"
+        });
+      }
+    }
+  };
+  checkDuplicateNames(companions, "Compagnons");
+  checkDuplicateNames(materials, "Ressources Matérielles");
+  checkDuplicateNames(users, "Utilisateurs");
+
+  // 10. Ressource matérielle capacité 1 réservée deux fois au même créneau
+  for (const m of materials) {
+    const cap = m.capaciteVehicules !== undefined ? m.capaciteVehicules : 1;
+    if (cap === 1) {
+      interface PlannedSlot {
+        dossierId: string;
+        taskId: string;
+        start: Date;
+        end: Date;
+      }
+      const slots: PlannedSlot[] = [];
+      for (const d of dossiers) {
+        if (d.statut === DossierStatus.PRET_A_LIVRER || d.statut === DossierStatus.LIVRE || d.statut === DossierStatus.CLOTURE) continue;
+        for (const line of d.ordresReparation) {
+          if (line.plannedBayId === m.id && line.planningStart && line.planningEnd && !isRepairOrderDone(line)) {
+            slots.push({
+              dossierId: d.id,
+              taskId: line.id,
+              start: new Date(line.planningStart),
+              end: new Date(line.planningEnd)
+            });
+          }
+        }
+      }
+      let doubleBooked = false;
+      for (let i = 0; i < slots.length; i++) {
+        for (let j = i + 1; j < slots.length; j++) {
+          const s1 = slots[i];
+          const s2 = slots[j];
+          if (s1.start < s2.end && s2.start < s1.end) {
+            doubleBooked = true;
+            break;
+          }
+        }
+        if (doubleBooked) break;
+      }
+      if (doubleBooked) {
+        issues.push({
+          code: "MATERIAL_DOUBLE_BOOKING",
+          message: "Ressource matérielle capacité 1 réservée deux fois au même créneau.",
+          severity: "error"
+        });
+      }
+    }
+  }
+
+  return issues;
 }
 
 export function isActiviteLog(value: unknown): value is ActiviteLog {
@@ -2803,12 +3211,22 @@ export function detectBayCollision(
   bayId: string,
   start: Date,
   end: Date,
-  ignoreTaskId?: string | string[]
+  ignoreTaskId?: string | string[],
+  workshopBays?: WorkshopBay[]
 ): boolean {
   if (!bayId) return false;
   const requestedSegments = buildPlanningSegments(start, end);
   const ignoredTaskIds = new Set(Array.isArray(ignoreTaskId) ? ignoreTaskId : ignoreTaskId ? [ignoreTaskId] : []);
 
+  let capacity = 1;
+  if (workshopBays) {
+    const bayObj = workshopBays.find(b => b.id === bayId);
+    if (bayObj && bayObj.capaciteVehicules !== undefined) {
+      capacity = bayObj.capaciteVehicules;
+    }
+  }
+
+  let overlapCount = 0;
   for (const dossier of dossiers) {
     if (isPlanningTerminalDossier(dossier)) continue;
     for (const line of dossier.ordresReparation) {
@@ -2816,7 +3234,10 @@ export function detectBayCollision(
       if (isRepairOrderDone(line)) continue;
       if (line.plannedBayId === bayId && line.planningStart && line.planningEnd) {
         if (segmentsOverlap(requestedSegments, getLinePlanningSegments(line))) {
-          return true;
+          overlapCount++;
+          if (overlapCount >= capacity) {
+            return true;
+          }
         }
       }
     }

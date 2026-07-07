@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile, User } from "../types";
+import { AtelierZone, TechnicienResource, DossierSAV, DossierStatus, RepairOrderLine, UserRole, WorkshopReservation, WorkshopAvailabilityConfig, WorkshopShiftProfile, User, WorkshopBay } from "../types";
 import { 
   normalizeRepairOrderStatus, 
   suggestWorkshopSlot, 
@@ -63,7 +63,7 @@ import ConfirmModal from "./ConfirmModal";
 import * as perm from "../permissions";
 import { maskPhoneNumber } from "../field-validations";
 import { TASK_STATUS_VISUAL_ORDER, getTaskStatusVisual } from "../task-status-visual";
-import { DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
+import { DEFAULT_WORKSHOP_BAYS as STATIC_DEFAULT_WORKSHOP_BAYS } from "../workshop-bays";
 import { canRunGuardedAction } from "../action-guard";
 import {
   findTaskPlanningTarget,
@@ -103,6 +103,8 @@ interface WorkshopPlanningProps {
   onUpdateTechnicians?: (updated: TechnicienResource[]) => void;
   users?: any[];
   currentUser?: User | null;
+  workshopBays?: WorkshopBay[];
+  onUpdateWorkshopBays?: (updated: WorkshopBay[]) => void;
 }
 
 const GANTT_LANE_HEIGHT = 56;
@@ -257,8 +259,11 @@ export default function WorkshopPlanning({
   onUpdateAvailabilityConfig,
   onUpdateTechnicians,
   users = [],
-  currentUser
+  currentUser,
+  workshopBays: propWorkshopBays,
+  onUpdateWorkshopBays
 }: WorkshopPlanningProps) {
+  const DEFAULT_WORKSHOP_BAYS = (propWorkshopBays && propWorkshopBays.length > 0) ? propWorkshopBays : STATIC_DEFAULT_WORKSHOP_BAYS;
   const [filterZone, setFilterZone] = useState<string>("Toutes");
   const [filterBay, setFilterBay] = useState<string>("Toutes");
 

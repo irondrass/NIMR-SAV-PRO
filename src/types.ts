@@ -13,6 +13,33 @@ export enum UserRole {
   LECTURE_SEULE = "Lecture seule"
 }
 
+export enum AtelierMetier {
+  MECANIQUE_RAPIDE = "MECANIQUE_RAPIDE",
+  MECANIQUE_GRAND_TRAVAUX = "MECANIQUE_GRAND_TRAVAUX",
+  ELECTRICITE_DIAGNOSTIC = "ELECTRICITE_DIAGNOSTIC",
+  TOLERIE = "TOLERIE",
+  PEINTURE = "PEINTURE",
+  PREPARATION_PEINTURE = "PREPARATION_PEINTURE",
+  QC = "QC",
+  LAVAGE_PREPARATION = "LAVAGE_PREPARATION",
+  LIVRAISON = "LIVRAISON"
+}
+
+export enum MaterialCategory {
+  PONT_SERVICE_RAPIDE = "PONT_SERVICE_RAPIDE",
+  PONT_GRAND_TRAVAUX = "PONT_GRAND_TRAVAUX",
+  PONT_MOBILE = "PONT_MOBILE",
+  ZONE_DIAGNOSTIC_ELECTRIQUE = "ZONE_DIAGNOSTIC_ELECTRIQUE",
+  ZONE_REPARATION_ELECTRIQUE = "ZONE_REPARATION_ELECTRIQUE",
+  ZONE_PREPARATION_CARROSSERIE = "ZONE_PREPARATION_CARROSSERIE",
+  ZONE_TOLERIE = "ZONE_TOLERIE",
+  CABINE_PEINTURE = "CABINE_PEINTURE",
+  ZONE_FINITION_REMONTAGE = "ZONE_FINITION_REMONTAGE",
+  ZONE_LAVAGE = "ZONE_LAVAGE",
+  ZONE_QC = "ZONE_QC",
+  ZONE_LIVRAISON = "ZONE_LIVRAISON"
+}
+
 export interface User {
   id: string;
   username: string;
@@ -23,7 +50,12 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
+  nom?: string;
+  prenom?: string;
+  login?: string;
+  linkedHumanResourceId?: string;
 }
+
 
 export interface UserSession {
   userId: string;
@@ -388,12 +420,38 @@ export interface TechnicienResource {
   chargeActuelle: number; // sum of scheduled hours
   actif?: boolean; // active/inactive resource toggle
   userId?: string; // optional link to a user account
+  displayName?: string;
+  type?: "HUMAN";
+  metierPrincipal?: AtelierMetier;
+  metiersSecondaires?: AtelierMetier[];
+  planifiable?: boolean;
+  linkedUserId?: string;
+  horaireTravail?: string;
+  capaciteJournaliereMinutes?: number;
+  zonesAutorisees?: AtelierZone[];
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface WorkshopBay {
   id: string;
   name: string;
   zone?: AtelierZone;
+  nom?: string;
+  type?: "MATERIAL";
+  categorie?: MaterialCategory;
+  actif?: boolean;
+  planifiable?: boolean;
+  capaciteVehicules?: number;
+  compatibleTaskTypes?: string[];
+  compatibleMetiers?: AtelierMetier[];
+  localisation?: string;
+  horaireDisponibilite?: string;
+  indisponibilites?: string[];
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DossierSAV {

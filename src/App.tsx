@@ -18,7 +18,8 @@ import {
   WorkshopReservation,
   WorkshopAvailabilityConfig,
   WorkshopShiftProfile,
-  VehicleMasterRecord
+  VehicleMasterRecord,
+  WorkshopBay
 } from "./types";
 import {
   createUser,
@@ -48,7 +49,11 @@ import {
   validateBackupPayload,
   isWorkshopReservation,
   applyDossierIntegrityAudit,
-  synchronizeDossiersWithReservations
+  synchronizeDossiersWithReservations,
+  isWorkshopBay,
+  normalizeWorkshopBay,
+  normalizeTechnicienResource,
+  detectResourceRepositoryIssues
 } from "./sav-core";
 import {
   buildImportSummary,
@@ -105,6 +110,8 @@ import ConfirmModal from "./components/ConfirmModal";
 import StorageDiagnosticsPanel from "./components/StorageDiagnosticsPanel";
 import BackendDiagnosticsPanel from "./components/BackendDiagnosticsPanel";
 import { buildBackendDiagnostics } from "./data/backendDiagnostics";
+import ResourceRepositoryView from "./components/ResourceRepositoryView";
+import { getDefaultHumanResources, getDefaultMaterialResources } from "./data";
 
 // Icons
 import { 
@@ -133,7 +140,8 @@ import {
   ClipboardCheck,
   Star,
   Menu,
-  X
+  X,
+  FolderTree
 } from "lucide-react";
 
 function writeLocalStorageValue(key: string, value: string) {
@@ -295,6 +303,7 @@ export default function App() {
   const [dossiers, setDossiers] = useState<DossierSAV[]>([]);
   const [reclamations, setReclamations] = useState<ReclammationClient[]>([]);
   const [techList, setTechList] = useState<TechnicienResource[]>([]);
+  const [baysList, setBaysList] = useState<WorkshopBay[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActiviteLog[]>([]);
   const [reservations, setReservations] = useState<WorkshopReservation[]>([]);
   const [availabilityConfig, setAvailabilityConfig] = useState<WorkshopAvailabilityConfig>({
@@ -390,7 +399,13 @@ export default function App() {
     const hydrateFromLocalStorage = () => {
       setDossiers(loadStoredArray(STORAGE_KEYS.dossiers, [], isDossierSAV).map(normalizeDossierForRuntime));
       setReclamations(loadStoredArray(STORAGE_KEYS.reclamations, [], isReclamationClient));
-      setTechList(loadStoredArray(STORAGE_KEYS.techs, [], isTechnicienResource));
+
+      const loadedTechs = loadStoredArray(STORAGE_KEYS.techs, [], isTechnicienResource);
+      setTechList(loadedTechs);
+
+      const loadedBays = loadStoredArray("nimr-sav-pro-bays-v1", [], isWorkshopBay);
+      setBaysList(loadedBays);
+
       setActivityLogs(loadStoredArray(STORAGE_KEYS.logs, [], isActiviteLog));
       setReservations(loadStoredArray(STORAGE_KEYS.reservations, [], isWorkshopReservation));
       setVehicleMasterRecords(loadStoredVehicleMaster(STORAGE_KEYS.vehicleMaster));
@@ -650,7 +665,8 @@ export default function App() {
       techList,
       activityLogs,
       reservations,
-      perm.canViewVehicleSensitiveFields(activeRole)
+      perm.canViewVehicleSensitiveFields(activeRole),
+      baysList
     );
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullBackup, null, 2));
     const downloadAnchor = document.createElement("a");
@@ -732,7 +748,7 @@ export default function App() {
             return;
           }
 
-          const preImportBackup = createPreImportBackupPayload(dossiers, reclamations, techList, activityLogs, reservations);
+          const preImportBackup = createPreImportBackupPayload(dossiers, reclamations, techList, activityLogs, reservations, baysList);
           writeLocalStorageValue(PRE_IMPORT_BACKUP_KEY, JSON.stringify(preImportBackup));
           setHasImportBackup(true);
           setPendingImport({
@@ -773,6 +789,10 @@ export default function App() {
     if (data.reservations) {
       setReservations(data.reservations);
       writeLocalStorageJSON(STORAGE_KEYS.reservations, data.reservations);
+    }
+    if (data.baysList) {
+      setBaysList(data.baysList);
+      writeLocalStorageJSON("nimr-sav-pro-bays-v1", data.baysList);
     }
     recordAudit({
       module: "import_export",
@@ -1223,6 +1243,7 @@ export default function App() {
               { id: "satisfaction", label: "Satisfaction pilote", icon: Star },
               { id: "reclamations", label: "Réclamations SAV", icon: ShieldAlert },
               { id: "rendements-sav", label: "Rapports SAV", icon: BarChart3 },
+              { id: "referentiel-atelier", label: "Référentiel Atelier", icon: FolderTree },
               { id: "parametres", label: "Paramètres Système", icon: SlidersHorizontal },
               { id: "users", label: "Gestion utilisateurs", icon: UserCog }
             ].map(item => {
@@ -1246,7 +1267,8 @@ export default function App() {
                 "rendements-sav": "nav-performance",
                 "garantie": "nav-warranty",
                 "satisfaction": "nav-satisfaction",
-                "users": "nav-users"
+                "users": "nav-users",
+                "referentiel-atelier": "nav-referentiel-atelier"
               };
 
               return (
@@ -1599,6 +1621,11 @@ export default function App() {
                   }}
                   users={users}
                   currentUser={currentUser}
+                  workshopBays={baysList}
+                  onUpdateWorkshopBays={(updated) => {
+                    setBaysList(updated);
+                    writeLocalStorageJSON("nimr-sav-pro-bays-v1", updated);
+                  }}
                 />
               )}
 
@@ -1687,6 +1714,26 @@ export default function App() {
                   activeRole={activeRole}
                   importSuccessMessage={importSuccessMessage}
                   importErrorMessage={importErrorMessage}
+                />
+              )}
+
+              {activeTab === "referentiel-atelier" && (
+                <ResourceRepositoryView
+                  activeRole={activeRole}
+                  users={users}
+                  persistUsers={persistUsers}
+                  techList={techList}
+                  setTechList={(newTechs) => {
+                    setTechList(newTechs);
+                    writeLocalStorageJSON(STORAGE_KEYS.techs, newTechs);
+                  }}
+                  baysList={baysList}
+                  setBaysList={(newBays) => {
+                    setBaysList(newBays);
+                    writeLocalStorageJSON("nimr-sav-pro-bays-v1", newBays);
+                  }}
+                  reservations={reservations}
+                  dossiers={dossiers}
                 />
               )}
 
