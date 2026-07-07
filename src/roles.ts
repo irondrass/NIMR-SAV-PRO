@@ -21,6 +21,7 @@ export const TAB_IDS = [
   "livraison",
   "garantie",
   "satisfaction",
+  "referentiel-atelier",
 ] as const;
 
 export type TabId = typeof TAB_IDS[number];
@@ -42,6 +43,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "livraison",
     "garantie",
     "satisfaction",
+    "referentiel-atelier",
   ],
   [UserRole.RECEPTIONNAIRE]: [
     "reception-rapide",
@@ -52,6 +54,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "livraison",
     "garantie",
     "satisfaction",
+    "referentiel-atelier",
   ],
   [UserRole.CHEF_ATELIER]: [
     "atelier-planning",
@@ -62,6 +65,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "rendements-sav",
     "controle-qualite",
     "garantie",
+    "referentiel-atelier",
   ],
   [UserRole.TECHNICIEN]: [
     "tech-view",
@@ -88,6 +92,7 @@ export const ROLE_TABS: Record<UserRole, readonly TabId[]> = {
     "rendements-sav",
     "garantie",
     "satisfaction",
+    "referentiel-atelier",
   ],
 };
 

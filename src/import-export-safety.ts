@@ -5,7 +5,7 @@
 
 import { BackupPayload, createBackupPayload } from "./sav-core";
 import { maskPhoneNumber, sanitizeFreeText } from "./field-validations";
-import { ActiviteLog, DossierSAV, ReclammationClient, TechnicienResource, WorkshopReservation } from "./types";
+import { ActiviteLog, DossierSAV, ReclammationClient, TechnicienResource, WorkshopReservation, WorkshopBay } from "./types";
 
 export const PRE_IMPORT_BACKUP_KEY = "nimr-sav-pro-pre-import-backup-v1";
 export const STRONG_IMPORT_CONFIRMATION = "Je comprends que l’import remplace les données locales";
@@ -16,6 +16,7 @@ export interface ImportSummary {
   techList: number;
   activityLogs: number;
   reservations: number;
+  baysList: number;
   label: string;
 }
 
@@ -25,9 +26,10 @@ export function createRoleAwareBackupPayload(
   techList: TechnicienResource[],
   activityLogs: ActiviteLog[],
   reservations: WorkshopReservation[] | undefined,
-  canViewSensitivePhone: boolean
+  canViewSensitivePhone: boolean,
+  baysList?: WorkshopBay[]
 ): BackupPayload {
-  const payload = createBackupPayload(dossiers, reclamations, techList, activityLogs, reservations);
+  const payload = createBackupPayload(dossiers, reclamations, techList, activityLogs, reservations, baysList);
   if (canViewSensitivePhone) return payload;
 
   return {
@@ -41,9 +43,10 @@ export function createPreImportBackupPayload(
   reclamations: ReclammationClient[],
   techList: TechnicienResource[],
   activityLogs: ActiviteLog[],
-  reservations?: WorkshopReservation[]
+  reservations?: WorkshopReservation[],
+  baysList?: WorkshopBay[]
 ): BackupPayload {
-  return createBackupPayload(dossiers, reclamations, techList, activityLogs, reservations);
+  return createBackupPayload(dossiers, reclamations, techList, activityLogs, reservations, baysList);
 }
 
 export function buildImportSummary(payload: Partial<BackupPayload>): ImportSummary {
@@ -53,11 +56,15 @@ export function buildImportSummary(payload: Partial<BackupPayload>): ImportSumma
     techList: payload.techList?.length ?? 0,
     activityLogs: payload.activityLogs?.length ?? 0,
     reservations: payload.reservations?.length ?? 0,
+    baysList: payload.baysList?.length ?? 0,
     label: "",
   };
   summary.label = [
     `${summary.dossiers} dossier(s)`,
     `${summary.reclamations} réclamation(s)`,
+    `${summary.techList} compagnon(s)`,
+    `${summary.baysList} ressource(s) matériel(s)`,
+    `${summary.reservations} réservation(s)`,
     `${summary.techList} technicien(s)`,
     `${summary.activityLogs} log(s)`,
     `${summary.reservations} réservation(s) atelier`,
