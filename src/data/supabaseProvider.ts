@@ -14,6 +14,7 @@ export type SupabaseTableName =
   | "dossiers"
   | "repair_order_lines"
   | "workshop_tasks"
+  | "workshop_bookings"
   | "technician_resources"
   | "reservations"
   | "workshop_reservations"
@@ -29,6 +30,7 @@ export interface SupabaseRequest {
   table: SupabaseTableName;
   operation: "list" | "get" | "insert" | "update" | "delete" | "rpc";
   payload?: unknown;
+  rpcName?: string;
 }
 
 export interface SupabaseClientLike {
@@ -40,6 +42,16 @@ export interface SupabaseProviderOptions {
   client?: SupabaseClientLike;
 }
 
+let runtimeAccessToken: string | null = null;
+
+export function setSupabaseAccessToken(accessToken: string | null): void {
+  runtimeAccessToken = accessToken?.trim() || null;
+}
+
+export function hasSupabaseUserSession(): boolean {
+  return Boolean(runtimeAccessToken);
+}
+
 export const SUPABASE_BACKEND_TABLES: SupabaseTableName[] = [
   "profiles",
   "users_profile",
@@ -49,6 +61,7 @@ export const SUPABASE_BACKEND_TABLES: SupabaseTableName[] = [
   "dossiers",
   "repair_order_lines",
   "workshop_tasks",
+  "workshop_bookings",
   "technician_resources",
   "reservations",
   "workshop_reservations",
@@ -123,7 +136,10 @@ function encodeFilterValue(value: string): string {
   return encodeURIComponent(value.replace(/"/g, ""));
 }
 
-export function createSupabaseRestClient(config = resolveBackendRuntimeConfig()): SupabaseClientLike {
+export function createSupabaseRestClient(
+  config = resolveBackendRuntimeConfig(),
+  getAccessToken: () => string | null = () => runtimeAccessToken,
+): SupabaseClientLike {
   assertSupabaseConfig(config);
   const supabaseUrl = config.supabaseUrl!.replace(/\/$/, "");
   const anonKey = config.supabaseAnonKey!;
@@ -131,7 +147,7 @@ export function createSupabaseRestClient(config = resolveBackendRuntimeConfig())
   const send = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
     const headers = new Headers(init.headers);
     headers.set("apikey", anonKey);
-    headers.set("authorization", `Bearer ${anonKey}`);
+    headers.set("authorization", `Bearer ${getAccessToken() ?? anonKey}`);
     headers.set("content-type", "application/json");
     headers.set("accept", "application/json");
 
@@ -176,7 +192,11 @@ export function createSupabaseRestClient(config = resolveBackendRuntimeConfig())
         await send<void>(`${tablePath}?id=eq.${encodeFilterValue(id)}`, { method: "DELETE" });
         return true as T;
       }
-      return send<T>("/rest/v1/rpc/not_configured", { method: "POST", body: JSON.stringify(request.payload ?? {}) });
+      const rpcName = request.rpcName?.replace(/[^a-z0-9_]/gi, "");
+      if (!rpcName) {
+        throw new SupabaseProviderError("not-configured", "A valid RPC name is required.");
+      }
+      return send<T>(`/rest/v1/rpc/${rpcName}`, { method: "POST", body: JSON.stringify(request.payload ?? {}) });
     },
   };
 }

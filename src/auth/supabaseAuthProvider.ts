@@ -7,6 +7,7 @@ import { BackendRuntimeConfig, resolveBackendRuntimeConfig, shouldAttemptSupabas
 import { User, UserSession } from "../types";
 import { AuthLoginInput, AuthProvider, AuthProviderLoginResult } from "./authProvider";
 import { BackendBusinessRole, toAppRole } from "./roleMapping";
+import { setSupabaseAccessToken } from "../data/supabaseProvider";
 
 export interface SupabaseUserProfile {
   id: string;
@@ -17,7 +18,7 @@ export interface SupabaseUserProfile {
 }
 
 export interface SupabaseAuthClientLike {
-  signInWithPassword(input: { email: string; password: string }): Promise<{ userId: string; email: string | null }>;
+  signInWithPassword(input: { email: string; password: string }): Promise<{ userId: string; email: string | null; accessToken?: string }>;
   signOut(): Promise<void>;
   getProfile(userId: string): Promise<SupabaseUserProfile | null>;
 }
@@ -69,13 +70,16 @@ export function createSupabaseAuthProvider(options: SupabaseAuthProviderOptions 
     async login(input: AuthLoginInput): Promise<AuthProviderLoginResult> {
       assertEnabled();
       const auth = await client!.signInWithPassword({ email: input.username, password: input.password });
+      setSupabaseAccessToken(auth.accessToken ?? null);
       const profile = await client!.getProfile(auth.userId);
       if (!profile) {
         await client!.signOut();
+        setSupabaseAccessToken(null);
         return { ok: false, reason: "missing-profile", message: "Profil utilisateur introuvable." };
       }
       if (!profile.active) {
         await client!.signOut();
+        setSupabaseAccessToken(null);
         return { ok: false, reason: "disabled-user", message: "Utilisateur inactif." };
       }
       let user: User;
@@ -83,6 +87,7 @@ export function createSupabaseAuthProvider(options: SupabaseAuthProviderOptions 
         user = mapSupabaseProfileToLocalUser(profile);
       } catch (error) {
         await client!.signOut();
+        setSupabaseAccessToken(null);
         if (error instanceof SupabaseAuthRoleError) {
           return {
             ok: false,
@@ -103,6 +108,7 @@ export function createSupabaseAuthProvider(options: SupabaseAuthProviderOptions 
     },
     async logout() {
       if (client && shouldAttemptSupabase(config)) await client.signOut();
+      setSupabaseAccessToken(null);
       currentSession = null;
     },
     async getSession() {

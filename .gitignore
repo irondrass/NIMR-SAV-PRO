@@ -11,3 +11,4 @@ assets/.aistudio/
 !.env.example
 playwright-report/
 test-results/
+.backups/
