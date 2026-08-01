@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { lazy, Suspense, useState, useEffect, useMemo } from "react";
 import { 
   UserRole, 
   DossierStatus, 
@@ -113,6 +113,8 @@ import { buildBackendDiagnostics } from "./data/backendDiagnostics";
 import ResourceRepositoryView from "./components/ResourceRepositoryView";
 import { getDefaultHumanResources, getDefaultMaterialResources } from "./data";
 
+const WorkshopOperationsView = lazy(() => import("./components/WorkshopOperationsView"));
+
 // Icons
 import { 
   BarChart3, 
@@ -142,6 +144,7 @@ import {
   Menu,
   X,
   FolderTree
+  ,Gauge
 } from "lucide-react";
 
 function writeLocalStorageValue(key: string, value: string) {
@@ -1234,6 +1237,7 @@ export default function App() {
               { id: "reception-rapide", label: "Réception Guidée", icon: Users },
               { id: "dossiers-liste", label: "Dossiers SAV", icon: FileText },
               { id: "atelier-planning", label: "Planning Atelier", icon: Calendar },
+              { id: "pilotage-atelier", label: "Pilotage Atelier", icon: Gauge },
               { id: "atelier-kanban", label: "Kanban Atelier", icon: ClipboardList },
               { id: "chef-atelier", label: "Chef d'atelier", icon: Wrench },
               { id: "tech-view", label: "Mode Technicien", icon: UserCheck },
@@ -1257,6 +1261,7 @@ export default function App() {
                 "reception-rapide": "nav-reception",
                 "dossiers-liste": "nav-dossiers",
                 "atelier-planning": "nav-planning",
+                "pilotage-atelier": "nav-pilotage-atelier",
                 "chef-atelier": "nav-chef-atelier",
                 "tech-view": "nav-technician",
                 "controle-qualite": "nav-controle-qualite",
@@ -1627,6 +1632,19 @@ export default function App() {
                     writeLocalStorageJSON("nimr-sav-pro-bays-v1", updated);
                   }}
                 />
+              )}
+
+              {activeTab === "pilotage-atelier" && (
+                <Suspense fallback={<div className="p-6 text-sm font-bold text-slate-600">Chargement du pilotage atelier...</div>}>
+                  <WorkshopOperationsView
+                    dossiers={dossiers}
+                    technicians={techList}
+                    materialResources={baysList}
+                    availabilityConfig={availabilityConfig}
+                    activeRole={activeRole}
+                    onSelectDossier={(id) => setSelectedDossierId(id)}
+                  />
+                </Suspense>
               )}
 
               {activeTab === "chef-atelier" && (
